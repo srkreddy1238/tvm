@@ -18,21 +18,25 @@
 
 set -e
 set -u
-set -o pipefail
 
-if [ -z ${1+x} ]; then
-    version=3.18.4
-else
-    version=$1
-fi
+output_directory=$(realpath ${PWD}/build-adreno-target)
+rm -rf ${output_directory}
 
-v=$(echo $version | sed 's/\(.*\)\..*/\1/g')
-echo "Installing cmake $version ($v)"
-wget https://cmake.org/files/v${v}/cmake-${version}.tar.gz
-tar xvf cmake-${version}.tar.gz
-cd cmake-${version}
-./bootstrap
-make -j$(nproc)
-make install
-cd ..
-rm -rf cmake-${version} cmake-${version}.tar.gz
+mkdir -p ${output_directory}
+cd ${output_directory}
+
+cp ../cmake/config.cmake .
+
+echo set\(USE_CLML ON\) >> config.cmake
+echo set\(USE_RPC ON\) >> config.cmake
+echo set\(USE_CLML_GRAPH_EXECUTOR ${ADRENO_OPENCL}\) >> config.cmake
+echo set\(USE_LIBBACKTRACE AUTO\) >> config.cmake
+echo set\(CMAKE_TOOLCHAIN_FILE "${ANDROID_NDK_HOME}/build/cmake/android.toolchain.cmake"\) >> config.cmake
+echo set\(ANDROID_ABI arm64-v8a\) >> config.cmake
+echo set\(ANDROID_PLATFORM android-28\) >> config.cmake
+echo set\(OS Linux\) >> config.cmake
+echo set\(CMAKE_CXX_COMPILER "${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android28-clang++"\) >> config.cmake
+
+cmake ..
+
+make -j$(nproc) tvm_rpc
