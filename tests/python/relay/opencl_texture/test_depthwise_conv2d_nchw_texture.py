@@ -64,7 +64,7 @@ def test_depthwise_conv2d_bias_nchwc(target, dtype):
         "bias": tvm.nd.array(bias_data),
     }
 
-    build_run_compare(mod, params1, {"data": input_shape}, dtype, target, [], gpu_preprocess)
+    build_run_compare(mod, params1, {"data": input_shape}, {"data": dtype}, target, [], gpu_preprocess)
 
 
 @tvm.testing.requires_opencl
@@ -101,7 +101,7 @@ def test_depthwise_conv2d_nchwc(target, dtype):
         "weight": tvm.nd.array(filter_data),
     }
 
-    build_run_compare(mod, params1, {"data": input_shape}, dtype, target, [], gpu_preprocess)
+    build_run_compare(mod, params1, {"data": input_shape}, {"data": dtype}, target, [], gpu_preprocess)
 
 
 @tvm.testing.requires_opencl
@@ -143,7 +143,7 @@ def test_depthwise_conv2d_bias_nchw(target, dtype):
         "bias": tvm.nd.array(bias_data),
     }
 
-    build_run_compare(mod, params1, {"data": input_shape}, dtype, target)
+    build_run_compare(mod, params1, {"data": input_shape}, {"data": dtype}, target)
 
 
 @tvm.testing.requires_opencl
@@ -185,4 +185,4 @@ def test_depthwise_conv2d_repack_bias_nchw(target, dtype):
         "bias": tvm.nd.array(bias_data),
     }
 
-    build_run_compare(mod, params1, {"data": input_shape}, dtype, target)
+    build_run_compare(mod, params1, {"data": input_shape}, {"data": dtype}, target)
