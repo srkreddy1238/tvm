@@ -155,14 +155,12 @@ def build_run_compare(
                 tvm_mod_nchwc, target_host=target_host, target=target, params=params1
             )
 
-    '''
     lib.export_library("model.so", ndk.create_shared)
     with open("model.json", "w") as fo:
         fo.write(graph)
     with open("model.params", "wb") as fo:
         fo.write(tvm.runtime.save_param_dict(params))
     exit(0)
-    '''
 
     # verification that storage_scope has expected textures scopes
     graph_json = json.loads(graph)

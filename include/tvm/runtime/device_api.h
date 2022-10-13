@@ -117,6 +117,11 @@ class TVM_DLL DeviceAPI {
   virtual void* AllocDataSpace(Device dev, int ndim, const int64_t* shape, DLDataType dtype,
                                Optional<String> mem_scope = NullOpt);
   /*!
+   * \brief Return host accessible native pointer if underlaying device supports.
+   * \return pointer to mem or nullptr if not supported
+   */
+  virtual void* GetNativePtr(Device dev, void* ptr);
+  /*!
    * \brief Free a data space on device.
    * \param dev The device device to perform operation.
    * \param ptr The data space.

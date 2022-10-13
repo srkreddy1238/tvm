@@ -27,6 +27,12 @@
 
 #include "opencl_common.h"
 
+#ifdef OPENCL_ENABLE_HOST_PTR
+#define CL_MEM_CREATE_FLAGS CL_MEM_READ_WRITE|CL_MEM_ALLOC_HOST_PTR
+#else
+#define CL_MEM_CREATE_FLAGS CL_MEM_READ_WRITE
+#endif
+
 namespace tvm {
 namespace runtime {
 namespace cl {
@@ -197,6 +203,18 @@ void OpenCLWorkspace::GetAttr(Device dev, DeviceAttrKind kind, TVMRetValue* rv) 
   }
 }
 
+void * OpenCLWorkspace::CreateHostPtrIfEnabled(cl::BufferDescriptor* desc, Device dev, size_t size) {
+#if !defined(OPENCL_ENABLE_HOST_PTR)
+    return desc;
+#endif
+    cl_int err_code;
+    desc->host_ptr = (cl_uchar *)clEnqueueMapBuffer(this->GetQueue(dev), desc->buffer, CL_TRUE,
+                                                       CL_MAP_WRITE, 0, sizeof(cl_uchar) * size, 0,
+						       NULL, NULL, &err_code);
+    OPENCL_CHECK_ERROR(err_code);
+    return desc;
+}
+
 void* OpenCLWorkspace::AllocDataSpace(Device dev, size_t size, size_t alignment,
                                       DLDataType type_hint) {
   this->Init();
@@ -207,10 +225,11 @@ void* OpenCLWorkspace::AllocDataSpace(Device dev, size_t size, size_t alignment,
   if (size == 0) {
     size = 1;
   }
-  desc->buffer = clCreateBuffer(this->context, CL_MEM_READ_WRITE, size, nullptr, &err_code);
+  desc->buffer = clCreateBuffer(this->context, CL_MEM_CREATE_FLAGS, size, nullptr, &err_code);
   desc->layout = cl::BufferDescriptor::MemoryLayout::kBuffer1D;
   OPENCL_CHECK_ERROR(err_code);
-  return desc;
+  LOG(WARNING) << "ALlocate & MAP for buffer\n";
+  return CreateHostPtrIfEnabled(desc, dev, size);
 }
 
 void* OpenCLWorkspace::AllocDataSpace(Device dev, int ndim, const int64_t* shape, DLDataType dtype,
@@ -229,7 +248,16 @@ void* OpenCLWorkspace::AllocDataSpace(Device dev, int ndim, const int64_t* shape
   size_t axis = DefaultTextureLayoutSeparator(ndim, mem_scope.value());
   auto texture = ApplyTexture2DFlattening<int64_t>(shape, ndim, axis);
   desc->buffer = AllocTexture(dev, texture.width, texture.height, dtype);
+  size_t mem_size = (texture.width * texture.height * texture.channel) *
+	            (dtype.bits * dtype.lanes + 7) / 8;
+  /*LOG(WARNING) << "ALlocate & MAP for Image\n";
+  return CreateHostPtrIfEnabled(desc, dev, mem_size); */
   return desc;
+}
+
+void* OpenCLWorkspace::GetNativePtr(Device dev, void* ptr) {
+  cl::BufferDescriptor* desc = static_cast<cl::BufferDescriptor*>(ptr);
+  return desc->host_ptr;
 }
 
 void OpenCLWorkspace::FreeDataSpace(Device dev, void* ptr) {
@@ -238,6 +266,10 @@ void OpenCLWorkspace::FreeDataSpace(Device dev, void* ptr) {
   OPENCL_CALL(clFinish(this->GetQueue(dev)));
 
   cl::BufferDescriptor* desc = static_cast<cl::BufferDescriptor*>(ptr);
+  if(desc->host_ptr) {
+    clEnqueueUnmapMemObject(this->GetQueue(dev), desc->buffer, (void *) desc->host_ptr, 0, NULL,
+                            NULL);
+  }
   OPENCL_CALL(clReleaseMemObject(desc->buffer));
   delete desc;
 }
@@ -251,7 +283,7 @@ cl_mem OpenCLWorkspace::AllocTexture(Device dev, size_t width, size_t height,
   cl_image_format format = {CL_RGBA, cl_type};
   cl_image_desc descriptor = {CL_MEM_OBJECT_IMAGE2D, width, height, 0, 0, 0, 0, 0, 0};
   cl_mem mptr =
-      clCreateImage(this->context, CL_MEM_READ_WRITE, &format, &descriptor, nullptr, &err_code);
+      clCreateImage(this->context, CL_MEM_CREATE_FLAGS, &format, &descriptor, nullptr, &err_code);
   OPENCL_CHECK_ERROR(err_code);
   return mptr;
 }

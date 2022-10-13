@@ -28,7 +28,7 @@ import pytest
 from tvm.relay.op import register_mixed_precision_conversion
 
 #dtype = tvm.testing.parameter("float32", "float16")
-dtype = tvm.testing.parameter("float16")
+dtype = tvm.testing.parameter("float32")
 
 def convert_to_fp16(mod, dtype):
     from tvm.ir import IRModule
@@ -87,7 +87,7 @@ def test_ssd_mobilenet(target, dtype):
         None, tflite_model_file, "tflite")
     if dtype == "float16":
         mod = convert_to_fp16(mod["main"], dtype)
-    build_run_compare(mod, params, inputs, dtypes, target, [], stat_file="ssd_mobilenet-fp16.log", tuning=True)
+    build_run_compare(mod, params, inputs, dtypes, target, [], stat_file="ssd_mobilenet-fp32.log")
 
 
 

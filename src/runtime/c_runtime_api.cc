@@ -171,6 +171,8 @@ void* DeviceAPI::AllocDataSpace(Device dev, int ndim, const int64_t* shape, DLDa
   return nullptr;
 }
 
+void * DeviceAPI::GetNativePtr(Device dev, void *ptr) { return nullptr; }
+
 void DeviceAPI::CopyDataFromTo(DLTensor* from, DLTensor* to, TVMStreamHandle stream) {
   // by default, we can always redirect to the flat memory copy operation.
   size_t nbytes = GetDataSize(*from);

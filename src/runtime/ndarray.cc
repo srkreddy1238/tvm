@@ -205,6 +205,11 @@ NDArray NDArray::Empty(ShapeTuple shape, DLDataType dtype, Device dev, Optional<
   return ret;
 }
 
+void* NDArray::GetNativePtr() {
+  DLTensor dl_tensor = get_mutable()->dl_tensor;
+  return DeviceAPI::Get(dl_tensor.device)->GetNativePtr(dl_tensor.device, dl_tensor.data);
+}
+
 NDArray NDArray::FromExternalDLTensor(const DLTensor& dl_tensor) {
   ICHECK(::tvm::runtime::IsContiguous(dl_tensor)) << "External DLTensor must be contiguous.";
   ICHECK(IsAligned(dl_tensor)) << "Data in DLTensor is not aligned as required by NDArray";

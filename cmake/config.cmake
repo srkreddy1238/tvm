@@ -70,6 +70,11 @@ set(USE_AOCL OFF)
 # - /path/to/opencl-sdk: use specific path to opencl-sdk
 set(USE_OPENCL OFF)
 
+# Wheather to allow OPENCL cl_mem access to host
+# cl_mem will be allocated with CL_MEM_ALLOC_HOST_PTR
+# ndarray->GetHostPtr can be invoked to get host accessible pointer
+set(USE_OPENCL_ENABLE_HOST_PTR OFF)
+
 # Whether enable Metal runtime
 set(USE_METAL OFF)
 

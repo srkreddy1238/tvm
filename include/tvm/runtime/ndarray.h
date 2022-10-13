@@ -156,6 +156,11 @@ class NDArray : public ObjectRef {
   TVM_DLL static NDArray Empty(ShapeTuple shape, DLDataType dtype, Device dev,
                                Optional<String> mem_scope = NullOpt);
   /*!
+   * \brief Return host accessible native pointer if underlaying device supports.
+   * \return pointer to mem or nullptr if not supported
+   */
+  TVM_DLL void* GetNativePtr();
+  /*!
    * \brief Create a NDArray backed by an external DLTensor without memory copying.
    *
    * If DLTensor is not contiguous or has bad aligned data, It fails.
