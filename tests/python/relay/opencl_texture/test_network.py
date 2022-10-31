@@ -27,8 +27,8 @@ import pytest
 
 from tvm.relay.op import register_mixed_precision_conversion
 
-#dtype = tvm.testing.parameter("float32", "float16")
-dtype = tvm.testing.parameter("float32")
+dtype = tvm.testing.parameter("float32", "float16")
+#dtype = tvm.testing.parameter("float32")
 
 def convert_to_fp16(mod, dtype):
     from tvm.ir import IRModule
@@ -45,35 +45,35 @@ def convert_to_fp16(mod, dtype):
 
 @tvm.testing.requires_opencl
 @tvm.testing.parametrize_targets("opencl -device=adreno")
-def _test_mobilenet_v1(target, dtype):
+def test_mobilenet_v1(target, dtype):
     mod, params, inputs, dtypes = get_model(
         "https://github.com/mlcommons/mobile_models/raw/main/v0_7/tflite/mobilenet_edgetpu_224_1.0_float.tflite",
         "mobilenet_edgetpu_224_1.0_float.tflite", "tflite")
     if dtype == "float16":
         mod = convert_to_fp16(mod["main"], dtype)
-    build_run_compare(mod, params, inputs, dtypes, target, [])
+    build_run_compare(mod, params, inputs, dtypes, target, [], model_name="mobilenet", model_dtype=dtype)
 
 
 @tvm.testing.requires_opencl
 @tvm.testing.parametrize_targets("opencl")
-def _test_mobilebert(target, dtype):
+def test_mobilebert(target, dtype):
     mod, params, inputs, dtypes = get_model(
         "https://github.com/mlcommons/mobile_models/raw/main/v0_7/tflite/mobilebert_float_384_gpu.tflite",
         "mobilebert_float_384_gpu.tflite", "tflite")
     if dtype == "float16":
         mod = convert_to_fp16(mod["main"], dtype)
-    build_run_compare(mod, params, inputs, dtypes, target, [])
+    build_run_compare(mod, params, inputs, dtypes, target, [], model_name="mobilebert", model_dtype=dtype)
 
 
 @tvm.testing.requires_opencl
 @tvm.testing.parametrize_targets("opencl -device=adreno")
-def _test_deeplab_v3(target, dtype):
+def test_deeplab_v3(target, dtype):
     mod, params, inputs, dtypes = get_model(
         "https://github.com/mlcommons/mobile_models/raw/main/v0_7/tflite/deeplabv3_mnv2_ade20k_float.tflite",
         "deeplabv3_mnv2_ade20k_float.tflite", "tflite")
     if dtype == "float16":
         mod = convert_to_fp16(mod["main"], dtype)
-    build_run_compare(mod, params, inputs, dtypes, target, [])
+    build_run_compare(mod, params, inputs, dtypes, target, [], model_name="deeplabv3", model_dtype=dtype)
 
 @tvm.testing.requires_opencl
 @tvm.testing.parametrize_targets("opencl -device=adreno")
@@ -87,7 +87,7 @@ def test_ssd_mobilenet(target, dtype):
         None, tflite_model_file, "tflite")
     if dtype == "float16":
         mod = convert_to_fp16(mod["main"], dtype)
-    build_run_compare(mod, params, inputs, dtypes, target, [], stat_file="ssd_mobilenet-fp32.log")
+    build_run_compare(mod, params, inputs, dtypes, target, [], model_name="ssd_mobilenet", model_dtype=dtype)
 
 
 
