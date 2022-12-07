@@ -346,6 +346,7 @@ class RelayBuildModule : public runtime::ModuleNode {
     // Fuse the operations if it is needed.
     pass_seqs.push_back(transform::FuseOps());
 
+    LOG(WARNING) << "SRK: Before Fuse:" << relay_module;
     // Create a sequential pass and perform optimizations.
     transform::Pass seq = transform::Sequential(pass_seqs);
     if (config_->optional_homogeneous_target.defined()) {
@@ -354,6 +355,7 @@ class RelayBuildModule : public runtime::ModuleNode {
     } else {
       relay_module = seq(relay_module);
     }
+    LOG(WARNING) << "SRK: After Fuse:" << relay_module;
 
     // Do layout rewrite for auto-scheduler.
     if (backend::IsAutoSchedulerEnabled() && config_->optional_homogeneous_target.defined()) {
@@ -393,10 +395,15 @@ class RelayBuildModule : public runtime::ModuleNode {
     // global function calls. We should make sure that these callees are also
     // inline functions. However, this should be very unlikely for accelerators
     // and vendor-provided libraries. So we don't handle for now.
+    LOG(WARNING) << "SRK: Before Inline:" << relay_module;
     relay_module = transform::Inline()(relay_module);
+    LOG(WARNING) << "SRK: Before InferType:" << relay_module;
     relay_module = transform::InferType()(relay_module);
+    LOG(WARNING) << "SRK: Before LabelOps:" << relay_module;
     relay_module = transform::LabelOps()(relay_module);
+    LOG(WARNING) << "SRK: Before AnnotateMem:" << relay_module;
     relay_module = transform::AnnotateMemoryScope(config_)(relay_module);
+    LOG(WARNING) << "SRK: Before Inline:" << relay_module;
 
     ICHECK(relay_module.defined());
 
@@ -425,6 +432,7 @@ class RelayBuildModule : public runtime::ModuleNode {
                                       {tvm::attr::kWorkspaceMemoryPools, workspace_memory_pools_},
                                       {tvm::attr::kConstantMemoryPools, constant_memory_pools_}});
 
+    LOG(WARNING) << "Optimized:" << func_module;
     // Generate code for the updated function.
     executor_codegen_ = MakeExecutorCodegen(executor_->name);
     executor_codegen_->Init(nullptr, config_->primitive_targets);
@@ -433,6 +441,7 @@ class RelayBuildModule : public runtime::ModuleNode {
     ret_.params = executor_codegen_->GetParams();
 
     auto lowered_funcs = executor_codegen_->GetIRModule();
+    //LOG(WARNING) << "SRK: Lowered:" << lowered_funcs;
 
     // No need to build for external functions.
     Target ext_dev("ext_dev");

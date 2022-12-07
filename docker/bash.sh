@@ -461,7 +461,7 @@ echo ""
 
 echo Running \'${COMMAND[@]+"${COMMAND[@]}"}\' inside ${DOCKER_IMAGE_NAME}...
 
-DOCKER_CMD=(${DOCKER_BINARY} run
+DOCKER_CMD=(${DOCKER_BINARY} run --cpus 24
             ${DOCKER_FLAGS[@]+"${DOCKER_FLAGS[@]}"}
             ${DOCKER_ENV[@]+"${DOCKER_ENV[@]}"}
             ${DOCKER_MOUNT[@]+"${DOCKER_MOUNT[@]}"}

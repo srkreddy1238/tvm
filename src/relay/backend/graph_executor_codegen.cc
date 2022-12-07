@@ -217,6 +217,7 @@ class GraphExecutorCodegen : public backend::MemoizedExprTranslator<std::vector<
       mod = WithAttr(mod, "main_func_info", func_info);
     }
 
+    LOG(WARNING) << "SRK: LowerTE:" << func;
     IRModule lowered_mod = tec::LowerTE(mod_name_, config_, [this](BaseFunc func) {
       // We need to maintain the constant map for external
       // functions so we pass this processing function which
@@ -230,6 +231,8 @@ class GraphExecutorCodegen : public backend::MemoizedExprTranslator<std::vector<
       // lowering process directly.
       tec::UpdateFunctionMetadata(func, this->function_metadata_);
     })(mod);
+
+    LOG(WARNING) << "SRK: LoweredMod:" << lowered_mod;
 
     Optional<backend::FunctionInfo> main_func_info =
         lowered_mod->GetAttr<backend::FunctionInfo>("main_func_info");
@@ -437,6 +440,9 @@ class GraphExecutorCodegen : public backend::MemoizedExprTranslator<std::vector<
           for (auto p : relay_attrs->dict) {
             if (p.second.as<StringObj>()) {
               attrs[p.first] = std::string(Downcast<String>(p.second));
+            } else {
+              LOG(WARNING) << "SRK: Attr:" << p.first << " Val:" << p.second;
+              attrs[p.first] = p.second;
             }
           }
         }

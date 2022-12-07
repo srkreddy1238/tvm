@@ -32,21 +32,43 @@ struct CollectAttrs : public AttrVisitor {
   void Visit(const char* key, std::string* value) final {
     if (std::string(key).find("layout") != std::string::npos) {
       attrs[key] = String(*value);
+    } else {
+      LOG(WARNING) << "SRK: Skip Key:" << key << " Val:" << *value;
     }
   }
-  void Visit(const char* key, double* value) final {}
-  void Visit(const char* key, uint64_t* value) final {}
-  void Visit(const char* key, int* value) final {}
-  void Visit(const char* key, int64_t* value) final {}
-  void Visit(const char* key, bool* value) final {}
-  void Visit(const char* key, runtime::NDArray* value) final {}
+  void Visit(const char* key, double* value) final {
+      LOG(WARNING) << "SRK: Skip double Key:" << key << " Val:" << *value;
+  }
+  void Visit(const char* key, uint64_t* value) final {
+      LOG(WARNING) << "SRK: Skip uint64_t Key:" << key << " Val:" << *value;
+  }
+  void Visit(const char* key, int* value) final {
+      attrs[key] = Integer(*value);
+      LOG(WARNING) << "SRK: Skip int Key:" << key << " Val:" << *value;
+  }
+  void Visit(const char* key, int64_t* value) final {
+      LOG(WARNING) << "SRK: Skip int64_t Key:" << key << " Val:" << *value;
+  }
+  void Visit(const char* key, bool* value) final {
+      LOG(WARNING) << "SRK: Skip bool Key:" << key << " Val:" << *value;
+  }
+  void Visit(const char* key, runtime::NDArray* value) final {
+      LOG(WARNING) << "SRK: Skip NDArray Key:" << key << " Val:" << *value;
+  }
   void Visit(const char* key, ObjectRef* value) final {
     if (std::string(key).find("layout") != std::string::npos) {
       attrs[key] = *value;
+    } else {
+      attrs[key] = *value;
+      LOG(WARNING) << "SRK: Skip Key2:" << key << " Val:" << *value;
     }
   }
-  void Visit(const char* key, DataType* value) final {}
-  void Visit(const char* key, void** value) final {}
+  void Visit(const char* key, DataType* value) final {
+      LOG(WARNING) << "SRK: Skip Dtype Key:" << key << " Val:" << *value;
+  }
+  void Visit(const char* key, void** value) final {
+      LOG(WARNING) << "SRK: Skip void* Key:" << key << " Val:" << *value;
+  }
   std::unordered_map<std::string, ObjectRef> attrs;
 };
 }  // namespace
@@ -105,6 +127,7 @@ class LabelOpsMutator : public MixedModeMutator {
 
   Expr Rewrite_(const CallNode* op, const Expr& post) final {
     auto updated = MixedModeMutator::Rewrite_(op, post);
+    //LOG(WARNING) << "SRK: CallNode:" << Downcast<Op>(op->op)->name;
     if (op->attrs.defined()) {
       CollectAttrs collect;
       const_cast<BaseAttrsNode*>(op->attrs.get())->VisitAttrs(&collect);
@@ -115,6 +138,7 @@ class LabelOpsMutator : public MixedModeMutator {
                        << "). Only the first will be recorded.";
         }
         body_attrs[p.first] = p.second;
+        //body_attrs[Downcast<Op>(op->op)->name] = op->attrs.get();
       }
     }
     return updated;

@@ -1201,6 +1201,7 @@ IRModule LowerTE(const IRModule& module, const String& module_name, ProcessFn pr
   // compiled by LowerExternalFunctions. However we still need a record of them in the
   // IRModule so that the various executors can see which function names need to be
   // retrieved. They may, however, have been renamed.
+  LOG(WARNING) << "SRK: LowerTensorExpr:" << updated_module;
   compiler->AddExterns(updated_module);
 
   // Add the lowered functions.
