@@ -53,7 +53,7 @@ jobs:
         shell: bash -l {0}
         run: |
           set -e
-          git fetch gpgpu
-          git checkout gpgpu/adreno_ci -- pytest_deselect_ids.txt
+          git fetch origin
+          git checkout origin/adreno_ci -- pytest_deselect_ids.txt
           git restore --staged pytest_deselect_ids.txt
           SCCACHE_SERVER_PORT=8767 ANDROID_SERIAL=`cat /etc/tvm-ci-device` python ./tests/scripts/ci.py adreno -d tvm.ci_adreno --test
