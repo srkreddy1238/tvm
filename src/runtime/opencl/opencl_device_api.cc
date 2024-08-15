@@ -450,7 +450,7 @@ void OpenCLWorkspace::SetNativePtr(const tvm::runtime::NDArray& narr, void* host
 #ifdef USE_OPENCL_EXTN_QCOM
     Device dev = narr.operator->()->device;
     cl_device_id device_id = GetCLDeviceID(dev.device_id);
-    auto platform = device_to_platform[device_id];
+    auto platform = device_info[device_id].platform_id;
 
     OPENCL_CALL(clFinish(this->GetQueue(dev)));
     if (desc->host_ptr) {
@@ -477,7 +477,7 @@ void OpenCLWorkspace::SetNativePtr(const tvm::runtime::NDArray& narr, void* host
 void OpenCLWorkspace::SetPerfHint(Device dev, cl_uint perf_hint) {
 #ifdef CL_CONTEXT_PERF_HINT_QCOM
   cl_device_id device_id = GetCLDeviceID(dev.device_id);
-  auto platform = device_to_platform[device_id];
+  auto platform = device_info[device_id].platform_id;
   OPENCL_CALL(clSetPerfHintQCOM(this->contexts[platform], perf_hint));
 #endif
 }
@@ -498,8 +498,9 @@ void OpenCLWorkspace::FreeDataSpace(Device dev, void* ptr) {
     if (desc->layout == cl::BufferDescriptor::MemoryLayout::kBuffer1D) {
       // 1D buffer allocated from pool
       if (desc->host_ptr) {
-        clEnqueueUnmapMemObject(this->GetQueue(dev), desc->buffer,
-                                reinterpret_cast<void*>(desc->host_ptr), 0, nullptr, nullptr);
+        OPENCL_CALL(clEnqueueUnmapMemObject(this->GetQueue(dev), desc->buffer,
+                                            reinterpret_cast<void*>(desc->host_ptr), 0, nullptr,
+                                            nullptr));
       }
       OPENCL_CALL(clFinish(this->GetQueue(dev)));
       OPENCL_CALL(clReleaseMemObject(desc->buffer));

@@ -694,7 +694,7 @@ generated = [
         help="Run Adreno build and test(s)",
         post_build=["./tests/scripts/task_build_adreno_bins.sh"],
         additional_flags={
-            "--volume": os.environ.get("ADRENO_OPENCL", "") + ":/adreno-opencl",
+            "--volume": os.environ.get("ADRENO_OPENCL", "/tmp/") + ":/adreno-opencl",
             "--env": "ADRENO_OPENCL=/adreno-opencl",
             "-v": os.environ.get("ADRENOACCL_SDK", "/tmp/") + ":/AdrenoAcCL",
             "-e": "ADRENOACCL_SDK=/AdrenoAcCL",
