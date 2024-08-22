@@ -695,13 +695,12 @@ generated = [
         post_build=["./tests/scripts/task_build_adreno_bins.sh"],
         additional_flags={
             "--volume": os.environ.get("ADRENO_OPENCL", "/tmp/") + ":/adreno-opencl",
-            "--env": "ADRENO_OPENCL=/adreno-opencl",
             "-v": os.environ.get("ADRENOACCL_SDK", "/tmp/") + ":/AdrenoAcCL",
-            "-e": "ADRENOACCL_SDK=/AdrenoAcCL",
             "--net": "host",
         },
         env={
             "ADRENO_OPENCL": "/adreno-opencl",
+            "ADRENOACCL_SDK": "/AdrenoAcCL",
             "ADRENO_TARGET_CLML_VERSION": os.environ.get("ADRENO_TARGET_CLML_VERSION", "3"),
         },
         options={

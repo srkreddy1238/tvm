@@ -60,17 +60,18 @@ jobs:
            git fetch gpgpu
            git checkout gpgpu/adreno_ci -- pytest_deselect_ids.txt
            git restore --staged pytest_deselect_ids.txt
-           # Test V4 device with V3 CLML SDK
-           ADRENO_OPENCL=${ADRENO_OPENCL_V3} \
-           SCCACHE_SERVER_PORT=8769 \
-           ANDROID_SERIAL=`cat /etc/tvm-ci-device-v4` \
-           python ./tests/scripts/ci.py adreno -d tvm.ci_adreno --test
            # Test V3 device with V3 CLML SDK
+           ADRENO_TARGET_CLML_VERSION=3 \
            ADRENO_OPENCL=${ADRENO_OPENCL_V3} \
            SCCACHE_SERVER_PORT=8769 \
            ANDROID_SERIAL=`cat /etc/tvm-ci-device` \
            python ./tests/scripts/ci.py adreno -d tvm.ci_adreno --test
-
+           # Test V3 device with V4 CLML SDK
+           ADRENO_TARGET_CLML_VERSION=3 \
+           ADRENO_OPENCL=${ADRENO_OPENCL_V4} \
+           SCCACHE_SERVER_PORT=8767 \
+           ANDROID_SERIAL=`cat /etc/tvm-ci-device` \
+           python ./tests/scripts/ci.py adreno -d tvm.ci_adreno --test
   Adreno-Tests-V4:
     needs: [Lint, Adreno-Tests-V3]
     if: ${{ github.repository == 'gpgpu/apache-tvm' }}
@@ -87,15 +88,17 @@ jobs:
            git fetch gpgpu
            git checkout gpgpu/adreno_ci -- pytest_deselect_ids.txt
            git restore --staged pytest_deselect_ids.txt
+           # Test V4 device with V3 CLML SDK
+           ADRENO_TARGET_CLML_VERSION=4 \
+           ADRENO_OPENCL=${ADRENO_OPENCL_V3} \
+           SCCACHE_SERVER_PORT=8769 \
+           ANDROID_SERIAL=`cat /etc/tvm-ci-device-v4` \
+           python ./tests/scripts/ci.py adreno -d tvm.ci_adreno --test
            # Test V4 device with V4 CLML SDK
+           ADRENO_TARGET_CLML_VERSION=4 \
            ADRENO_OPENCL=${ADRENO_OPENCL_V4} \
            SCCACHE_SERVER_PORT=8767 \
            ANDROID_SERIAL=`cat /etc/tvm-ci-device-v4` \
-           python ./tests/scripts/ci.py adreno -d tvm.ci_adreno --test
-           # Test V3 device with V4 CLML SDK
-           ADRENO_OPENCL=${ADRENO_OPENCL_V4} \
-           SCCACHE_SERVER_PORT=8767 \
-           ANDROID_SERIAL=`cat /etc/tvm-ci-device` \
            python ./tests/scripts/ci.py adreno -d tvm.ci_adreno --test
   GPU-Tests:
     needs: [Lint, Adreno-Tests-V3, Adreno-Tests-V4]
