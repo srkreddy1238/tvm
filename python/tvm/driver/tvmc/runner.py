@@ -462,20 +462,29 @@ def run_module(
         if tvmc_package.type == "vm":
             assert inputs is not None, "vm runner requires inputs to be provided as a dict"
 
-            input_tensor = {}
-            for e, i in inputs.items():
+            shape_dict = {
+                data["name"]: np.array(data["shape"], dtype="int")
+                for data in tvmc_package.input_shapes
+            }
+            dtype_dict = {data["name"]: data["dtype"] for data in tvmc_package.input_shapes}
+            input_tensor = make_inputs_dict(shape_dict, dtype_dict, inputs, fill_mode)
+            for e, i in input_tensor.items():
                 input_tensor[e] = tvm.nd.array(i, dev)
+            params = load_param_dict(tvmc_package.params)
+            if params:
+                for e, i in params.items():
+                    input_tensor[e] = tvm.nd.array(i, dev)
 
             if profile:
                 logger.debug("Creating vm with profile enabled.")
-                exe = profiler_vm.VirtualMachineProfiler(lib, dev)
+                exe = profiler_vm.VirtualMachineProfiler(lib, dev, "naive")
                 res = exe.profile(**input_tensor, func_name="main")
                 # This print is intentional
                 print(res)
             else:
-                exe = vm.VirtualMachine(lib, dev)
+                exe = vm.VirtualMachine(lib, dev, "naive")
 
-            exe_outputs = exe.invoke("main", **input_tensor)
+            exe.invoke("main", **input_tensor)
 
             if benchmark:
                 times = exe.benchmark(
@@ -490,14 +499,10 @@ def run_module(
                 exe.run(**input_tensor)
                 times = []
 
-            # Special handling if the output only has a single value
-            if not isinstance(exe_outputs, list):
-                exe_outputs = [exe_outputs]
-
             outputs = {}
-            for i, val in enumerate(exe_outputs):
+            for i in range(exe._get_num_outputs()):
                 output_name = "output_{}".format(i)
-                outputs[output_name] = val.numpy()
+                outputs[output_name] = exe.get_outputs()[i].asnumpy()
         else:
             # TODO(gromero): Adjust for micro targets.
             if profile:

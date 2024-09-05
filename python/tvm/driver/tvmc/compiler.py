@@ -45,6 +45,7 @@ from .target import target_from_cli, generate_target_args, reconstruct_target_ar
 from .pass_config import parse_configs
 from .pass_list import parse_pass_list_str
 from .transform import generate_transform_args, parse_graph_transform_args, apply_graph_transforms
+from .transform import parse_heterogenous_graph_partition_args, apply_heterogenous_graph_partition
 from .shape_parser import parse_shape_string
 from .workspace_pools import generate_workspace_pools_args, workspace_pools_recombobulate
 
@@ -173,6 +174,27 @@ def add_compile_parser(subparsers, _, json_params):
         "e.g. '--print-ir-after [tir.SplitHostDevice,tir.ConvertSSA]' ",
         default="",
     )
+    parser.add_argument(
+        "--use-vm",
+        action="store_true",
+        help="the use collage tuning option to select best heterogenous graph between targets.",
+    )
+    parser.add_argument(
+        "--rpc-key",
+        help="the RPC tracker key of the target device. "
+        "Required when --rpc-tracker is provided.",
+    )
+    parser.add_argument(
+        "--rpc-tracker",
+        help="hostname (required) and port (optional, defaults to 9090) of the RPC tracker, "
+        "e.g. '192.168.0.100:9999'",
+    )
+    parser.add_argument(
+        "--heterogeneous-tuning",
+        help="heterogeneous tuning provide option to tune graph with different BYOC backends, "
+        "(optional - collage, qual_hybrid_tuner)",
+        default="",
+    )
     for one_entry in json_params:
         parser.set_defaults(**one_entry)
 
@@ -208,6 +230,7 @@ def drive_compile(args):
     additional_targets = reconstruct_target_args(args)
     workspace_pools_target, extra_targets = target_from_cli(args.target, additional_targets)
     transform_args = parse_graph_transform_args(args)
+    partition_args = parse_heterogenous_graph_partition_args(args)
 
     compile_model(
         tvmc_model,
@@ -227,6 +250,7 @@ def drive_compile(args):
         pass_context_configs=args.pass_config,
         mod_name=args.module_name,
         additional_target_options=additional_targets,
+        use_vm=args.use_vm,
         workspace_pools=(
             workspace_pools_recombobulate(args, [workspace_pools_target], extra_targets)
         ),
@@ -234,6 +258,7 @@ def drive_compile(args):
         print_ir_before=args.print_ir_before,
         print_ir_after=args.print_ir_after,
         **transform_args,
+        **partition_args,
     )
 
     return 0
@@ -269,6 +294,9 @@ def compile_model(
     mixed_precision_ops: Optional[List[str]] = None,
     mixed_precision_calculation_type: Optional[str] = None,
     mixed_precision_acc_type: Optional[str] = None,
+    heterogeneous_tuning: Optional[str] = None,
+    rpc_tracker: Optional[str] = None,
+    rpc_key: Optional[str] = None,
 ):
     """Compile a model from a supported framework into a TVM module.
 
@@ -377,7 +405,10 @@ def compile_model(
 
     partition_functions = []
     partition_opts = []
+    targets = []
+    targets.append(tvm_target)
     for codegen_from_cli in extra_targets:
+        targets.append(tvm.target.Target(codegen_from_cli["name"], target_host))
         codegen = composite_target.get_codegen_by_target(codegen_from_cli["name"])
         partition_functions.append(codegen["pass_pipeline"])
         partition_opts.append(codegen_from_cli["opts"])
@@ -403,13 +434,6 @@ def compile_model(
         transform_args = parse_graph_transform_args(locals())
         mod = apply_graph_transforms(mod, transform_args, params)
 
-        for partition_function, opts in zip(partition_functions, partition_opts):
-            mod = partition_function(mod, params, mod_name=mod_name, **opts)
-
-        if initial_relay:
-            # dump which operations are offloaded to which backend
-            dump_operation_offloads(mod, initial_relay, dump_offloads)
-
         if tuning_records and os.path.exists(tuning_records):
             logger.debug("tuning records file provided: %s", tuning_records)
 
@@ -421,8 +445,21 @@ def compile_model(
 
             if use_autoscheduler:
                 with auto_scheduler.ApplyHistoryBest(tuning_records):
-                    config["relay.backend.use_auto_scheduler"] = True
                     logger.debug("building relay graph with autoscheduler")
+                    if heterogeneous_tuning:
+                        partition_args = parse_heterogenous_graph_partition_args(locals())
+                        mod = apply_heterogenous_graph_partition(
+                            mod, params, targets, cross, partition_args
+                        )
+                        use_vm = True
+                    else:
+                        for partition_function, opts in zip(partition_functions, partition_opts):
+                            mod = partition_function(mod, params, mod_name=mod_name, **opts)
+                    if initial_relay:
+                        # dump which operations are offloaded to which backend
+                        dump_operation_offloads(mod, initial_relay, dump_offloads)
+
+                    config["relay.backend.use_auto_scheduler"] = True
                     graph_module = build(
                         mod,
                         tvm_target=tvm_target,
@@ -436,6 +473,18 @@ def compile_model(
             else:
                 with autotvm.apply_history_best(tuning_records):
                     logger.debug("building relay graph with tuning records")
+                    if heterogeneous_tuning:
+                        partition_args = parse_heterogenous_graph_partition(locals())
+                        mod = apply_heterogenous_graph_partition(
+                            mod, params, targets, cross, partition_args
+                        )
+                        use_vm = True
+                    else:
+                        for partition_function, opts in zip(partition_functions, partition_opts):
+                            mod = partition_function(mod, params, mod_name=mod_name, **opts)
+                    if initial_relay:
+                        # dump which operations are offloaded to which backend
+                        dump_operation_offloads(mod, initial_relay, dump_offloads)
                     graph_module = build(
                         mod,
                         tvm_target=tvm_target,
@@ -448,6 +497,18 @@ def compile_model(
                     )
         else:
             logger.debug("building relay graph (no tuning records provided)")
+            if heterogeneous_tuning:
+                partition_args = parse_heterogenous_graph_partition(locals())
+                mod = apply_heterogenous_graph_partition(
+                    mod, params, targets, cross, partition_args
+                )
+                use_vm = True
+            else:
+                for partition_function, opts in zip(partition_functions, partition_opts):
+                    mod = partition_function(mod, params, mod_name=mod_name, **opts)
+            if initial_relay:
+                # dump which operations are offloaded to which backend
+                dump_operation_offloads(mod, initial_relay, dump_offloads)
             graph_module = build(
                 mod,
                 tvm_target=tvm_target,

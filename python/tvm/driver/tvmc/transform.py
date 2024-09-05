@@ -17,9 +17,11 @@
 """
 TVMC Graph Transforms
 """
-
+import tvm
 from tvm import relay, transform
 from tvm.driver.tvmc import TVMCException
+from tvm.relay.collage.collage import CostEstimator
+from tvm.relay.build_module import bind_params_by_name
 
 
 def generate_mixed_precision_rule(acc_dtype):
@@ -272,3 +274,87 @@ def generate_transform_args(parser):
         default="float16",
         help="Accumulator precision type",
     )
+
+
+def parse_heterogenous_graph_partition_args(args):
+    """Parse incoming options for graph transform arguments.
+
+    Parameters
+    ----------
+    args: argparse.Namespace or dict
+        Arguments.
+
+    Returns
+    -------
+    transform_args : dict
+        Graph transform arguments
+    """
+
+    if not isinstance(args, dict):
+        args = vars(args)
+
+    partition_args = [
+        "heterogeneous_tuning",
+        "rpc_tracker",
+        "rpc_key",
+    ]
+    partition_args = {key: args.get(key, None) for key in partition_args}
+    return partition_args
+
+
+def apply_heterogenous_graph_partition(mod, params, targets, cross, args):
+    """Apply the heterogenous backend tuning and generate optimized hybrid graph.
+
+    Parameters
+    ----------
+    mod : tvm.IRModule
+        The relay module to convert.
+    params : dict()
+        The dictionary of parameters.
+    targets: Target()
+        The compiler targets.
+    cross: String
+        The cross compiler NDK path.
+    args : dict
+        The transform arguments.
+
+    Returns
+    -------
+    mod : tvm.IRModule
+        The converted module.
+    """
+    if not args:
+        return mod
+
+    # Collage partition tuning
+    if args.get("heterogeneous_tuning") == "collage":
+        host = args["rpc_tracker"].split(":")[0]
+        port = int(args["rpc_tracker"].split(":")[-1])
+        config = {
+            "relay.collage.tvm_max_depth": 8,
+            "relay.collage.byoc_max_depth": 8,
+        }
+        for target in targets:
+            if target.kind.name == "clml":
+                config["relay.collage.byoc_fusion_style"] = ["clml.NoFusion"]
+        if params:
+            mod["main"] = bind_params_by_name(mod["main"], params)
+        ctxt = tvm.transform.PassContext(config=config)
+        config = tvm.target.make_compilation_config(ctxt, targets)
+        with ctxt:
+            collage_mod = tvm.relay.transform.CollagePartition(
+                config,
+                cost_estimator=CostEstimator(
+                    host=host,
+                    port=port,
+                    rpc_key=args["rpc_key"],
+                    ndk_cc=cross,
+                ),
+            )(mod)
+    else:
+        raise ValueError(
+            "Unsupported heterogeneous_tuning method, "
+            "please provide collage method for heterogenous tuning."
+        )
+
+    return collage_mod
