@@ -266,7 +266,7 @@ def compile_and_run(remote, label, model, targets, inputs):
     exe = tvm.relay.vm.compile(mod, target=targets, params=model["params"])
     lib = exe.mod
     temp = utils.tempdir()
-    dso_binary = get_unique_dso_lib
+    dso_binary = get_unique_dso_lib()
     dso_binary_path = temp.relpath(dso_binary)
     logging.info(f"Exporting library to {dso_binary_path}...")
     ndk_cc = os.getenv("TVM_NDK_CC", "aarch64-linux-android-g++")
@@ -283,4 +283,4 @@ def compile_and_run(remote, label, model, targets, inputs):
     vm_factory.set_input("main", **inputs_data)
     vm_factory.invoke_stateful("main")
     out = vm_factory.get_outputs()[0]
-    return out.asnumpy()
+    return out.numpy()

@@ -19,7 +19,6 @@
 import argparse
 import tvm
 from tvm import relay
-import logging
 import os
 import sys
 import numpy as np
@@ -33,8 +32,6 @@ import tvm.contrib.graph_executor as runtime
 from tvm.contrib import utils, ndk
 from tvm.relay.collage.collage import *
 from tvm.relay.op.contrib import clml
-
-logging.basicConfig(level=logging.INFO)
 
 
 ###
@@ -132,14 +129,14 @@ def tune_tasks(
 
 def compile_and_run(label, model, targets, inputs):
     """Compile model for target and run it with profiling."""
-    logging.info(f"Compiling {model['name']} using {label} with {targets}...")
+    print(f"Compiling {model['name']} using {label} with {targets}...")
     mod = model["mod"]
     exe = tvm.relay.vm.compile(mod, target=targets, params=model["params"])
     lib = exe.mod
     temp = utils.tempdir()
     dso_binary = "dev_lib_cl.so"
     dso_binary_path = temp.relpath(dso_binary)
-    logging.info(f"Exporting library to {dso_binary_path}...")
+    print(f"Exporting library to {dso_binary_path}...")
     lib.export_library(dso_binary_path, cc=NDK_CC)
     tracker = rpc.connect_tracker(args.host, args.port)
     remote = tracker.request(args.rpc_key, priority=0, session_timeout=600)
@@ -152,63 +149,62 @@ def compile_and_run(label, model, targets, inputs):
     profile = vm_factory.benchmark(
         ctx, repeat=5, number=20, min_repeat_ms=0, func_name=func_name, **main_args
     )
-    return profile.mean
+    print(profile)
+    return profile.median * 1e3
 
 
 def collage(model, input_data, tune_log=""):
     """Run the Collage partitioner for a set of Opencl Adreno related targets and profile the result"""
-    logging.info(f"collage | {model['name']}")
-    logging.info("-------------- BEGIN ORIGINAL --------------")
-    logging.info(model["mod"])
-    logging.info("-------------- END ORIGINAL ----------------")
-    with autotvm.apply_history_best(tune_log):
-        targets = []
-        targets.append(OPENCL)
-        use_fp16 = model["main_dtype"] == "float16"
-        targets.append(tvm.target.Target("clml", HOST))
-
-        # Register byoc fusion style for compiler with available
-        # options [compiler.NoFusion | compiler.TVMFusion | compiler.MaxDepthFusion]
-        config = {
-            "relay.collage.tvm_max_depth": TVM_MAX_DEPTH,
-            "relay.collage.byoc_max_depth": BYOC_MAX_DEPTH,
-            "relay.collage.byoc_fusion_style": ["clml.NoFusion"],
-        }
-        logging.info(f"Using PassContext(config={config}")
-        ctxt = tvm.transform.PassContext(config=config)
-        config = tvm.target.make_compilation_config(ctxt, targets)
-        with ctxt:
-            mod = model["mod"]
-            """Collage partition with tvm opencl and clml target on rpc device"""
-            mod = tvm.relay.transform.CollagePartition(
-                config,
-                cost_estimator=CostEstimator(
-                    host=args.host, port=args.port, rpc_key=args.rpc_key, ndk_cc=NDK_CC
-                ),
-            )(mod)
-            partitioned_model = model.copy()
-            partitioned_model["mod"] = mod
-            logging.info("-------------- BEGIN PARTITIONED --------------")
-            logging.info(partitioned_model["mod"])
-            logging.info("-------------- END PARTITIONED ----------------")
-            return compile_and_run("collage", partitioned_model, targets, input_data)
+    print(f"collage | {model['name']}")
+    print("-------------- BEGIN ORIGINAL --------------")
+    print(model["mod"])
+    print("-------------- END ORIGINAL ----------------")
+    targets = []
+    targets.append(OPENCL)
+    use_fp16 = model["main_dtype"] == "float16"
+    targets.append(tvm.target.Target("clml", HOST))
+    # Register byoc fusion style for compiler with available
+    # options [compiler.NoFusion | compiler.TVMFusion | compiler.MaxDepthFusion]
+    config = {
+        "relay.collage.tvm_max_depth": TVM_MAX_DEPTH,
+        "relay.collage.byoc_max_depth": BYOC_MAX_DEPTH,
+        "relay.collage.byoc_fusion_style": ["clml.NoFusion"],
+    }
+    print(f"Using PassContext(config={config}")
+    ctxt = tvm.transform.PassContext(config=config)
+    config = tvm.target.make_compilation_config(ctxt, targets)
+    with ctxt:
+        mod = model["mod"]
+        """Collage partition with tvm opencl and clml target on rpc device"""
+        mod = tvm.relay.transform.CollagePartition(
+            config,
+            cost_estimator=CostEstimator(
+                host=args.host, port=args.port, rpc_key=args.rpc_key, ndk_cc=NDK_CC
+            ),
+        )(mod)
+        partitioned_model = model.copy()
+        partitioned_model["mod"] = mod
+        print("-------------- BEGIN PARTITIONED --------------")
+        print(partitioned_model["mod"])
+        print("-------------- END PARTITIONED ----------------")
+        return compile_and_run("collage", partitioned_model, targets, input_data)
 
 
 def just_clml(model, input_data, tune_log=""):
     """Run partition_for_clml, complete the compilation with TVM, and profile the result."""
-    logging.info(f"just_clml | {model['name']}")
-    logging.info("-------------- BEGIN ORIGINAL --------------")
-    logging.info(model["mod"])
-    logging.info("-------------- END ORIGINAL ----------------")
+    print(f"just_clml | {model['name']}")
+    print("-------------- BEGIN ORIGINAL --------------")
+    print(model["mod"])
+    print("-------------- END ORIGINAL ----------------")
     with autotvm.apply_history_best(tune_log):
         with tvm.transform.PassContext(opt_level=3):
-            logging.info("Partitioning for CLML...")
+            print("Partitioning for CLML...")
             mod = tvm.relay.op.contrib.clml.partition_for_clml(model["mod"], model["params"])
             partitioned_model = model.copy()
             partitioned_model["mod"] = mod
-            logging.info("-------------- BEGIN PARTITIONED --------------")
-            logging.info(partitioned_model["mod"])
-            logging.info("-------------- END PARTITIONED ----------------")
+            print("-------------- BEGIN PARTITIONED --------------")
+            print(partitioned_model["mod"])
+            print("-------------- END PARTITIONED ----------------")
             targets = []
             targets.append(OPENCL)
             targets.append(tvm.target.Target("clml", HOST))
@@ -217,11 +213,15 @@ def just_clml(model, input_data, tune_log=""):
 
 def just_tvm(model, input_data, tune_log=""):
     """Compile and profile using vanilla TVM."""
-    logging.info(f"just_tvm | {model['name']}")
-    logging.info("-------------- BEGIN ORIGINAL --------------")
-    logging.info(model["mod"])
-    logging.info("-------------- END ORIGINAL ----------------")
-    with autotvm.apply_history_best(tune_log):
+    print(f"just_tvm | {model['name']}")
+    print("-------------- BEGIN ORIGINAL --------------")
+    print(model["mod"])
+    print("-------------- END ORIGINAL ----------------")
+    if tune_log:
+        with autotvm.apply_history_best(tune_log):
+            with tvm.transform.PassContext(opt_level=3):
+                return compile_and_run("just_tvm", model, OPENCL, input_data)
+    else:
         with tvm.transform.PassContext(opt_level=3):
             return compile_and_run("just_tvm", model, OPENCL, input_data)
 
@@ -275,8 +275,9 @@ def evaluate_network(model_name, dtype):
     print("Network evaluating .. " + model_name + " " + dtype)
     np.random.seed(0)
     model = get_model(model_name, dtype)
-    tune_log = "adreno_v0.01.log"
+    tune_log = ""
     if args.tune:
+        tune_log = "adreno_v0.01.log"
         # Auto Tuning
         tune_log = "adreno-" + model_name + "-" + dtype + ".log"
         tuning_options = {
@@ -306,7 +307,11 @@ def evaluate_network(model_name, dtype):
     tvm_time = just_tvm(model, input_data, tune_log)
 
     """Run Collage for tvm and clml compiler target."""
-    collage_time = collage(model, input_data, tune_log)
+    if tune_log:
+        with autotvm.apply_history_best(tune_log):
+            collage_time = collage(model, input_data, tune_log)
+    else:
+        collage_time = collage(model, input_data, tune_log)
     return (tvm_time, clml_time, collage_time)
 
 

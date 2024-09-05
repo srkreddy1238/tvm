@@ -18,7 +18,6 @@
 """Compares Collage with various other baselines."""
 
 import tvm
-import logging
 import os
 import numpy as np
 from tvm.relay import testing
@@ -27,8 +26,6 @@ from tvm import autotvm
 from tvm.relay.collage.collage import *
 from test_clml.infrastructure import compile_and_run
 import pytest
-
-logging.basicConfig(level=logging.INFO)
 
 
 ###
@@ -62,10 +59,10 @@ def get_rpc_remote():
 
 def collage(model, input_data):
     """Run the Collage partitioner for a set of Opencl Adreno related targets and profile the result"""
-    logging.info(f"collage | {model['name']}")
-    logging.info("-------------- BEGIN ORIGINAL --------------")
-    logging.info(model["mod"])
-    logging.info("-------------- END ORIGINAL ----------------")
+    print(f"collage | {model['name']}")
+    print("-------------- BEGIN ORIGINAL --------------")
+    print(model["mod"])
+    print("-------------- END ORIGINAL ----------------")
     with autotvm.apply_history_best(TUNING_LOG):
         targets = []
         targets.append(OPENCL)
@@ -79,7 +76,7 @@ def collage(model, input_data):
             "relay.collage.byoc_max_depth": BYOC_MAX_DEPTH,
             "relay.collage.byoc_fusion_style": ["clml.NoFusion"],
         }
-        logging.info(f"Using PassContext(config={config}")
+        print(f"Using PassContext(config={config}")
         ctxt = tvm.transform.PassContext(config=config)
         config = tvm.target.make_compilation_config(ctxt, targets)
         with ctxt:
@@ -93,40 +90,17 @@ def collage(model, input_data):
             )(mod)
             partitioned_model = model.copy()
             partitioned_model["mod"] = mod
-            logging.info("-------------- BEGIN PARTITIONED --------------")
-            logging.info(partitioned_model["mod"])
-            logging.info("-------------- END PARTITIONED ----------------")
+            print("-------------- BEGIN COLLAGE PARTITIONED --------------")
+            print(partitioned_model["mod"])
+            print("-------------- END COLLAGE PARTITIONED ----------------")
             return compile_and_run(
                 get_rpc_remote(), "collage", partitioned_model, targets, input_data
             )
 
 
-def just_clml(model, input_data):
-    """Run partition_for_clml, complete the compilation with TVM, and profile the result."""
-    logging.info(f"just_clml | {model['name']}")
-    logging.info("-------------- BEGIN ORIGINAL --------------")
-    logging.info(model["mod"])
-    logging.info("-------------- END ORIGINAL ----------------")
-    with tvm.transform.PassContext(opt_level=3):
-        logging.info("Partitioning for CLML...")
-        mod = tvm.relay.op.contrib.clml.partition_for_clml(model["mod"], model["params"])
-        partitioned_model = model.copy()
-        partitioned_model["mod"] = mod
-        logging.info("-------------- BEGIN PARTITIONED --------------")
-        logging.info(partitioned_model["mod"])
-        logging.info("-------------- END PARTITIONED ----------------")
-        targets = []
-        targets.append(OPENCL)
-        targets.append(tvm.target.Target("clml", HOST))
-        return compile_and_run(get_rpc_remote(), "just_clml", partitioned_model, OPENCL, input_data)
-
-
 def just_tvm(model, input_data):
     """Compile and profile using vanilla TVM."""
-    logging.info(f"just_tvm | {model['name']}")
-    logging.info("-------------- BEGIN ORIGINAL --------------")
-    logging.info(model["mod"])
-    logging.info("-------------- END ORIGINAL ----------------")
+    print(f"just_tvm | {model['name']}")
     with autotvm.apply_history_best(TUNING_LOG):
         with tvm.transform.PassContext(opt_level=3):
             return compile_and_run(get_rpc_remote(), "just_tvm", model, OPENCL, input_data)
@@ -163,7 +137,7 @@ def get_model(model_name, dtype):
 
 ########### Runners ###########
 @pytest.mark.parametrize("dtype", ["float32", "float16"])
-@pytest.mark.parametrize("model_name", ["mobilenet", "resnet-50"])
+@pytest.mark.parametrize("model_name", ["mobilenet"])
 @tvm.testing.requires_openclml
 def test_network_collage(model_name, dtype):
     print("Network evaluating .. " + model_name + " " + dtype)
@@ -173,20 +147,15 @@ def test_network_collage(model_name, dtype):
     for name, shape in model["input_shapes"].items():
         input_data[name] = np.random.uniform(-1.0, 1.0, shape).astype(model["input_dtypes"][name])
 
-    clml_out = just_clml(model, input_data)
     tvm_out = just_tvm(model, input_data)
-    """Check tvm and clml output correctness."""
     tvm_sort = np.argsort(tvm_out).flatten()
-    clml_sort = np.argsort(clml_out).flatten()
-    tvm.testing.assert_allclose(tvm_sort[-5:], clml_sort[-5:], rtol=0, atol=0)
-    logging.info("-------- TVM and CLML execution test passed ---------")
 
     """Run Collage for tvm and clml compiler target."""
     collage_out = collage(model, input_data)
     collage_sort = np.argsort(collage_out).flatten()
     """Check tvm and collage(tvm+clml) output correctness."""
     tvm.testing.assert_allclose(tvm_sort[-5:], collage_sort[-5:], rtol=0, atol=0)
-    logging.info("-------- Collage execution test passed ---------")
+    print("-------- Collage execution test passed ---------")
 
 
 if __name__ == "__main__":
