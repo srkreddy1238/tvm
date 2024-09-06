@@ -155,6 +155,7 @@ def convert_graph_layout(mod, desired_layouts, ops=None):
             relay.transform.RemoveUnusedFunctions(),
             relay.transform.ConvertLayout(desired_layouts),
             relay.transform.FoldConstant(),
+            relay.transform.FoldScaleAxis(),
         ]
     )
 

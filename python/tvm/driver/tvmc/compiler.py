@@ -432,6 +432,7 @@ def compile_model(
         instruments=instruments,
     ):
         transform_args = parse_graph_transform_args(locals())
+
         mod = apply_graph_transforms(mod, transform_args, params)
 
         if tuning_records and os.path.exists(tuning_records):
