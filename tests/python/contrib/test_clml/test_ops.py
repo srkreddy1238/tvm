@@ -29,12 +29,21 @@ from test_clml.infrastructure import (
     verify_codegen,
 )
 import pytest
+import os
 
 
 executor_type = tvm.testing.parameter("ge", "vm")
 
 
-def _build_and_run_network(remote, mod, params, input_data, target, executor_type, tvm_log=""):
+def _build_and_run_network(
+    remote,
+    mod,
+    params,
+    input_data,
+    target,
+    executor_type,
+    tvm_log="",
+):
     """Helper function to build and run a network."""
 
     outputs = []
@@ -1349,6 +1358,115 @@ def test_clip(remote, dtype, target, executor_type, trials):
                 },
                 "inputs": [[0, 0, 0]],
                 "name": "clip",
+                "op": "kernel",
+            },
+        ]
+
+        verify_codegen(remote, mod, params, exp_codegen, target)
+
+    _verify(trials[0], trials[1], trials[2])
+
+
+@pytest.mark.parametrize("dtype", ["float16"])
+@pytest.mark.skipif(
+    int(os.getenv("ADRENO_TARGET_CLML_VERSION", 3)) < 4,
+    reason="Requires target device with CLML v4 or above",
+)
+@pytest.mark.skipif(
+    int(tvm.support.libinfo().get("TVM_CLML_VERSION", 2)) < 4,
+    reason="Requires compiler supporting CLML v4 or above",
+)
+@pytest.mark.parametrize(
+    "trials",
+    [
+        [(1, 6, 2, 2), 3, 1],
+        [(1, 16, 4, 4), 2, 1],
+        [(1, 512, 128, 64), 8, 1],
+    ],
+)
+@tvm.testing.requires_openclml
+@tvm.testing.parametrize_targets("opencl")
+def test_group_norm(remote, dtype, target, executor_type, trials):
+    def _verify(shape, num_groups, axis):
+        np.random.seed(0)
+        data = relay.var("data", shape=shape, dtype=dtype)
+        gamma_arr = tvm.nd.array(np.random.uniform(-1, 1, (shape[axis],)).astype(dtype))
+        beta_arr = tvm.nd.array(np.random.uniform(-1, 1, (shape[axis],)).astype(dtype))
+        gamma = relay.const(gamma_arr, dtype)
+        beta = relay.const(beta_arr, dtype)
+        out = relay.nn.group_norm(
+            data,
+            gamma,
+            beta,
+            num_groups=num_groups,
+            axis=axis,
+            epsilon=1e-05,
+            center=True,
+            scale=True,
+        )
+        inputs = {"data": tvm.nd.array(np.random.uniform(-1, 1, shape).astype(dtype))}
+        params = {}
+        mod = IRModule.from_expr(out)
+        outputs = _build_and_run_network(remote, mod, params, inputs, target, executor_type)
+        out_tol = 1e-1
+        tvm.testing.assert_allclose(
+            outputs[0].asnumpy(), outputs[1].asnumpy(), rtol=out_tol, atol=out_tol
+        )
+        exp_codegen = [
+            {
+                "attrs": {
+                    "dtype": [[dtype]],
+                    "shape": [[list(shape)]],
+                },
+                "name": "",
+                "op": "input",
+            },
+            {
+                "attrs": {
+                    "dtype": [[dtype]],
+                    "shape": [
+                        [
+                            list(
+                                [
+                                    shape[axis],
+                                ]
+                            )
+                        ]
+                    ],
+                },
+                "name": "",
+                "op": "const",
+            },
+            {
+                "attrs": {
+                    "dtype": [[dtype]],
+                    "shape": [
+                        [
+                            list(
+                                [
+                                    shape[axis],
+                                ]
+                            )
+                        ]
+                    ],
+                },
+                "name": "",
+                "op": "const",
+            },
+            {
+                "attrs": {
+                    "axis": [[str(axis)]],
+                    "center": [["1"]],
+                    "dtype": [[dtype]],
+                    "epsilon": [["1.0000000000000001e-05"]],
+                    "num_groups": [[str(num_groups)]],
+                    "num_inputs": "3",
+                    "num_outputs": "1",
+                    "scale": [["1"]],
+                    "shape": [[list(shape)]],
+                },
+                "inputs": [[0, 0, 0], [1, 0, 0], [2, 0, 0]],
+                "name": "nn.group_norm",
                 "op": "kernel",
             },
         ]

@@ -95,6 +95,10 @@ def get_non_cpu_op_count(mod):
     return c.count
 
 
+def get_clml_target_version():
+    return int(os.getenv("ADRENO_TARGET_CLML_VERSION"))
+
+
 # build module run with opencl or clml target with graph executor
 def build_and_run(
     remote,
@@ -114,7 +118,9 @@ def build_and_run(
         mod = tvm.IRModule.from_expr(mod)
 
     with autotvm.apply_history_best(stat_file):
-        with tvm.transform.PassContext(opt_level=3):
+        with tvm.transform.PassContext(
+            opt_level=3, config={"relay.ext.clml.target_version": get_clml_target_version()}
+        ):
             if enable_clml:
                 mod = clml.partition_for_clml(mod, params1)
             graph, lib, params = relay.build(
@@ -164,7 +170,9 @@ def build_and_run_vm(
         mod = tvm.IRModule.from_expr(mod)
 
     with autotvm.apply_history_best(stat_file):
-        with tvm.transform.PassContext(opt_level=3):
+        with tvm.transform.PassContext(
+            opt_level=3, config={"relay.ext.clml.target_version": get_clml_target_version()}
+        ):
             if enable_clml:
                 mod = clml.partition_for_clml(mod, params1)
             vmc = relay.vm.compile(mod, target=target, params=params1)
@@ -212,11 +220,12 @@ def verify_codegen(
         target_host = "llvm"
     else:
         target_host = "llvm -mtriple=arm64-linux-android"
-
     """Check clml codegen against a known good output."""
     if isinstance(mod, tvm.relay.expr.Call):
         mod = tvm.IRModule.from_expr(mod)
-    with tvm.transform.PassContext(opt_level=3):
+    with tvm.transform.PassContext(
+        opt_level=3, config={"relay.ext.clml.target_version": get_clml_target_version()}
+    ):
         mod = clml.partition_for_clml(mod, params)
         tvm_op_count = get_cpu_op_count(mod)
         assert tvm_op_count == tvm_ops, "Got {} TVM operators, expected {}".format(
@@ -248,7 +257,6 @@ def verify_codegen(
                 codegen[node]["name"] = ""
         codegen_str = json.dumps(codegen, sort_keys=True, indent=2)
         known_good_codegen_str = json.dumps(known_good_codegen, sort_keys=True, indent=2)
-
         assert codegen_str == known_good_codegen_str, (
             f"The JSON produced by codegen does not match the expected result. \n"
             f"Actual={codegen_str} \n"

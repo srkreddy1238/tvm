@@ -96,6 +96,7 @@ CLMLWorkspace::CLMLWorkspace() {
   target_minor = minorVersions[numVersions - 1];
 
   LOG(WARNING) << "CLML Target Version:" << target_major << "." << target_minor;
+  LOG(WARNING) << "CL_QCOM_ML_OPS_H_MAJOR_VERSION" << CL_QCOM_ML_OPS_H_MAJOR_VERSION;
 
   if (target_major > CL_QCOM_ML_OPS_H_MAJOR_VERSION) {
     LOG(WARNING) << "Runtime is compiled with " << CL_QCOM_ML_OPS_H_MAJOR_VERSION
@@ -516,10 +517,9 @@ class CLMLRuntime : public JSONRuntimeBase {
    * \return CLML Tensor descriptor.
    */
   std::shared_ptr<cl_ml_tensor_memory_desc_qcom> MakeCLMLTensorFromJSONEntry(
-      size_t nid, std::vector<size_t> shape, cl_ml_tensor_layout_qcom layout, cl_uint dtype) {
+      size_t nid, std::vector<size_t> shape, cl_ml_tensor_layout_qcom layout, cl_uint dtype,
+      cl_ml_tensor_usage_qcom usage = CL_TENSOR_USAGE_CNN_QCOM) {
     const JSONGraphNode node = nodes_[nid];
-    cl_ml_tensor_usage_qcom usage = CL_TENSOR_USAGE_CNN_QCOM;
-
     if (this->layer_.storage_map.find(nid) == this->layer_.storage_map.end()) {
       void* node_data = nullptr;
       if (node.GetOpType() == "const") {
@@ -613,6 +613,10 @@ class CLMLRuntime : public JSONRuntimeBase {
           CreateResizeLayer(&layer_, node, nid);
         else if ("nn.batch_matmul" == op_name)
           CreateBatchMatmulLayer(&layer_, node, nid);
+#if (CL_QCOM_ML_OPS_H_MAJOR_VERSION >= 4)
+        else if ("nn.group_norm" == op_name)
+          CreateGroupNormLayer(&layer_, node, nid);
+#endif
         else
           LOG(FATAL) << "Unsupported op: " << op_name;
         this->layer_.layer_names.push_back(op_name);
@@ -1568,6 +1572,52 @@ class CLMLRuntime : public JSONRuntimeBase {
     layer->function.push_back(op);
     return;
   }
+
+#if (CL_QCOM_ML_OPS_H_MAJOR_VERSION >= 4)
+
+  /*!
+   * \brief Create a GroupNorm(X) layer.
+   * \note Only FP16 arithmetic is supported for this Op
+   * \param layer The CLML layer to build. Containing inputs, outputs and the CLML output.
+   * \param node The JSON representation of the operator.
+   * \param nid The node index of JSON graph node, which points to this operator.
+   */
+  void CreateGroupNormLayer(CachedLayer* layer, const JSONGraphNode& node, size_t nid) {
+    cl_int result = 0;
+    cl_ml_op_qcom op = nullptr;
+    DLDataType tvm_dtype = node.GetOpDataType()[0];
+    cl_channel_type cl_dtype = MakeCLDataType(tvm_dtype);
+    cl_arithmetic_mode_qcom cl_arithmetic_mode = MakeCLArithMode(cl_dtype, cl_dtype);
+    cl_ml_tensor_usage_qcom usage = CL_TENSOR_USAGE_CNN_QCOM;
+    int axis = std::stoi(node.GetAttr<std::vector<std::string>>("axis")[0]);
+    auto input = MakeCLMLTensorFromJSONEntry(node.GetInputs()[0].id_, {},
+                                             CL_TENSOR_LAYOUT_OPTIMAL_QCOM, cl_dtype, usage);
+
+    float epsilon = std::stof(node.GetAttr<std::vector<std::string>>("epsilon")[0]);
+    cl_uint num_groups = std::stoi(node.GetAttr<std::vector<std::string>>("num_groups")[0]);
+    auto gn_dims = GetTensorDims(nodes_[node.GetInputs()[1].id_]);
+
+    std::vector<size_t> gn_shape = {1, 1, 1, 1};
+    gn_shape[axis] = gn_dims.n;
+    auto gn_scale = std::make_shared<cl_ml_tensor_memory_desc_qcom>();
+    auto gn_bias = std::make_shared<cl_ml_tensor_memory_desc_qcom>();
+    gn_scale = MakeCLMLTensorFromJSONEntry(node.GetInputs()[1].id_, gn_shape,
+                                           CL_TENSOR_LAYOUT_OPTIMAL_QCOM, cl_dtype);
+    gn_bias = MakeCLMLTensorFromJSONEntry(node.GetInputs()[2].id_, gn_shape,
+                                          CL_TENSOR_LAYOUT_OPTIMAL_QCOM, cl_dtype);
+
+    auto output =
+        MakeCLMLTensorFromJSONEntry(nid, {}, CL_TENSOR_LAYOUT_OPTIMAL_QCOM, cl_dtype, usage);
+    cl_ml_op_groupnorm_desc_qcom gn_desc = {CL_GROUPNORM_MODE_INSTANCE_QCOM, num_groups, epsilon,
+                                            cl_arithmetic_mode};
+    CLML_CALL_clCreateMLOpGroupNormForwardQCOM(CLML_CTX, nullptr, &gn_desc, input->tensor,
+                                               gn_scale->tensor, gn_bias->tensor, output->tensor,
+                                               &op, layer_.tuning_cache);
+    ICHECK(op) << "Groupnorm Error:";
+    layer->function.push_back(op);
+    return;
+  }
+#endif
 
   /*!
    * \brief The network layers represented by acl functions.

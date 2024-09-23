@@ -25,7 +25,15 @@ from test_clml.infrastructure import build_and_run, build_and_run_vm
 import pytest
 
 
-def _build_and_run_network(remote, mod, params, input_data, target, executor_type, tvm_log=""):
+def _build_and_run_network(
+    remote,
+    mod,
+    params,
+    input_data,
+    target,
+    executor_type,
+    tvm_log="",
+):
     """Helper function to build and run a network."""
 
     outputs = []

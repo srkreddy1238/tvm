@@ -338,6 +338,58 @@ def clml_pattern_table():
         pattern = is_op("nn.pad")(wildcard(), is_constant())
         return pattern
 
+    def group_norm_pattern():
+        """Create a group norm pattern."""
+        pattern = is_op("nn.group_norm")(wildcard(), is_constant(), is_constant())
+        return pattern
+
+    def check_groupnorm_op(extract):
+        call = extract
+        # channel axis other than 1 is not supported in CLML
+        if call.attrs["axis"] != 1:
+            return False
+
+        if isinstance(call, tvm.relay.expr.TupleGetItem):
+            call = call.tuple_value
+            call_shape = call.checked_type.fields[0].shape
+            call_dtype = call.checked_type.fields[0].dtype
+        else:
+            call_shape = call.checked_type.shape
+            call_dtype = call.checked_type.dtype
+
+        # int64, int32, flaot32  dtypes are not Supported in CLML
+        if call_dtype in ["int64", "int32", "float32"]:
+            return False
+
+        # Supports only upto 4 dim shapes
+        if len(call_shape) > 4:
+            return False
+        # Only support batch dim = 1
+        if isinstance(call_shape[0], tvm.tir.expr.Any) or call_shape[0] > 1:
+            return False
+        # Checking buffer indexing limit
+        for shape in call_shape:
+            if shape > 32768:
+                return False
+        # Avoid any operators with dtype Int64 and upsupported shape
+        for _arg in call.args:
+            t_arg = _arg if isinstance(_arg, tvm.relay.Tuple) else [_arg]
+            for arg in t_arg:
+                checked_type = (
+                    arg.tuple_value.checked_type.fields[arg.index]
+                    if isinstance(arg, tvm.relay.TupleGetItem)
+                    else arg.checked_type
+                )
+                if checked_type.dtype in ["int64", "int32", "float32"]:
+                    return False
+                # Supports only 4 dim shapes
+                if len(checked_type.shape) > 4:
+                    return False
+                for shape in checked_type.shape:
+                    if shape > 32768:
+                        return False
+        return True
+
     def check_conv(extract):
         """Check conv pattern is supported by CLML."""
         call = extract
@@ -590,7 +642,7 @@ def clml_pattern_table():
     )
     print("CLML Target Version: ", target_version)
 
-    return [
+    CLML3_ops = [
         ("clml.pad_conv2d", pad_conv_pattern(), check_conv),
         ("clml.conv2d", conv_pattern(), check_conv),
         ("clml.conv2d_transpose", conv_transpose_pattern(), check_conv_transpose),
@@ -622,6 +674,13 @@ def clml_pattern_table():
             check_batch_matmul_op,
         ),
     ]
+    CLML4_ops = [
+        ("clml.group_norm", group_norm_pattern(), check_groupnorm_op),
+    ]
+    if (target_version >= 4) and (clml_sdk_version() >= 4):
+        return CLML3_ops + CLML4_ops
+    else:
+        return CLML3_ops
 
 
 def _register_external_op_helper(op_name, supported=True):
