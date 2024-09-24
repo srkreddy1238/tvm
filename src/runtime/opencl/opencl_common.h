@@ -347,7 +347,7 @@ class OpenCLWorkspace : public DeviceAPI {
   void* AllocDataSpace(Device dev, size_t size, size_t alignment, DLDataType type_hint) final;
   void* AllocDataSpace(Device dev, int ndim, const int64_t* shape, DLDataType dtype,
                        Optional<String> mem_scope = NullOpt) final;
-  void* AllocDataSpace(Device dev, size_t width, size_t height, DLDataType type_hint,
+  void* AllocDataSpace(Device dev, size_t width, size_t height, size_t depth, DLDataType type_hint,
                        Optional<String> mem_scope = NullOpt);
 
   void* AllocDataSpaceView(Device dev, void* data, ShapeTuple shape, DLDataType dtype,
@@ -365,8 +365,8 @@ class OpenCLWorkspace : public DeviceAPI {
 
   // cl_mem alloc utils
   void* AllocCLBuffer(Device dev, size_t size, size_t alignment, DLDataType type_hint);
-  void* AllocCLImage(Device dev, void* back_buffer, size_t width, size_t height, size_t row_pitch,
-                     DLDataType type_hint, Optional<String> mem_scope);
+  void* AllocCLImage(Device dev, void* back_buffer, size_t width, size_t height, size_t depth,
+                     size_t row_pitch, DLDataType type_hint, Optional<String> mem_scope);
 
   /*!
    * \brief Get the thread local ThreadEntry

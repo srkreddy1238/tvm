@@ -45,12 +45,12 @@ def test_conv2d_transpose_adreno(remote, target, executor_type, dtype):
     ]
     # Tensors memory scope with graph executor build
     ge_texture_scopes = [
-        ["", "global.texture", "global.texture-weight", "", ""],
-        ["", "global.texture", "global.texture-weight", "", ""],
-        ["", "global.texture", "global.texture-weight", "global.texture-weight", "", ""],
-        ["", "global.texture", "global.texture-weight", "", ""],
-        ["", "global.texture", "global.texture-weight", "global.texture-weight", "", ""],
-        ["", "global.texture", "global.texture-nhwc", "", ""],
+        ["", "global.texture-nhwc", "global.texture-weight", "", ""],
+        ["", "global.texture-nhwc", "global.texture-weight", "", ""],
+        ["", "global.texture-nhwc", "global.texture-weight", "global.texture-weight", "", ""],
+        ["", "global.texture-nhwc", "global.texture-weight", "", ""],
+        ["", "global.texture-nhwc", "global.texture-weight", "global.texture-weight", "", ""],
+        ["", "global.texture-weight", "global.texture-weight", "", ""],
         [],
         [],
     ]
@@ -59,40 +59,40 @@ def test_conv2d_transpose_adreno(remote, target, executor_type, dtype):
         """
         VM VirtualDevice[0]: device type 1, id 0 and mem_scope
         VM VirtualDevice[1]: device type 4, id 0 and mem_scope
-        VM VirtualDevice[2]: device type 4, id 0 and mem_scope global.texture
+        VM VirtualDevice[2]: device type 4, id 0 and mem_scope global.texture-nhwc
         VM VirtualDevice[3]: device type 4, id 0 and mem_scope global.texture-weight
         """,
         """
         VM VirtualDevice[0]: device type 1, id 0 and mem_scope
         VM VirtualDevice[1]: device type 4, id 0 and mem_scope
-        VM VirtualDevice[2]: device type 4, id 0 and mem_scope global.texture
+        VM VirtualDevice[2]: device type 4, id 0 and mem_scope global.texture-nhwc
         VM VirtualDevice[3]: device type 4, id 0 and mem_scope global.texture-weight
         """,
         """
         VM VirtualDevice[0]: device type 1, id 0 and mem_scope
         VM VirtualDevice[1]: device type 4, id 0 and mem_scope
-        VM VirtualDevice[2]: device type 4, id 0 and mem_scope global.texture
-        VM VirtualDevice[3]: device type 4, id 0 and mem_scope global.texture-weight
-        VM VirtualDevice[4]: device type 4, id 0 and mem_scope global.texture-weight
-        """,
-        """
-        VM VirtualDevice[0]: device type 1, id 0 and mem_scope
-        VM VirtualDevice[1]: device type 4, id 0 and mem_scope
-        VM VirtualDevice[2]: device type 4, id 0 and mem_scope global.texture
-        VM VirtualDevice[3]: device type 4, id 0 and mem_scope global.texture-weight
-        """,
-        """
-        VM VirtualDevice[0]: device type 1, id 0 and mem_scope
-        VM VirtualDevice[1]: device type 4, id 0 and mem_scope
-        VM VirtualDevice[2]: device type 4, id 0 and mem_scope global.texture
+        VM VirtualDevice[2]: device type 4, id 0 and mem_scope global.texture-nhwc
         VM VirtualDevice[3]: device type 4, id 0 and mem_scope global.texture-weight
         VM VirtualDevice[4]: device type 4, id 0 and mem_scope global.texture-weight
         """,
         """
         VM VirtualDevice[0]: device type 1, id 0 and mem_scope
         VM VirtualDevice[1]: device type 4, id 0 and mem_scope
-        VM VirtualDevice[2]: device type 4, id 0 and mem_scope global.texture
-        VM VirtualDevice[3]: device type 4, id 0 and mem_scope global.texture-nhwc
+        VM VirtualDevice[2]: device type 4, id 0 and mem_scope global.texture-nhwc
+        VM VirtualDevice[3]: device type 4, id 0 and mem_scope global.texture-weight
+        """,
+        """
+        VM VirtualDevice[0]: device type 1, id 0 and mem_scope
+        VM VirtualDevice[1]: device type 4, id 0 and mem_scope
+        VM VirtualDevice[2]: device type 4, id 0 and mem_scope global.texture-nhwc
+        VM VirtualDevice[3]: device type 4, id 0 and mem_scope global.texture-weight
+        VM VirtualDevice[4]: device type 4, id 0 and mem_scope global.texture-weight
+        """,
+        """
+        VM VirtualDevice[0]: device type 1, id 0 and mem_scope
+        VM VirtualDevice[1]: device type 4, id 0 and mem_scope
+        VM VirtualDevice[2]: device type 4, id 0 and mem_scope global.texture-weight
+        VM VirtualDevice[3]: device type 4, id 0 and mem_scope global.texture-weight
         """,
         [],
         [],
@@ -183,9 +183,9 @@ def test_conv2d_transpose_three_layer_block(remote, target, executor_type, dtype
     ge_texture_scopes = [
         [
             "",
-            "global.texture",
+            "global.texture-nhwc",
             "global.texture-weight",
-            "global.texture",
+            "global.texture-nhwc",
             "global.texture-weight",
             "global.texture",
             "global.texture-weight",
@@ -194,12 +194,12 @@ def test_conv2d_transpose_three_layer_block(remote, target, executor_type, dtype
         ],
         [
             "",
-            "global.texture-nhwc",
-            "global.texture-weight",
-            "global.texture-nhwc",
             "global.texture-weight",
             "global.texture-weight",
-            "global.texture-nhwc",
+            "global.texture-weight",
+            "global.texture-weight",
+            "global.texture-weight",
+            "global.texture-weight",
             "global.texture-weight",
             "",
             "",
@@ -209,8 +209,8 @@ def test_conv2d_transpose_three_layer_block(remote, target, executor_type, dtype
         """
         VM VirtualDevice[0]: device type 1, id 0 and mem_scope
         VM VirtualDevice[1]: device type 4, id 0 and mem_scope
-        VM VirtualDevice[2]: device type 4, id 0 and mem_scope global.texture
-        VM VirtualDevice[3]: device type 4, id 0 and mem_scope global.texture
+        VM VirtualDevice[2]: device type 4, id 0 and mem_scope global.texture-nhwc
+        VM VirtualDevice[3]: device type 4, id 0 and mem_scope global.texture-nhwc
         VM VirtualDevice[4]: device type 4, id 0 and mem_scope global.texture-weight
         VM VirtualDevice[5]: device type 4, id 0 and mem_scope global.texture
         VM VirtualDevice[6]: device type 4, id 0 and mem_scope global.texture-weight
@@ -219,10 +219,10 @@ def test_conv2d_transpose_three_layer_block(remote, target, executor_type, dtype
         """
         VM VirtualDevice[0]: device type 1, id 0 and mem_scope
         VM VirtualDevice[1]: device type 4, id 0 and mem_scope
-        VM VirtualDevice[2]: device type 4, id 0 and mem_scope global.texture-nhwc
-        VM VirtualDevice[3]: device type 4, id 0 and mem_scope global.texture-nhwc
+        VM VirtualDevice[2]: device type 4, id 0 and mem_scope global.texture-weight
+        VM VirtualDevice[3]: device type 4, id 0 and mem_scope global.texture-weight
         VM VirtualDevice[4]: device type 4, id 0 and mem_scope global.texture-weight
-        VM VirtualDevice[5]: device type 4, id 0 and mem_scope global.texture-nhwc
+        VM VirtualDevice[5]: device type 4, id 0 and mem_scope global.texture-weight
         VM VirtualDevice[6]: device type 4, id 0 and mem_scope global.texture-weight
         VM VirtualDevice[7]: device type 4, id 0 and mem_scope global.texture-weight
         VM VirtualDevice[8]: device type 4, id 0 and mem_scope global.texture-weight

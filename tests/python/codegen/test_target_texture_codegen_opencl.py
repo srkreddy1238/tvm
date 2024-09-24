@@ -1468,7 +1468,7 @@ class TestSimpleTextureToScalarFP16:
             ["global.texture", (1, 1, 40, 40, 4)],
             ["", (1, 4, 40, 40)],
             [
-                "float4 v_ = READ_IMAGEF(p0_comp, image_sampler, ((int2)(((convert_int(get_local_id(0))) % 40), ((((convert_int(get_group_id(0))) & 1) * 20) + ((convert_int(get_local_id(0))) / 40)))));",
+                "float4 v_ = READ_IMAGEF(p0_comp, image_sampler, ((int4)(((convert_int(get_local_id(0))) % 40), ((((convert_int(get_group_id(0))) & 1) * 20) + ((convert_int(get_local_id(0))) / 40)), 0, 0)));",
                 "out[(((convert_int(get_group_id(0))) * 800) + (convert_int(get_local_id(0))))] = (convert_half(((float*)&v_)[((convert_int(get_group_id(0))) >> 1)]));",
             ],
         ),
@@ -1485,8 +1485,8 @@ class TestSimpleTextureToScalarFP16:
             ["global.texture", (1, 1, 40, 40, 4)],
             ["global.texture", (1, 1, 40, 40, 4)],
             [
-                "float4 v_ = READ_IMAGEF(p0_comp, image_sampler, ((int2)(((((convert_int(get_group_id(0))) * 24) + (convert_int(get_local_id(0)))) % 40), ((((convert_int(get_group_id(0))) * 8) + ((convert_int(get_local_id(0))) >> 3)) / 5))));",
-                "write_imageh(out, (int2)(((((convert_int(get_group_id(0))) * 24) + (convert_int(get_local_id(0)))) % 40), ((((convert_int(get_group_id(0))) * 8) + ((convert_int(get_local_id(0))) >> 3)) / 5)), (convert_half4(v_)));",
+                "float4 v_ = READ_IMAGEF(p0_comp, image_sampler, ((int4)(((((convert_int(get_group_id(0))) * 24) + (convert_int(get_local_id(0)))) % 40), ((((convert_int(get_group_id(0))) * 8) + ((convert_int(get_local_id(0))) >> 3)) / 5), 0, 0)));",
+                "write_imageh(out, (int4)(((((convert_int(get_group_id(0))) * 24) + (convert_int(get_local_id(0)))) % 40), ((((convert_int(get_group_id(0))) * 8) + ((convert_int(get_local_id(0))) >> 3)) / 5), 0, 0), (convert_half4(v_)));",
             ],
         ),
     )
@@ -1509,7 +1509,7 @@ class TestSimpleTextureToScalarFP32:
             ["global.texture", (1, 1, 40, 40, 4)],
             ["", (1, 4, 40, 40)],
             [
-                "float4 v_ = READ_IMAGEF(p0_comp, image_sampler, ((int2)(((convert_int(get_local_id(0))) % 40), ((((convert_int(get_group_id(0))) & 1) * 20) + ((convert_int(get_local_id(0))) / 40)))));",
+                "float4 v_ = READ_IMAGEF(p0_comp, image_sampler, ((int4)(((convert_int(get_local_id(0))) % 40), ((((convert_int(get_group_id(0))) & 1) * 20) + ((convert_int(get_local_id(0))) / 40)), 0, 0)));",
                 "out[(((convert_int(get_group_id(0))) * 800) + (convert_int(get_local_id(0))))] = ((float*)&v_)[((convert_int(get_group_id(0))) >> 1)];",
             ],
         ),
@@ -1621,7 +1621,7 @@ class TestTextureToScalarReuseSSAFP16:
             ["global.texture", (1, 1, 40, 40, 4)],
             ["", (1, 4, 40, 40)],
             [
-                "float4 v_ = READ_IMAGEF(p0_comp, image_sampler, ((int2)(((convert_int(get_local_id(0))) % 40), ((((convert_int(get_group_id(0))) & 1) * 20) + ((convert_int(get_local_id(0))) / 40)))));",
+                "float4 v_ = READ_IMAGEF(p0_comp, image_sampler, ((int4)(((convert_int(get_local_id(0))) % 40), ((((convert_int(get_group_id(0))) & 1) * 20) + ((convert_int(get_local_id(0))) / 40)), 0, 0)));",
                 "out_sum[(((convert_int(get_group_id(0))) * 800) + (convert_int(get_local_id(0))))] = ((convert_half(((float*)&v_)[((convert_int(get_group_id(0))) >> 1)])) + ((convert_half(((float*)&v_)[((convert_int(get_group_id(0))) >> 1)])) + (convert_half(((float*)&v_)[((convert_int(get_group_id(0))) >> 1)]))));",
             ],
         ),
@@ -1638,8 +1638,8 @@ class TestTextureToScalarReuseSSAFP16:
             ["global.texture", (1, 1, 40, 40, 4)],
             ["global.texture", (1, 1, 40, 40, 4)],
             [
-                "float4 v_ = READ_IMAGEF(p0_comp, image_sampler, ((int2)(((((convert_int(get_group_id(0))) * 24) + (convert_int(get_local_id(0)))) % 40), ((((convert_int(get_group_id(0))) * 8) + ((convert_int(get_local_id(0))) >> 3)) / 5))));",
-                "write_imageh(out_sum, (int2)(((((convert_int(get_group_id(0))) * 24) + (convert_int(get_local_id(0)))) % 40), ((((convert_int(get_group_id(0))) * 8) + ((convert_int(get_local_id(0))) >> 3)) / 5)), ((convert_half4(v_)) + ((convert_half4(v_)) + (convert_half4(v_)))));",
+                "float4 v_ = READ_IMAGEF(p0_comp, image_sampler, ((int4)(((((convert_int(get_group_id(0))) * 24) + (convert_int(get_local_id(0)))) % 40), ((((convert_int(get_group_id(0))) * 8) + ((convert_int(get_local_id(0))) >> 3)) / 5), 0, 0)));",
+                "write_imageh(out_sum, (int4)(((((convert_int(get_group_id(0))) * 24) + (convert_int(get_local_id(0)))) % 40), ((((convert_int(get_group_id(0))) * 8) + ((convert_int(get_local_id(0))) >> 3)) / 5), 0, 0), ((convert_half4(v_)) + ((convert_half4(v_)) + (convert_half4(v_)))));",
             ],
         ),
     )
@@ -1662,7 +1662,7 @@ class TestTextureToScalarReuseSSAFP32:
             ["global.texture", (1, 1, 40, 40, 4)],
             ["", (1, 4, 40, 40)],
             [
-                "float4 v_ = READ_IMAGEF(p0_comp, image_sampler, ((int2)(((convert_int(get_local_id(0))) % 40), ((((convert_int(get_group_id(0))) & 1) * 20) + ((convert_int(get_local_id(0))) / 40)))));",
+                "float4 v_ = READ_IMAGEF(p0_comp, image_sampler, ((int4)(((convert_int(get_local_id(0))) % 40), ((((convert_int(get_group_id(0))) & 1) * 20) + ((convert_int(get_local_id(0))) / 40)), 0, 0)));",
                 "out_sum[(((convert_int(get_group_id(0))) * 800) + (convert_int(get_local_id(0))))] = (((float*)&v_)[((convert_int(get_group_id(0))) >> 1)] + (((float*)&v_)[((convert_int(get_group_id(0))) >> 1)] + ((float*)&v_)[((convert_int(get_group_id(0))) >> 1)]));",
             ],
         ),
@@ -1695,10 +1695,10 @@ class TestLocalArrayToTexture:
             (1, 2, 38, 38, 4),
             [
                 "float out_local[4];",
-                "float4 v_ = READ_IMAGEF(p1_comp, image_sampler, ((int2)(((((convert_int(get_group_id(0))) * 14) + (convert_int(get_local_id(0)))) % 38), (((((convert_int(get_group_id(0))) * 64) + ((convert_int(get_local_id(0))) >> 1)) % 722) / 19))));",
-                "float4 v__1 = READ_IMAGEF(p2_comp, image_sampler, ((int2)(rw, (((((((convert_int(get_group_id(0))) * 32) + ((convert_int(get_local_id(0))) >> 2)) / 361) * 12) + (rcb * 3)) + rh))));",
+                "float4 v_ = READ_IMAGEF(p1_comp, image_sampler, ((int4)(((((convert_int(get_group_id(0))) * 14) + (convert_int(get_local_id(0)))) % 38), (((((convert_int(get_group_id(0))) * 64) + ((convert_int(get_local_id(0))) >> 1)) % 722) / 19), 0, 0)));",
+                "float4 v__1 = READ_IMAGEF(p2_comp, image_sampler, ((int4)(rw, rh, ((((((convert_int(get_group_id(0))) * 32) + ((convert_int(get_local_id(0))) >> 2)) / 361) * 4) + rcb), 0)));",
                 "out_local[cb_c] = (out_local[cb_c] + (((float*)&v_)[rcb] * ((float*)&v__1)[cb_c]));",
-                "write_imagef(out, (int2)(((((convert_int(get_group_id(0))) * 14) + (convert_int(get_local_id(0)))) % 38), ((((convert_int(get_group_id(0))) * 64) + ((convert_int(get_local_id(0))) >> 1)) / 19)), vload4(0, out_local + 0));",
+                "write_imagef(out, (int4)(((((convert_int(get_group_id(0))) * 14) + (convert_int(get_local_id(0)))) % 38), (((((convert_int(get_group_id(0))) * 64) + ((convert_int(get_local_id(0))) >> 1)) % 722) / 19), ((((convert_int(get_group_id(0))) * 32) + ((convert_int(get_local_id(0))) >> 2)) / 361), 0), vload4(0, out_local + 0));",
             ],
         ),
     )
