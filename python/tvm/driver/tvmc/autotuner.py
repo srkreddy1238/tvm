@@ -125,6 +125,12 @@ def add_tune_parser(subparsers, _, json_params):
         help="the maximum number of tuning trials to perform",
     )
     parser.add_argument(
+        "--trials-per-task",
+        type=int,
+        default=100,
+        help="the maximum number of tuning trials per task to perform",
+    )
+    parser.add_argument(
         "--tuning-records",
         metavar="PATH",
         help="path to an auto-tuning log file by AutoTVM.",
@@ -261,18 +267,20 @@ def drive_tune(args):
     tvmc_model = frontends.load_model(args.FILE, args.model_format, shape_dict=args.input_shapes)
 
     # Specify hardware parameters, although they'll only be used if autoscheduling.
-    hardware_params = auto_scheduler.HardwareParams(
-        num_cores=args.num_cores,
-        vector_unit_bytes=args.vector_unit_bytes,
-        cache_line_bytes=args.cache_line_bytes,
-        max_shared_memory_per_block=args.max_shared_memory_per_block,
-        max_local_memory_per_block=args.max_local_memory_per_block,
-        max_threads_per_block=args.max_threads_per_block,
-        max_vthread_extent=args.max_vthread_extent,
-        warp_size=args.warp_size,
-        target=args.target,
-        target_host=args.target_host,
-    )
+    hardware_params = None
+    if args.enable_autoscheduler:
+        hardware_params = auto_scheduler.HardwareParams(
+            num_cores=args.num_cores,
+            vector_unit_bytes=args.vector_unit_bytes,
+            cache_line_bytes=args.cache_line_bytes,
+            max_shared_memory_per_block=args.max_shared_memory_per_block,
+            max_local_memory_per_block=args.max_local_memory_per_block,
+            max_threads_per_block=args.max_threads_per_block,
+            max_vthread_extent=args.max_vthread_extent,
+            warp_size=args.warp_size,
+            target=args.target,
+            target_host=args.target_host,
+        )
 
     if args.rpc_tracker:
         parsed_url = urlparse("//%s" % args.rpc_tracker)
@@ -299,6 +307,7 @@ def drive_tune(args):
         hostname=rpc_hostname,
         port=rpc_port,
         trials=args.trials,
+        trails_per_task=args.trials_per_task,
         target_host=args.target_host,
         tuner=args.tuner,
         min_repeat_ms=args.min_repeat_ms,
@@ -415,6 +424,7 @@ def tune_model(
     hostname: Optional[str] = None,
     port: Optional[Union[int, str]] = 9090,
     trials: int = 10000,
+    trails_per_task: int = 100,
     target_host: Optional[str] = None,
     tuner: str = "xgb",
     min_repeat_ms: Optional[int] = None,
@@ -463,6 +473,8 @@ def tune_model(
         value is chosen as a decent average for most models, but larger models may need
         more trials to reach a good result while smaller models will converge with fewer
         trials.
+    trails_per_task : int, optional
+        The number of schedules to try out for each tuning task of model.
     tuner : str, optional
         The type of tuner to use when tuning with autotvm. Can be one of
         "ga", "gridsearch", "random", "xgb", "xgb_knob", "xgb_itervar", "xgb_curve",
@@ -558,6 +570,7 @@ def tune_model(
                 timeout=timeout,
                 min_repeat_ms=min_repeat_ms,
             )
+            builder = autotvm.LocalBuilder(build_func="ndk")
         else:
             logger.info("Starting localhost tuning.")
             runner_ctor = (
@@ -578,6 +591,8 @@ def tune_model(
                 runner = local_server.runner
             else:
                 runner = local_server
+
+            builder = autotvm.LocalBuilder(build_func="default")
 
         if enable_autoscheduler:
             tasks, weights = autoscheduler_get_tuning_tasks(
@@ -624,16 +639,14 @@ def tune_model(
         else:
             # In autotvm, trials is specified per task. We can convert the per-model input
             # provided to per-task trials by dividing by the number of tasks.
-            trials = int(max(1, trials / max(len(tasks), 1)))
+            trials = int(max(trails_per_task, trials / max(len(tasks), 1)))
             logger.info("Autotuning with %d trials per task.", trials)
 
             tuning_options = {
                 "tuner": tuner,
                 "trials": trials,
                 "early_stopping": early_stopping,
-                "measure_option": autotvm.measure_option(
-                    builder=autotvm.LocalBuilder(build_func="default"), runner=runner
-                ),
+                "measure_option": autotvm.measure_option(builder=builder, runner=runner),
                 "tuning_records": prior_records,
             }
             logger.info("Autotuning with configuration: %s", tuning_options)
@@ -853,6 +866,7 @@ def tune_tasks(
             tuner_obj.load_history(autotvm.record.load_from_file(tuning_records))
             logging.info("loaded history in %.2f sec(s)", time.time() - start_time)
 
+        tuner_obj.set_error_threshold(trials)
         tuner_obj.tune(
             n_trial=min(trials, len(tsk.config_space)),
             early_stopping=early_stopping,
