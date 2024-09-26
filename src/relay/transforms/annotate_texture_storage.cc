@@ -205,7 +205,12 @@ class StorageInfo : private transform::DeviceAwareExprVisitor {
           if (storage_scope_.count(call)) {
             ICHECK(!HasMixedStorageOutputs(call))
                 << "Mixed output storage scopes are not currently supported";
-            consumer_storage_scopes_[arg.operator->()].push_back("global.texture");
+            std::string scope = "global.texture";
+            if (const auto* ttype =
+                    GetRef<Expr>(arg.operator->())->checked_type().as<TensorTypeNode>()) {
+              scope = Scope(ttype->shape, GetVirtualDevice(GetRef<Expr>(call)));
+            }
+            consumer_storage_scopes_[arg.operator->()].push_back(scope);
           } else {
             consumer_storage_scopes_[arg.operator->()].push_back("global");
           }
@@ -273,9 +278,8 @@ class StorageInfo : private transform::DeviceAwareExprVisitor {
         scope += ".texture-weight";
       else if (a0 < depth_limit && a1 < spatial_limit && d2r < spatial_limit)
         scope += ".texture-nhwc";
-      else if (d1r < depth_limit && a1 < spatial_limit && a2 < spatial_limit)
+      else if (d1r < depth_limit && a2 < spatial_limit && a3 < spatial_limit)
         scope += ".texture";
-
       return scope;
     }
     return "global";
