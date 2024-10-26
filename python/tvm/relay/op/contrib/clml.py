@@ -353,52 +353,31 @@ def clml_pattern_table():
         pattern = is_op("nn.group_norm")(wildcard(), is_constant(), is_constant())
         return pattern
 
+    def layer_norm_pattern():
+        """Create a group norm pattern."""
+        pattern = is_op("nn.layer_norm")(wildcard(), is_constant(), is_constant())
+        return pattern
+
     def check_groupnorm_op(extract):
         call = extract
         # channel axis other than 1 is not supported in CLML
         if call.attrs["axis"] != 1:
             return False
 
-        if isinstance(call, tvm.relay.expr.TupleGetItem):
-            call = call.tuple_value
-            call_shape = call.checked_type.fields[0].shape
-            call_dtype = call.checked_type.fields[0].dtype
-        else:
-            call_shape = call.checked_type.shape
-            call_dtype = call.checked_type.dtype
+        return check_norm_op(call)
 
-        # int64, int32, flaot32  dtypes are not Supported in CLML
-        if call_dtype in ["int64", "int32", "float32"]:
+    def check_layernorm_op(extract):
+        call = extract
+        # width axis other than 3 is not supported in CLML
+        if call.attrs["axis"] != 3:
+            return False
+        call_shape = call.checked_type.shape
+
+        # channel dim other than 1 is not supported in CLML
+        if len(call_shape) == 4 and call_shape[1] != 1:
             return False
 
-        # Supports only upto 4 dim shapes
-        if len(call_shape) > 4:
-            return False
-        # Only support batch dim = 1
-        if isinstance(call_shape[0], tvm.tir.expr.Any) or call_shape[0] > 1:
-            return False
-        # Checking buffer indexing limit
-        for shape in call_shape:
-            if shape > 32768:
-                return False
-        # Avoid any operators with dtype Int64 and upsupported shape
-        for _arg in call.args:
-            t_arg = _arg if isinstance(_arg, tvm.relay.Tuple) else [_arg]
-            for arg in t_arg:
-                checked_type = (
-                    arg.tuple_value.checked_type.fields[arg.index]
-                    if isinstance(arg, tvm.relay.TupleGetItem)
-                    else arg.checked_type
-                )
-                if checked_type.dtype in ["int64", "int32", "float32"]:
-                    return False
-                # Supports only 4 dim shapes
-                if len(checked_type.shape) > 4:
-                    return False
-                for shape in checked_type.shape:
-                    if shape > 32768:
-                        return False
-        return True
+        return check_norm_op(call)
 
     def check_conv(extract):
         """Check conv pattern is supported by CLML."""
@@ -448,32 +427,6 @@ def clml_pattern_table():
         )
         if attrs.groups != 1 and not is_depthwise:
             return False
-        return True
-
-    def check_batchnorm(extract):
-        call = extract
-        if isinstance(call, tvm.relay.expr.TupleGetItem):
-            call = call.tuple_value
-            call_shape = call.checked_type.fields[0].shape
-            call_dtype = call.checked_type.fields[0].dtype
-        else:
-            call_shape = call.checked_type.shape
-            call_dtype = call.checked_type.dtype
-
-        # int64, int32 dtypes are not Supported in CLML
-        if call_dtype in ["int64", "int32"]:
-            return False
-
-        # Supports only upto 4 dim shapes
-        if len(call_shape) == 0 or len(call_shape) > 4:
-            return False
-        # Only support batch dim = 1
-        if isinstance(call_shape[0], tvm.tir.expr.Any) or call_shape[0] > 1:
-            return False
-        # Checking buffer indexing limit
-        for shape in call_shape:
-            if shape > 32768:
-                return False
         return True
 
     def check_conv_transpose(extract):
@@ -644,6 +597,37 @@ def clml_pattern_table():
             return False
         return True
 
+    def check_norm_op(extract):
+        call = extract
+        if isinstance(call, tvm.relay.expr.TupleGetItem):
+            call = call.tuple_value
+            call_shape = call.checked_type.fields[0].shape
+            call_dtype = call.checked_type.fields[0].dtype
+        else:
+            call_shape = call.checked_type.shape
+            call_dtype = call.checked_type.dtype
+        if isinstance(call, tvm.relay.expr.Call) and isinstance(call.op, tvm.ir.Op):
+            if call.op.name == "nn.batch_norm":
+                dtype_list = ["int64", "int32"]
+            else:
+                dtype_list = ["int64", "int32", "float32"]
+
+        # int64, int32 dtypes are not Supported in CLML
+        if call_dtype in dtype_list:
+            return False
+
+        # Supports only upto 4 dim shapes
+        if len(call_shape) == 0 or len(call_shape) > 4:
+            return False
+        # Only support batch dim = 1
+        if isinstance(call_shape[0], tvm.tir.expr.Any) or call_shape[0] > 1:
+            return False
+        # Checking buffer indexing limit
+        for shape in call_shape:
+            if shape > 32768:
+                return False
+        return True
+
     pass_context = tvm.get_global_func("transform.GetCurrentPassContext")()
     target_version = (
         pass_context.config["relay.ext.clml.target_version"]
@@ -659,7 +643,7 @@ def clml_pattern_table():
         ("clml.dense2d", dense2d_pattern(), check_dense2d_op),
         ("clml.pad", pad_pattern(), check_pad_op),
         ("clml.concat", concat_pattern(), check_concat_op),
-        ("clml.batch_norm", batch_norm_pattern(), check_batchnorm),
+        ("clml.batch_norm", batch_norm_pattern(), check_norm_op),
         ("clml.add", is_op("add")(wildcard(), wildcard()), check_binary_op),
         ("clml.subtract", is_op("subtract")(wildcard(), wildcard()), check_binary_op),
         ("clml.multiply", is_op("multiply")(wildcard(), wildcard()), check_binary_op),
@@ -685,6 +669,7 @@ def clml_pattern_table():
     ]
     CLML4_ops = [
         ("clml.group_norm", group_norm_pattern(), check_groupnorm_op),
+        ("clml.layer_norm", layer_norm_pattern(), check_layernorm_op),
     ]
     if (target_version >= 4) and (clml_sdk_version() >= 4):
         return CLML3_ops + CLML4_ops

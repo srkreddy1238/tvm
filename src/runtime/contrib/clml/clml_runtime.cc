@@ -782,6 +782,9 @@ class CLMLRuntime : public JSONRuntimeBase {
 #if (CL_QCOM_ML_OPS_H_MAJOR_VERSION >= 4)
         else if ("nn.group_norm" == op_name)
           CreateGroupNormLayer(&layer_, node, nid);
+        else if ("nn.layer_norm" == op_name)
+          CreateLayerNormLayer(&layer_, node, nid);
+
 #endif
         else
           LOG(FATAL) << "Unsupported op: " << op_name;
@@ -1742,6 +1745,53 @@ class CLMLRuntime : public JSONRuntimeBase {
   }
 
 #if (CL_QCOM_ML_OPS_H_MAJOR_VERSION >= 4)
+
+  /*!
+   * \brief Create a layer norm layer.
+   *
+   *
+   * \param layer The CLML layer to build. Containing inputs, outputs and the CLML function.
+   * \param node The JSON representation of the operator.
+   * \param nid The node index of JSON graph node, which points to this operator.
+   */
+  void CreateLayerNormLayer(CachedLayer* layer, const JSONGraphNode& node, size_t nid) {
+    cl_int result = 0;
+    cl_ml_op_qcom op = nullptr;
+    DLDataType tvm_dtype = node.GetOpDataType()[0];
+    cl_channel_type cl_dtype = MakeCLDataType(tvm_dtype);
+    cl_arithmetic_mode_qcom cl_arithmetic_mode = MakeCLArithMode(cl_dtype, cl_dtype);
+    auto input =
+        MakeCLMLTensorFromJSONEntry(node.GetInputs()[0].id_, {}, CL_TENSOR_LAYOUT_OPTIMAL_QCOM,
+                                    cl_dtype, CL_TENSOR_USAGE_TNN_QCOM);
+    int axis = std::stoi(node.GetAttr<std::vector<std::string>>("axis")[0]);
+    float epsilon = std::stof(node.GetAttr<std::vector<std::string>>("epsilon")[0]);
+
+    auto ln_dims = GetTensorDims(nodes_[node.GetInputs()[1].id_]);
+    std::vector<size_t> ln_shape = {1, 1, 1, 1};
+    ln_shape[axis] = ln_dims.n;
+
+    auto ln_scale = std::make_shared<cl_ml_tensor_memory_desc_qcom>();
+    auto ln_bias = std::make_shared<cl_ml_tensor_memory_desc_qcom>();
+
+    ln_scale = MakeCLMLTensorFromJSONEntry(node.GetInputs()[1].id_, ln_shape,
+                                           CL_TENSOR_LAYOUT_OPTIMAL_QCOM, cl_dtype,
+                                           CL_TENSOR_USAGE_PARAMETER_QCOM);
+    ln_bias = MakeCLMLTensorFromJSONEntry(node.GetInputs()[2].id_, ln_shape,
+                                          CL_TENSOR_LAYOUT_OPTIMAL_QCOM, cl_dtype,
+                                          CL_TENSOR_USAGE_PARAMETER_QCOM);
+
+    auto output = MakeCLMLTensorFromJSONEntry(nid, {}, CL_TENSOR_LAYOUT_OPTIMAL_QCOM, cl_dtype,
+                                              CL_TENSOR_USAGE_TNN_QCOM);
+    cl_ml_op_layernorm_desc_qcom ln_desc = {CL_LAYERNORM_MODE_WIDTH_QCOM, epsilon,
+                                            cl_arithmetic_mode};
+    CLML_CALL_clCreateMLOpLayerNormForwardQCOM(CLML_CTX, nullptr, &ln_desc, input->tensor,
+                                               ln_scale->tensor, ln_bias->tensor, output->tensor,
+                                               &op, layer_.tuning_cache);
+
+    ICHECK(op) << "Layernorm Error:" << result;
+    layer->function.push_back(op);
+    return;
+  }
 
   /*!
    * \brief Create a GroupNorm(X) layer.

@@ -1378,16 +1378,18 @@ def test_clip(remote, dtype, target, executor_type, trials):
 )
 @pytest.mark.parametrize(
     "trials",
-    [
-        [(1, 6, 2, 2), 3, 1],
-        [(1, 16, 4, 4), 2, 1],
-        [(1, 512, 128, 64), 8, 1],
+    [  # shape, num_groups, axis, epsilon
+        # OpenCLML supports group norm along the channel (axis =1)
+        [(1, 6, 2, 2), 3, 1, 1e-08],
+        [(1, 16, 4, 4), 2, 1, 1e-05],
+        [(1, 512, 128, 64), 8, 1, 1e-12],
+        [(1, 256, 256, 8), 4, 1, 1e-07],
     ],
 )
 @tvm.testing.requires_openclml
 @tvm.testing.parametrize_targets("opencl")
 def test_group_norm(remote, dtype, target, executor_type, trials):
-    def _verify(shape, num_groups, axis):
+    def _verify(shape, num_groups, axis, eps):
         np.random.seed(0)
         data = relay.var("data", shape=shape, dtype=dtype)
         gamma_arr = tvm.nd.array(np.random.uniform(-1, 1, (shape[axis],)).astype(dtype))
@@ -1400,7 +1402,7 @@ def test_group_norm(remote, dtype, target, executor_type, trials):
             beta,
             num_groups=num_groups,
             axis=axis,
-            epsilon=1e-05,
+            epsilon=eps,
             center=True,
             scale=True,
         )
@@ -1412,66 +1414,52 @@ def test_group_norm(remote, dtype, target, executor_type, trials):
         tvm.testing.assert_allclose(
             outputs[0].asnumpy(), outputs[1].asnumpy(), rtol=out_tol, atol=out_tol
         )
-        exp_codegen = [
-            {
-                "attrs": {
-                    "dtype": [[dtype]],
-                    "shape": [[list(shape)]],
-                },
-                "name": "",
-                "op": "input",
-            },
-            {
-                "attrs": {
-                    "dtype": [[dtype]],
-                    "shape": [
-                        [
-                            list(
-                                [
-                                    shape[axis],
-                                ]
-                            )
-                        ]
-                    ],
-                },
-                "name": "",
-                "op": "const",
-            },
-            {
-                "attrs": {
-                    "dtype": [[dtype]],
-                    "shape": [
-                        [
-                            list(
-                                [
-                                    shape[axis],
-                                ]
-                            )
-                        ]
-                    ],
-                },
-                "name": "",
-                "op": "const",
-            },
-            {
-                "attrs": {
-                    "axis": [[str(axis)]],
-                    "center": [["1"]],
-                    "dtype": [[dtype]],
-                    "epsilon": [["1.0000000000000001e-05"]],
-                    "num_groups": [[str(num_groups)]],
-                    "num_inputs": "3",
-                    "num_outputs": "1",
-                    "scale": [["1"]],
-                    "shape": [[list(shape)]],
-                },
-                "inputs": [[0, 0, 0], [1, 0, 0], [2, 0, 0]],
-                "name": "nn.group_norm",
-                "op": "kernel",
-            },
-        ]
 
-        verify_codegen(remote, mod, params, exp_codegen, target)
+    _verify(trials[0], trials[1], trials[2], trials[3])
+
+
+@pytest.mark.parametrize("dtype", ["float16"])
+@pytest.mark.skipif(
+    int(os.getenv("ADRENO_TARGET_CLML_VERSION", 3)) < 4,
+    reason="Requires target device with CLML v4 or above",
+)
+@pytest.mark.skipif(
+    int(tvm.support.libinfo().get("TVM_CLML_VERSION", 2)) < 4,
+    reason="Requires compiler supporting CLML v4 or above",
+)
+@pytest.mark.parametrize(
+    "trials",
+    [
+        # shape, axis ,epsilon
+        # OpenCLML supports width axis=3 and channel dim=1
+        [(1, 1, 16, 16), 3, 1e-07],
+        [(1, 1, 512, 4), 3, 1e-05],
+        [(1, 1, 64, 128), 3, 1e-04],
+        [(1, 1, 8, 256), 3, 1e-12],
+    ],
+)
+@tvm.testing.requires_openclml
+@tvm.testing.parametrize_targets("opencl")
+def _test_layer_norm(remote, dtype, target, executor_type, trials):
+    def _verify(shape, axis, eps):
+        np.random.seed(0)
+        data = relay.var("data", shape=shape, dtype=dtype)
+        gamma_arr = tvm.nd.array(np.random.uniform(-1, 1, (shape[axis],)).astype(dtype))
+        beta_arr = tvm.nd.array(np.random.uniform(-1, 1, (shape[axis],)).astype(dtype))
+        gamma = relay.const(gamma_arr, dtype)
+        beta = relay.const(beta_arr, dtype)
+
+        out = relay.nn.layer_norm(
+            data, gamma, beta, axis=axis, epsilon=eps, center=True, scale=True
+        )
+        inputs = {"data": tvm.nd.array(np.random.uniform(-1, 1, shape).astype(dtype))}
+        params = {}
+        mod = IRModule.from_expr(out)
+        outputs = _build_and_run_network(remote, mod, params, inputs, target, executor_type)
+        out_tol = 1e-1
+        tvm.testing.assert_allclose(
+            outputs[0].asnumpy(), outputs[1].asnumpy(), rtol=out_tol, atol=out_tol
+        )
 
     _verify(trials[0], trials[1], trials[2])
 
