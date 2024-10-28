@@ -20,6 +20,7 @@
 ENVIRONMENT=""
 RPC_PORT=""
 ADB_SERIAL=""
+TRACE_ENABLE=0
 LISTEN_PORT=5000
 
 function usage() {
@@ -51,6 +52,10 @@ while [[ $# -gt 0 ]]; do
       LISTEN_PORT="$2"
       shift # past argument
       shift # past value
+      ;;
+    -t|--trace)
+      TRACE_ENABLE=1
+      shift # past argument
       ;;
     -h|--help)
       usage
@@ -101,6 +106,7 @@ case ${ENVIRONMENT} in
     TARGET_FOLDER=/data/local/tmp/tvm_ci-${USER}
     CPP_LIB=`find ${ANDROID_NDK_HOME} -name libc++_shared.so | grep aarch64`
     adb shell "mkdir -p ${TARGET_FOLDER}"
+    adb shell "mkdir -p ${TARGET_FOLDER}/trace"
     adb push build-adreno-target/tvm_rpc ${TARGET_FOLDER}/tvm_rpc-${USER}
     adb push build-adreno-target/libtvm_runtime.so ${TARGET_FOLDER}
     if [ -f ${CPP_LIB} ] ; then
@@ -115,7 +121,16 @@ case ${ENVIRONMENT} in
     adb forward tcp:$((LISTEN_PORT + 1)) tcp:$((LISTEN_PORT + 1))
     adb forward tcp:$((LISTEN_PORT + 2)) tcp:$((LISTEN_PORT + 2))
     adb forward tcp:$((LISTEN_PORT + 3)) tcp:$((LISTEN_PORT + 3))
-    adb shell "cd ${TARGET_FOLDER}; killall -9 tvm_rpc-${USER}; sleep 2; export CLML_IS_TUNING_RUN=1; export CLML_TUNING_CACHE=clml.bin; LD_LIBRARY_PATH=${TARGET_FOLDER}/ ./tvm_rpc-${USER} server --host=0.0.0.0 --port=${LISTEN_PORT} --port-end=$((LISTEN_PORT + 10)) --tracker=127.0.0.1:${TVM_TRACKER_PORT} --key=${RPC_DEVICE_KEY}"
+    adb shell "cd ${TARGET_FOLDER}; echo \"killall -9 tvm_rpc-${USER}\" > exec.sh"
+    if [ $TRACE_ENABLE -eq 1 ]; then
+      adb shell "cd ${TARGET_FOLDER}; echo \"export PROFILE_SHADER_DUMP_PATH=${TARGET_FOLDER}/trace \" >> exec.sh"
+    fi
+    adb shell "cd ${TARGET_FOLDER}; echo \"export CLML_DISABLE_RECORDABLE_QUEUE=0\" >> exec.sh"
+    adb shell "cd ${TARGET_FOLDER}; echo \"export CLML_IS_TUNING_RUN=1\" >> exec.sh"
+    adb shell "cd ${TARGET_FOLDER}; echo \"export CLML_TUNING_CACHE=clml.bin\" >> exec.sh"
+    adb shell "cd ${TARGET_FOLDER}; echo LD_LIBRARY_PATH=${TARGET_FOLDER} ./tvm_rpc-${USER} server --host=0.0.0.0 --port=${LISTEN_PORT} --port-end=$((LISTEN_PORT + 10)) --tracker=127.0.0.1:${TVM_TRACKER_PORT} --key=${RPC_DEVICE_KEY} >> exec.sh"
+
+    adb shell "cd ${TARGET_FOLDER}; source exec.sh"
     ;;
 
   "query")
