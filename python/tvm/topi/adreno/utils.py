@@ -602,15 +602,31 @@ def get_texture_storage(shape):
     # certain limitation of the Qualcomm devices. Subject to be determined for certain device
     # individually, but until we have access to remote device during compilation, we have to
     # define it uniformly for all target devices
-    # limit = 16384
-    limit = tvm.target.Target.current().attrs["texture_spatial_limit"]
+    # spatial_limit = 16384, depth_limit = 2048
+    spatial_limit = tvm.target.Target.current().attrs["texture_spatial_limit"]
+    depth_limit = tvm.target.Target.current().attrs["texture_depth_limit"]
 
-    if shape[0] * shape[1] * shape[2] < limit and shape[3] < limit:
-        return "global.texture"
-    elif shape[0] * shape[1] < limit and shape[2] * shape[3] < limit:
-        return "global.texture-nhwc"
-    else:
-        return "global.texture-weight"
+    if len(shape) > 4:
+        if shape[0] < spatial_limit and shape[1] * shape[2] * shape[3] < spatial_limit:
+            return "global.texture-weight"
+        elif shape[0] < depth_limit and shape[2] * shape[3] < spatial_limit:
+            return "global.texture-nhwc"
+        elif (
+            shape[0] * shape[1] < depth_limit
+            and shape[2] < spatial_limit
+            and shape[3] < spatial_limit
+        ):
+            return "global.texture"
+    elif len(shape) > 3:
+        if shape[0] < spatial_limit and shape[1] * shape[2] < spatial_limit:
+            return "global.texture-weight"
+        elif shape[0] < depth_limit and shape[1] < spatial_limit and shape[2] < spatial_limit:
+            return "global.texture"
+    elif len(shape) == 3:
+        if shape[0] < spatial_limit and shape[1] < spatial_limit:
+            return "global.texture-weight"
+
+    return "global"
 
 
 @register_func("tvm.info.mem.global.texture")
@@ -620,7 +636,7 @@ def mem_info_global_texture_variants():
     return tvm.ir.make_node(
         "MemoryInfo",
         unit_bits=16,
-        max_num_bits=16384 * 16384 * 4 * 32,
+        max_num_bits=2048 * 16384 * 16384 * 4 * 32,
         max_simd_bits=4 * 32,
         head_address=None,
     )

@@ -271,7 +271,7 @@ void CodeGenOpenCL::PrintType(const Type& type, std::ostream& os) {  // NOLINT(*
     return PrintType(ptr->dtype, os);
   } else if (auto* ptr = type.as<PointerTypeNode>()) {
     if (runtime::IsTextureStorage(std::string(ptr->storage_scope))) {
-      os << "image2d_t";
+      os << "image2d_array_t";
     } else {
       PrintType(ptr->element_type, os);
       os << '*';
@@ -431,12 +431,16 @@ void CodeGenOpenCL::VisitExpr_(const CallNode* op, std::ostream& os) {
     }
     this->PrintExpr(op->args[0], os);
     os << ", ";
-    os << "(int2)(";
+    os << "(int4)(";
     this->PrintExpr(op->args[1], os);
     os << ", ";
     this->PrintExpr(op->args[2], os);
-    os << "), ";
+    os << ", ";
     this->PrintExpr(op->args[3], os);
+    os << ", ";
+    this->PrintExpr(make_const(DataType::Int(32), 0), os);
+    os << "), ";
+    this->PrintExpr(op->args[4], os);
     os << ")";
   } else if (op->op.same_as(builtin::texture2d_load())) {
     enable_compliant_texture_reads_ = true;
@@ -452,10 +456,14 @@ void CodeGenOpenCL::VisitExpr_(const CallNode* op, std::ostream& os) {
     this->PrintExpr(op->args[0], ss);
     ss << ", ";
     ss << "image_sampler, ";
-    ss << "((int2)(";
+    ss << "((int4)(";
     this->PrintExpr(op->args[1], ss);
     ss << ", ";
     this->PrintExpr(op->args[2], ss);
+    ss << ", ";
+    this->PrintExpr(op->args[3], ss);
+    ss << ", ";
+    this->PrintExpr(make_const(DataType::Int(32), 0), ss);
     ss << ")))";
 
     std::string rhs = SSAGetID(ss.str(), op->dtype.with_lanes(4));

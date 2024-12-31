@@ -121,7 +121,7 @@ class TextureFlattener : public TextureLoweringBase {
       args.push_back(StringImm(storage_scope));
       args.push_back(IntImm(DataType::Int(64), 2));  // 2d
       args.push_back(Call(DataType::Handle(), builtin::tvm_stack_make_shape(),
-                          {texture.width, texture.height}));
+                          {texture.width, texture.height, texture.depth}));
       stmt = LetStmt(buffer_var, Call(buffer_var.dtype(), builtin::nd_mem_alloc_with_scope(), args),
                      body);
     }
@@ -166,9 +166,13 @@ class TextureFlattener : public TextureLoweringBase {
     } else {
       args.push_back(buffer->data);
     }
-    Array<PrimExpr> row_dims, row_indices, col_dims, col_indices;
+    Array<PrimExpr> row_dims, row_indices, col_dims, col_indices, depth_dims, depth_indices;
+    size_t axis = DefaultTextureLayoutSeparator(op->buffer->shape.size(), GetStorageScope(buffer));
     for (size_t i = 0; i < op->buffer->shape.size() - 1; i++) {
-      if (i < DefaultTextureLayoutSeparator(op->buffer->shape.size(), GetStorageScope(buffer))) {
+      if (i < (axis - 1)) {
+        depth_dims.push_back(op->buffer->shape[i]);
+        depth_indices.push_back(op->indices[i]);
+      } else if (i < axis) {
         col_dims.push_back(op->buffer->shape[i]);
         col_indices.push_back(op->indices[i]);
       } else {
@@ -178,8 +182,10 @@ class TextureFlattener : public TextureLoweringBase {
     }
     PrimExpr row_offset = SimplifyOffset(row_dims, row_indices);
     PrimExpr col_offset = SimplifyOffset(col_dims, col_indices);
+    PrimExpr depth_offset = SimplifyOffset(depth_dims, depth_indices);
     args.push_back(row_offset);
     args.push_back(col_offset);
+    args.push_back(depth_offset);
     return args;
   }
 

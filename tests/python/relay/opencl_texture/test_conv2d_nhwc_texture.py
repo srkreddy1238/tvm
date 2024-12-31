@@ -894,5 +894,143 @@ def test_conv2d_to_3_channels(remote, target, executor_type, dtype):
         )
 
 
+@tvm.testing.requires_opencl
+@tvm.testing.parametrize_targets("opencl -device=adreno")
+def test_conv2d_fallback_buffer_height(remote, target, executor_type, dtype):
+    input_shape = (1, 65536, 8, 2)
+    filter_shape = (8, 65536, 1, 1)
+    bias_shape = (1, 8, 1, 1)
+    A = relay.var("data", shape=input_shape, dtype=dtype)
+    B = relay.var("weight", shape=filter_shape, dtype=dtype)
+    bias = relay.var("bias", shape=bias_shape, dtype=dtype)
+
+    conv = relay.nn.conv2d(
+        A,
+        B,
+        data_layout="NCHW",
+        kernel_layout="OIHW",
+        padding=[0, 0, 0, 0],
+        strides=[1, 1],
+        out_dtype=dtype,
+        channels=8,
+        kernel_size=(1, 1),
+    )
+    D = relay.op.add(conv, bias)
+    D = relay.op.nn.relu(D)
+
+    mod = relay.Function([A, B, bias], D)
+    np.random.seed(0)
+    initializer = relay.testing.init.Xavier()
+    filter_data = np.zeros(filter_shape).astype(dtype)
+    bias_data = np.zeros(bias_shape).astype(dtype)
+    initializer("weight", filter_data)
+    initializer("bias", bias_data)
+    params1 = {
+        "weight": tvm.nd.array(filter_data),
+        "bias": tvm.nd.array(bias_data),
+    }
+
+    if executor_type == "ge":
+        build_run_compare(
+            remote, mod, params1, {"data": input_shape}, {"data": dtype}, target, [], gpu_preprocess
+        )
+    else:
+        build_run_compare_vm(
+            remote, mod, params1, {"data": input_shape}, {"data": dtype}, target, [], gpu_preprocess
+        )
+
+
+@tvm.testing.requires_opencl
+@tvm.testing.parametrize_targets("opencl -device=adreno")
+def test_conv2d_fallback_buffer_width(remote, target, executor_type, dtype):
+    input_shape = (8, 8, 8, 16384)
+    filter_shape = (8, 8, 1, 1)
+    bias_shape = (1, 8, 1, 1)
+    A = relay.var("data", shape=input_shape, dtype=dtype)
+    B = relay.var("weight", shape=filter_shape, dtype=dtype)
+    bias = relay.var("bias", shape=bias_shape, dtype=dtype)
+
+    conv = relay.nn.conv2d(
+        A,
+        B,
+        data_layout="NCHW",
+        kernel_layout="OIHW",
+        padding=[0, 0, 0, 0],
+        strides=[1, 1],
+        out_dtype=dtype,
+        channels=8,
+        kernel_size=(1, 1),
+    )
+    D = relay.op.add(conv, bias)
+    D = relay.op.nn.relu(D)
+
+    mod = relay.Function([A, B, bias], D)
+    np.random.seed(0)
+    initializer = relay.testing.init.Xavier()
+    filter_data = np.zeros(filter_shape).astype(dtype)
+    bias_data = np.zeros(bias_shape).astype(dtype)
+    initializer("weight", filter_data)
+    initializer("bias", bias_data)
+    params1 = {
+        "weight": tvm.nd.array(filter_data),
+        "bias": tvm.nd.array(bias_data),
+    }
+
+    if executor_type == "ge":
+        build_run_compare(
+            remote, mod, params1, {"data": input_shape}, {"data": dtype}, target, [], gpu_preprocess
+        )
+    else:
+        build_run_compare_vm(
+            remote, mod, params1, {"data": input_shape}, {"data": dtype}, target, [], gpu_preprocess
+        )
+
+
+@tvm.testing.requires_opencl
+@tvm.testing.parametrize_targets("opencl -device=adreno")
+def test_conv2d_fallback_buffer_depth(remote, target, executor_type, dtype):
+    input_shape = (2, 4096, 128, 128)
+    filter_shape = (8, 4096, 1, 1)
+    bias_shape = (1, 8, 1, 1)
+    A = relay.var("data", shape=input_shape, dtype=dtype)
+    B = relay.var("weight", shape=filter_shape, dtype=dtype)
+    bias = relay.var("bias", shape=bias_shape, dtype=dtype)
+
+    conv = relay.nn.conv2d(
+        A,
+        B,
+        data_layout="NCHW",
+        kernel_layout="OIHW",
+        padding=[0, 0, 0, 0],
+        strides=[1, 1],
+        out_dtype=dtype,
+        channels=8,
+        kernel_size=(1, 1),
+    )
+    D = relay.op.add(conv, bias)
+    D = relay.op.nn.relu(D)
+
+    mod = relay.Function([A, B, bias], D)
+    np.random.seed(0)
+    initializer = relay.testing.init.Xavier()
+    filter_data = np.zeros(filter_shape).astype(dtype)
+    bias_data = np.zeros(bias_shape).astype(dtype)
+    initializer("weight", filter_data)
+    initializer("bias", bias_data)
+    params1 = {
+        "weight": tvm.nd.array(filter_data),
+        "bias": tvm.nd.array(bias_data),
+    }
+
+    if executor_type == "ge":
+        build_run_compare(
+            remote, mod, params1, {"data": input_shape}, {"data": dtype}, target, [], gpu_preprocess
+        )
+    else:
+        build_run_compare_vm(
+            remote, mod, params1, {"data": input_shape}, {"data": dtype}, target, [], gpu_preprocess
+        )
+
+
 if __name__ == "__main__":
     tvm.testing.main()

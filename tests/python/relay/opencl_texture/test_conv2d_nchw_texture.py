@@ -663,12 +663,12 @@ def test_residual_block(remote, target, executor_type, dtype):
     else:
         static_memory_scope = [
             "",
-            "global.texture",
+            "global.texture-weight",
             "global",
             "global.texture-weight",
-            "global.texture",
             "global.texture-weight",
-            "global.texture",
+            "global.texture-weight",
+            "global.texture-weight",
             "global",
             "",
             "",
@@ -789,11 +789,11 @@ def test_concat(remote, target, executor_type, dtype):
 
     static_memory_scope = [
         "",
-        "global.texture",
+        "global.texture-weight",
         "global",
         "global.texture-weight",
         "global",
-        "global.texture-nhwc",
+        "global.texture-weight",
         "global",
         "global.texture-weight",
         "",
@@ -933,16 +933,16 @@ def test_pooling_branching_texture_params(remote, target, executor_type, dtype):
 
     static_memory_scope = [
         "",
-        "global.texture",
         "global.texture-weight",
-        "global.texture",
-        "global.texture",
-        "global",
+        "global.texture-weight",
+        "global.texture-weight",
         "global.texture-weight",
         "global",
         "global.texture-weight",
-        "global.texture",
-        "global.texture",
+        "global",
+        "global.texture-weight",
+        "global.texture-weight",
+        "global.texture-weight",
         "",
         "",
     ]
@@ -1076,15 +1076,15 @@ def test_branching_texture_params(remote, target, executor_type, dtype):
 
     static_memory_scope = [
         "",
-        "global.texture",
         "global.texture-weight",
-        "global.texture",
-        "global",
+        "global.texture-weight",
         "global.texture-weight",
         "global",
         "global.texture-weight",
-        "global.texture",
-        "global.texture",
+        "global",
+        "global.texture-weight",
+        "global.texture-weight",
+        "global.texture-weight",
         "",
         "",
     ]
@@ -1181,10 +1181,10 @@ def test_conv2d_different_lowering_same_op(remote, target, executor_type, dtype)
 
     static_memory_scope = [
         "",
-        "global.texture",
         "global.texture-weight",
-        "global.texture",
-        "global.texture",
+        "global.texture-weight",
+        "global.texture-weight",
+        "global.texture-weight",
         "",
         "",
     ]
@@ -1348,11 +1348,11 @@ def test_injective_nwo_inputs1(remote, target, executor_type, dtype):
 
     static_memory_scope = [
         "",
-        "global.texture",
+        "global.texture-weight",
         "global",
-        "global.texture",
+        "global.texture-weight",
         "global",
-        "global.texture",
+        "global.texture-weight",
         "global",
         "global",
     ]
@@ -1462,12 +1462,12 @@ def test_injective_nwo_inputs2(remote, target, executor_type, dtype):
 
     static_memory_scope = [
         "",
-        "global.texture",
+        "global.texture-weight",
         "global",
-        "global.texture",
+        "global.texture-weight",
         "global",
         "global",
-        "global.texture",
+        "global.texture-weight",
         "global",
     ]
     if executor_type == "ge":
@@ -1555,7 +1555,7 @@ def test_conv2d_weight_on_buffers(remote, target, executor_type, dtype):
     if executor_type == "ge":
         static_memory_scope = [
             "",
-            "global.texture",
+            "global.texture-nhwc",
             "global",
             "global.texture-weight",
             "",
@@ -1574,7 +1574,7 @@ def test_conv2d_weight_on_buffers(remote, target, executor_type, dtype):
         static_memory_scope = """
         VM VirtualDevice[0]: device type 1, id 0 and mem_scope
         VM VirtualDevice[1]: device type 4, id 0 and mem_scope
-        VM VirtualDevice[2]: device type 4, id 0 and mem_scope global.texture
+        VM VirtualDevice[2]: device type 4, id 0 and mem_scope global.texture-nhwc
         VM VirtualDevice[3]: device type 4, id 0 and mem_scope global
         VM VirtualDevice[4]: device type 4, id 0 and mem_scope global.texture-weight
         """
