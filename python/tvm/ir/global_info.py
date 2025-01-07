@@ -17,6 +17,7 @@
 """Global Info."""
 import tvm
 from tvm.runtime.object import Object
+from tvm._ffi.runtime_ctypes import Device
 from . import _ffi_api
 
 
@@ -51,4 +52,6 @@ class VDevice(GlobalInfo):
     ) -> None:
         if isinstance(target, (dict, str)):
             target = tvm.target.Target(tvm.runtime.convert(target))
+        if isinstance(target, Device):
+            target = tvm.target.Target.from_device(target)
         self.__init_handle_by_constructor__(_ffi_api.VDevice, target, vdevice_id, memory_scope)

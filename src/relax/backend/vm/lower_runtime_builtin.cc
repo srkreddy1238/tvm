@@ -88,7 +88,13 @@ class LowerRuntimeBuiltinMutator : public ExprMutator {
   Expr MakeMemAllocTensor(const Call& call) {
     PrimValue offset = Downcast<PrimValue>(call->args[1]);
     DataTypeImm dtype = Downcast<DataTypeImm>(call->args[3]);
-    return Call(vm_alloc_tensor_op_, {call->args[0], offset, call->args[2], dtype}, Attrs());
+
+    Array<Expr> call_args = {call->args[0], offset, call->args[2], dtype};
+    if (5 == call->args.size()) {
+      call_args.push_back(call->args[4]);
+    }
+
+    return Call(vm_alloc_tensor_op_, call_args, Attrs());
   }
 
   Expr MakeMemKillObject(const Call& call) {

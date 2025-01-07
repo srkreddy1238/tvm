@@ -18,3 +18,4 @@
 Adreno schedule rules.
 """
 from .convolution import Conv2d
+from .layout_transform import TextureTranspose

@@ -149,8 +149,15 @@ class StorageObj : public Object {
   /*! \brief Allocate an NDArray from a given piece of storage. */
   TVM_DLL NDArray AllocNDArray(int64_t offset, ShapeTuple shape, DLDataType dtype);
 
+  /*! \brief Allocate an NDArray with memory scope from a given piece of storage. */
+  TVM_DLL NDArray AllocNDArrayScoped(int64_t offset, ShapeTuple shape, DLDataType dtype,
+                                     String scope = "global");
+
   /*! \brief The deleter for an NDArray when allocated from underlying storage. */
   static void Deleter(Object* ptr);
+
+  /*! \brief The deleter for an NDArray when allocated from underlying storage. */
+  static void ScopedDeleter(Object* ptr);
 
   ~StorageObj() {
     if (allocator) {

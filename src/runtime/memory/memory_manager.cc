@@ -66,6 +66,18 @@ void StorageObj::Deleter(Object* obj) {
   delete ptr;
 }
 
+void StorageObj::ScopedDeleter(Object* obj) {
+  auto* ptr = static_cast<NDArray::Container*>(obj);
+
+  // Let Device API handle proper cleanup of view
+  tvm::runtime::DeviceAPI::Get(ptr->dl_tensor.device)
+      ->FreeDataSpaceView(ptr->dl_tensor.device, ptr->dl_tensor.data);
+
+  StorageObj* storage = reinterpret_cast<StorageObj*>(ptr->manager_ctx);
+  storage->DecRef();
+  delete ptr;
+}
+
 inline void VerifyDataType(DLDataType dtype) {
   ICHECK_GE(dtype.lanes, 1);
   if (dtype.code == kDLFloat) {
@@ -82,6 +94,40 @@ inline size_t GetDataAlignment(const DLTensor& arr) {
   size_t align = (arr.dtype.bits / 8) * arr.dtype.lanes;
   if (align < kAllocAlignment) return kAllocAlignment;
   return align;
+}
+
+NDArray StorageObj::AllocNDArrayScoped(int64_t offset, ShapeTuple shape, DLDataType dtype,
+                                       String scope) {
+  LOG(WARNING) << "StorageObj::AllocNDArrayScoped:" << scope
+               << " Device:" << this->buffer.device.device_type << " : "
+               << this->buffer.device.device_id;
+  if (scope == "global") {
+    return AllocNDArray(offset, shape, dtype);
+  }
+  VerifyDataType(dtype);
+
+  void* data =
+      DeviceAPI::Get(this->buffer.device)
+          ->AllocDataSpaceView(this->buffer.device, this->buffer.data, shape, dtype, scope);
+
+  NDArray::Container* container =
+      new NDArray::Container(data, shape, dtype, this->buffer.device, scope);
+  container->dl_tensor.byte_offset = offset;
+
+  container->SetDeleter(StorageObj::ScopedDeleter);
+  size_t needed_size = DeviceAPI::Get(this->buffer.device)->GetDataSize(container->dl_tensor);
+  this->IncRef();
+
+  container->manager_ctx = reinterpret_cast<void*>(this);
+
+  NDArray ret(GetObjectPtr<Object>(container));
+  // RAII in effect, now run the check.
+
+  ICHECK(offset + needed_size <= this->buffer.size)
+      << "storage allocation failure, attempted to allocate " << needed_size << " at offset "
+      << offset << " in region that is " << this->buffer.size << "bytes";
+
+  return ret;
 }
 
 NDArray StorageObj::AllocNDArray(int64_t offset, ShapeTuple shape, DLDataType dtype) {
@@ -196,12 +242,18 @@ void MemoryManager::Clear() {
 NDArray Allocator::Empty(ShapeTuple shape, DLDataType dtype, DLDevice dev,
                          Optional<String> mem_scope) {
   VerifyDataType(dtype);
-  NDArray::Container* container = new NDArray::Container(nullptr, shape, dtype, dev);
+  NDArray::Container* container = new NDArray::Container(nullptr, shape, dtype, dev, mem_scope);
   container->SetDeleter(BufferDeleter);
-  size_t size = DeviceAPI::Get(dev)->GetDataSize(container->dl_tensor, mem_scope);
-  size_t alignment = GetDataAlignment(container->dl_tensor);
   Buffer* buffer = new Buffer;
-  *buffer = this->Alloc(dev, size, alignment, dtype);
+  if (mem_scope.defined()) {
+    LOG(WARNING) << "Allocator::Empty:" << mem_scope.value() << " : " << shape;
+    *buffer = this->Alloc(dev, shape, dtype, mem_scope.value());
+  } else {
+    size_t size = DeviceAPI::Get(dev)->GetDataSize(container->dl_tensor, mem_scope);
+    size_t alignment = GetDataAlignment(container->dl_tensor);
+    LOG(WARNING) << "Allocator::Empty w/o scope:" << size;
+    *buffer = this->Alloc(dev, size, alignment, dtype);
+  }
   container->dl_tensor.data = buffer->data;
   container->manager_ctx = reinterpret_cast<void*>(buffer);
   return NDArray(GetObjectPtr<Object>(container));
@@ -213,13 +265,16 @@ bool Allocator::AllowMemoryScope(const std::string& mem_scope) const {
 
 Buffer Allocator::Alloc(Device dev, ShapeTuple shape, DLDataType type_hint,
                         const std::string& mem_scope) {
-  NDArray::Container container(nullptr, shape, type_hint, dev);
-  size_t size = DeviceAPI::Get(dev)->GetDataSize(container.dl_tensor);
+  NDArray::Container container(nullptr, shape, type_hint, dev, String(mem_scope));
+  size_t size = DeviceAPI::Get(dev)->GetDataSize(container.dl_tensor, String(mem_scope));
 
   if (AllowMemoryScope(mem_scope)) {
+    LOG(WARNING) << "Allocator::Alloc: global"
+                 << " : " << shape;
     size_t alignment = GetDataAlignment(container.dl_tensor);
     return Alloc(dev, size, alignment, type_hint);
   }
+  LOG(WARNING) << "Allocator::Alloc:" << mem_scope << " : " << shape;
   Buffer buf;
   buf.device = dev;
   buf.size = size;
