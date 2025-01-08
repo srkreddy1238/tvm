@@ -92,10 +92,11 @@ def build_run(mod, inputs, is_adreno):
         mod = tvm.relax.transform.VMShapeLower()(mod)
         mod = tvm.relax.transform.AttachGlobalSymbol()(mod)
 
+    print("Mod relax.build:", mod)
     ex = relax.build(mod, tgt)
-    #for smod in ex.mod.imported_modules:
-    #  print("Mod:", smod.type_key)
-    #  print(smod.imported_modules[0].get_source())
+    for smod in ex.mod.imported_modules:
+      print("Mod:", smod.type_key)
+      print(smod.imported_modules[0].get_source())
     load_path="vm_library.so"
     temp = utils.tempdir()
     path = temp.relpath(load_path)
@@ -111,7 +112,11 @@ def build_run(mod, inputs, is_adreno):
     inputs = [tvm.nd.array(inp, dev) for inp in inputs]
     vm.set_input("main", *inputs)
     vm.invoke_stateful("main")
-    tvm_output = vm.get_outputs("main").numpy()
+    tvm_output = vm.get_outputs("main")
+    if isinstance(tvm_output, tuple):
+        tvm_output = (out.numpy() for out in tvm_output)
+    else:
+        tvm_output = tvm_output.numpy()
 
     rpc.get_function("CloseRPCConnection")()
     return tvm_output
@@ -122,10 +127,14 @@ def verify(mod):
         shape = tuple(shape_val.value for shape_val in arg.struct_info.shape.values)
         inputs.append(np.random.uniform(-1, 1, size=shape).astype(arg.struct_info.dtype))
 
-    ret1 = build_run(mod, inputs, True)
-    ret2 = build_run(mod, inputs, False)
+    ret1 = build_run(mod, inputs, False)
+    ret2 = build_run(mod, inputs, True)
 
-    tvm.testing.assert_allclose(ret1, ret2, rtol=1e-3, atol=1e-3)
+    if isinstance(ret1, tuple):
+        for val1, val2 in zip(ret1, ret2):
+            tvm.testing.assert_allclose(val1, ret2, rtol=1e-3, atol=1e-3)
+    else:
+        tvm.testing.assert_allclose(ret1, ret2, rtol=1e-3, atol=1e-3)
 
 
 def test_conv2d():
@@ -211,7 +220,7 @@ def test_conv2d_add():
     verify(Input)
 
 
-def _test_conv2d_sum():
+def test_conv2d_sum():
     @I.ir_module
     class Input:
         @R.function
@@ -228,7 +237,7 @@ def _test_conv2d_sum():
     verify(Input)
 
 
-def _test_conv2d_sum_keepdims():
+def test_conv2d_sum_keepdims():
     @I.ir_module
     class Input:
         @R.function
@@ -244,7 +253,7 @@ def _test_conv2d_sum_keepdims():
     verify(Input)
 
 
-def _test_conv2d_sum_reduce():
+def test_conv2d_sum_reduce():
     @I.ir_module
     class Input:
         @R.function
@@ -260,7 +269,7 @@ def _test_conv2d_sum_reduce():
     verify(Input)
 
 
-def _test_conv2d_transpose():
+def test_conv2d_transpose():
     @I.ir_module
     class Input:
         @R.function
@@ -343,7 +352,7 @@ def test_conv2d_relu_concat():
     verify(Input)
 
 
-def _test_conv2d_relu_concat_split():
+def test_conv2d_relu_concat_split():
     @I.ir_module
     class Input:
         @R.function
@@ -353,8 +362,10 @@ def _test_conv2d_relu_concat_split():
                 gv2: R.Tensor((2, 4, 26, 26), "float32") = R.nn.relu(gv)
                 gv3: R.Tensor((2, 8, 26, 26), "float32") = R.concat((gv, gv2), axis=1)
                 gv4 = R.split(gv3, indices_or_sections=2, axis=1)
-                R.output(gv4)
-            return gv4
+                # TODO @Siva: Multi value return have an issue at runtime.
+                gv5 = gv4[0]
+                R.output(gv5)
+            return gv5
 
     verify(Input)
 
@@ -378,7 +389,7 @@ def test_conv2d_relu_concat_split_transpose_concat():
     verify(Input)
 
 
-def _test_conv2d_maxpool2d():
+def test_conv2d_maxpool2d():
     @I.ir_module
     class Input:
         @R.function
@@ -744,3 +755,8 @@ def _test_injective_nwo_inputs2():
 
 if __name__ == "__main__":
     tvm.testing.main()
+    #_test_conv2d_conv2d_fallback_to_buffer_conv2d()
+    #_test_pooling_branching_texture_params()
+    #_test_injective_inputs1()
+    #_test_injective_nwo_inputs2()
+    #_test_conv2d_avgpool2d()

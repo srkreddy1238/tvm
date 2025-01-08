@@ -40,7 +40,6 @@ DivIndex = namedtuple("DivIndex", ["sub", "div"])  # c//len
 MergeIndex = namedtuple("MulIndex", ["dom", "mul", "sub"])  # co*len + cb
 BufIndex = List[Union[Index, RemIndex, DivIndex, MergeIndex, None]]
 
-
 def extract_index_types(sch: tir.Schedule, buf: tir.BufferRegion) -> BufIndex:
     buf_index = []
     for expr in buf.region:
@@ -102,6 +101,14 @@ class TextureTranspose(AdrenoScheduleRule):
 
         sch = tir.Schedule(func)
         root_block = sch.get_block("root")
+        can_handle = False
+        for block in sch.get_child_blocks(root_block):
+            if "te_layout_transform" == sch.get(block).name_hint:
+                can_handle = True
+
+        if not can_handle:
+            return None
+
         if len(sch.get_child_blocks(root_block)) != 1:
             return None
 
@@ -150,13 +157,13 @@ class TextureTranspose(AdrenoScheduleRule):
             block_loops.append(blk_lp)
             vlps.append(vec_lp)
         vec_loops = vlps
-        print([sch.get(lp).loop_var for lp in [*block_loops, *vec_loops]])
+        #print([sch.get(lp).loop_var for lp in [*block_loops, *vec_loops]])
 
         sch.reorder(*block_loops, *vec_loops)
         if local_cache:
             rblk = sch.cache_read(blk, 0, "local")
             sch.compute_at(rblk, block_loops[-1])
-            print(sch.mod)
+            #print(sch.mod)
             lpv = sch.get_loops(rblk)[-1]
             sch.vectorize(lpv)
         wblk = sch.cache_write(blk, 0, "local")
