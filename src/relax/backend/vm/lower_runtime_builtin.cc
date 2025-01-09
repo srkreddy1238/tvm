@@ -155,8 +155,10 @@ class LowerRuntimeBuiltinMutator : public ExprMutator {
     VDevice vdev = attrs->dst_vdevice;
     int dev_type = vdev->target->GetTargetDeviceType();
     int dev_id = vdev->vdevice_id;
+    StringImm storage_scope = StringImm(vdev->memory_scope);
     args.push_back(PrimValue::Int64(dev_type));
     args.push_back(PrimValue::Int64(dev_id));
+    args.push_back(storage_scope);
     return Call(builtin_to_device_, args, call_node->attrs, {GetStructInfo(call_node)});
   }
 

@@ -96,7 +96,8 @@ class Mutator : public ExprMutator {
           auto* device_scope_handler =
               tvm::runtime::Registry::Get("DeviceScopeCompatibility." + dev_kind);
           if (device_scope_handler) {
-            String dev_scope = (*device_scope_handler)(vdevice.value());
+            String dev_scope =
+              (*device_scope_handler)(vdevice.value()->target, vdevice.value()->memory_scope);
             storage_scope = StringImm(dev_scope);
           }
         }

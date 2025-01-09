@@ -436,9 +436,9 @@ TVM_REGISTER_GLOBAL("vm.builtin.null_value").set_body([](TVMArgs args, TVMRetVal
 });
 
 TVM_REGISTER_GLOBAL("vm.builtin.to_device")
-    .set_body_typed([](NDArray data, int dev_type, int dev_id) {
+    .set_body_typed([](NDArray data, int dev_type, int dev_id, String mem_scope) {
       Device dst_device = {(DLDeviceType)dev_type, dev_id};
-      return data.CopyTo(dst_device);
+      return data.CopyTo(dst_device, mem_scope);
     });
 
 /*!
