@@ -73,6 +73,7 @@ def build_run(mod, inputs, is_adreno):
             mod =  dl.ApplyDefaultSchedule(
                 dl.adreno.Conv2d(),
                 dl.adreno.TextureTranspose(),
+                dl.adreno.Pool2D(),
             )(mod)
 
         mod =  dl.ApplyDefaultSchedule(
@@ -127,8 +128,8 @@ def verify(mod):
         shape = tuple(shape_val.value for shape_val in arg.struct_info.shape.values)
         inputs.append(np.random.uniform(-1, 1, size=shape).astype(arg.struct_info.dtype))
 
-    ret1 = build_run(mod, inputs, False)
-    ret2 = build_run(mod, inputs, True)
+    ret1 = build_run(mod, inputs, True)
+    ret2 = build_run(mod, inputs, False)
 
     if isinstance(ret1, tuple):
         for val1, val2 in zip(ret1, ret2):
@@ -412,7 +413,7 @@ def test_conv2d_maxpool2d():
     verify(Input)
 
 
-def _test_conv2d_avgpool2d():
+def test_conv2d_avgpool2d():
     @I.ir_module
     class Input:
         @R.function
@@ -546,7 +547,7 @@ def test_residual_block():
     verify(Input)
 
 
-def _test_conv2d_conv2d_fallback_to_buffer_conv2d():
+def test_conv2d_conv2d_fallback_to_buffer_conv2d():
     """
         layout_transform (NCHW->NCHW4c)
                   |                      <- texture
@@ -675,7 +676,7 @@ def _test_injective_inputs1():
                          |                        /
                       conv2d (1)                 /
                          |                      /
-                      conv2d (2)       mean    /
+                      conv2d (2)              mean
                   /         \                 / 
                  |           |      \        /
                  |           |       (3) add
@@ -701,7 +702,7 @@ def _test_injective_inputs1():
                 conv2 = R.nn.conv2d(conv1, w2, padding=[1, 1, 1, 1], strides=[1, 1], out_dtype="float32")
                 ad3 = R.add(conv1, conv2)
                 ad1 = R.add(mean, conv1)
-                ad2 = R.multiply(ad1, conv1)
+                ad2 = R.multiply(ad1, conv2)
                 gv = R.add(ad3, ad2)
                 R.output(gv)
             return gv
@@ -755,8 +756,7 @@ def _test_injective_nwo_inputs2():
 
 if __name__ == "__main__":
     tvm.testing.main()
-    #_test_conv2d_conv2d_fallback_to_buffer_conv2d()
-    #_test_pooling_branching_texture_params()
+    #_test_conv2d_avgpool2d()
+    #_test_pooling_branching_texture_params() # - Maxpool schedule
     #_test_injective_inputs1()
     #_test_injective_nwo_inputs2()
-    #_test_conv2d_avgpool2d()
