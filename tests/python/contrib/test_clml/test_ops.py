@@ -23,10 +23,11 @@ from tvm.relay.op.contrib import clml
 from tvm.relay import testing
 from tvm.ir import IRModule
 from tvm.contrib import utils
-from test_clml.infrastructure import (
+from infrastructure import (
     build_and_run,
     build_and_run_vm,
     verify_codegen,
+    verify_clml_op_count,
 )
 import pytest
 import os
@@ -1414,6 +1415,7 @@ def test_group_norm(remote, dtype, target, executor_type, trials):
         tvm.testing.assert_allclose(
             outputs[0].asnumpy(), outputs[1].asnumpy(), rtol=out_tol, atol=out_tol
         )
+        verify_clml_op_count(remote, mod, params, target)
 
     _verify(trials[0], trials[1], trials[2], trials[3])
 
@@ -1431,16 +1433,20 @@ def test_group_norm(remote, dtype, target, executor_type, trials):
     "trials",
     [
         # shape, axis ,epsilon
-        # OpenCLML supports width axis=3 and channel dim=1
+        # OpenCLML supports width axis
         [(1, 1, 16, 16), 3, 1e-07],
         [(1, 1, 512, 4), 3, 1e-05],
-        [(1, 1, 64, 128), 3, 1e-04],
+        [(1, 1, 64, 128), -1, 1e-04],
         [(1, 1, 8, 256), 3, 1e-12],
+        [(1, 25, 38, 256), 3, 1e-05],
+        [(1, 38, 25, 512), -1, 1e-06],
+        [(1, 4096, 320), 2, 1e-5],
+        [(1, 32, 4096), -1, 1e-6],
     ],
 )
 @tvm.testing.requires_openclml
 @tvm.testing.parametrize_targets("opencl")
-def _test_layer_norm(remote, dtype, target, executor_type, trials):
+def test_layer_norm(remote, dtype, target, executor_type, trials):
     def _verify(shape, axis, eps):
         np.random.seed(0)
         data = relay.var("data", shape=shape, dtype=dtype)
@@ -1460,6 +1466,7 @@ def _test_layer_norm(remote, dtype, target, executor_type, trials):
         tvm.testing.assert_allclose(
             outputs[0].asnumpy(), outputs[1].asnumpy(), rtol=out_tol, atol=out_tol
         )
+        verify_clml_op_count(remote, mod, params, target)
 
     _verify(trials[0], trials[1], trials[2])
 

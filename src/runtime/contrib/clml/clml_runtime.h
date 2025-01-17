@@ -147,6 +147,15 @@
       LOG(FATAL) << "CLML Error: - Unsupported target version \n"; \
   }
 
+// clCreateMLOpMultiHeadAttentionForwardQCOM
+#define CLML_CALL_clCreateMLOpMultiHeadAttentionForwardQCOM(...)         \
+  cl_int e;                                                              \
+  switch (CLMLWorkspace::Global()->target_major) {                       \
+    CALL_CASE(4, clCreateMLOpMultiHeadAttentionForwardQCOM, __VA_ARGS__) \
+    default:                                                             \
+      LOG(FATAL) << "CLML Error: - Unsupported target version \n";       \
+  }
+
 // clCreateMLTensorQCOM and clCreateMLTensorWithUsageQCOM
 #define CALL_clCreateMLTensorQCOM(VERSION, CONTEXT, TENSORPROPS, TENSORDESC, USAGE, TENSOR) \
   CALL_CASE(VERSION, clCreateMLTensorQCOM, CONTEXT, TENSORPROPS, TENSORDESC, TENSOR)

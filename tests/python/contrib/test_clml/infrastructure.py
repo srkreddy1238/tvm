@@ -292,3 +292,27 @@ def compile_and_run(remote, label, model, targets, inputs):
     vm_factory.invoke_stateful("main")
     out = vm_factory.get_outputs()[0]
     return out.numpy()
+
+
+def verify_clml_op_count(
+    remote,
+    mod,
+    params,
+    target="llvm",
+    tvm_ops=0,
+):
+    if remote is None:
+        target_host = "llvm"
+    else:
+        target_host = "llvm -mtriple=arm64-linux-android"
+    """Check clml operator count"""
+    if isinstance(mod, tvm.relay.expr.Call):
+        mod = tvm.IRModule.from_expr(mod)
+    with tvm.transform.PassContext(
+        opt_level=3, config={"relay.ext.clml.target_version": get_clml_target_version()}
+    ):
+        mod = clml.partition_for_clml(mod, params)
+        tvm_op_count = get_cpu_op_count(mod)
+        assert tvm_op_count == tvm_ops, "Got {} TVM operators, expected {}".format(
+            tvm_op_count, tvm_ops
+        )

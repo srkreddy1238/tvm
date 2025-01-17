@@ -817,6 +817,8 @@ class CLMLRuntime : public JSONRuntimeBase {
           CreateGroupNormLayer(&layer_, node, nid);
         else if ("nn.layer_norm" == op_name)
           CreateLayerNormLayer(&layer_, node, nid);
+        else if ("clml.mha" == op_name)
+          CreateMultiHeadAttentionLayer(&layer_, node, nid);
 
 #endif
         else
@@ -1780,8 +1782,6 @@ class CLMLRuntime : public JSONRuntimeBase {
 
   /*!
    * \brief Create a layer norm layer.
-   *
-   *
    * \param layer The CLML layer to build. Containing inputs, outputs and the CLML function.
    * \param node The JSON representation of the operator.
    * \param nid The node index of JSON graph node, which points to this operator.
@@ -1792,28 +1792,46 @@ class CLMLRuntime : public JSONRuntimeBase {
     DLDataType tvm_dtype = node.GetOpDataType()[0];
     cl_channel_type cl_dtype = MakeCLDataType(tvm_dtype);
     cl_arithmetic_mode_qcom cl_arithmetic_mode = MakeCLArithMode(cl_dtype, cl_dtype);
-    auto input =
-        MakeCLMLTensorFromJSONEntry(node.GetInputs()[0].id_, {}, CL_TENSOR_LAYOUT_OPTIMAL_QCOM,
-                                    cl_dtype, CL_TENSOR_USAGE_TNN_QCOM);
-    int axis = std::stoi(node.GetAttr<std::vector<std::string>>("axis")[0]);
+    std::shared_ptr<cl_ml_tensor_memory_desc_qcom> input;
+    std::shared_ptr<cl_ml_tensor_memory_desc_qcom> output;
+
     float epsilon = std::stof(node.GetAttr<std::vector<std::string>>("epsilon")[0]);
 
+    auto in_dims = GetTensorDims(nodes_[node.GetInputs()[0].id_]);
+
     auto ln_dims = GetTensorDims(nodes_[node.GetInputs()[1].id_]);
-    std::vector<size_t> ln_shape = {1, 1, 1, 1};
-    ln_shape[axis] = ln_dims.n;
+    auto bias_dims = GetTensorDims(nodes_[node.GetInputs()[2].id_]);
+
+    std::vector<int64_t> shape = node.GetOpShape()[0];
+
+    if (shape.size() == 4) {
+      input = MakeCLMLTensorFromJSONEntry(
+          node.GetInputs()[0].id_, {1, 1, in_dims.c * in_dims.h, in_dims.w},
+          CL_TENSOR_LAYOUT_OPTIMAL_QCOM, cl_dtype, CL_TENSOR_USAGE_TNN_QCOM);
+      output = MakeCLMLTensorFromJSONEntry(nid, {1, 1, in_dims.c * in_dims.h, in_dims.w},
+                                           CL_TENSOR_LAYOUT_OPTIMAL_QCOM, cl_dtype,
+                                           CL_TENSOR_USAGE_TNN_QCOM);
+      layer->out_shapes.insert({nid, { 1, 1, in_dims.c * in_dims.h, in_dims.w }});
+    } else if (shape.size() == 3) {
+      input = MakeCLMLTensorFromJSONEntry(node.GetInputs()[0].id_, {1, 1, in_dims.c, in_dims.h},
+                                          CL_TENSOR_LAYOUT_OPTIMAL_QCOM, cl_dtype,
+                                          CL_TENSOR_USAGE_TNN_QCOM);
+      output = MakeCLMLTensorFromJSONEntry(nid, {1, 1, in_dims.c, in_dims.h},
+                                           CL_TENSOR_LAYOUT_OPTIMAL_QCOM, cl_dtype,
+                                           CL_TENSOR_USAGE_TNN_QCOM);
+      layer->out_shapes.insert({nid, { 1, 1, in_dims.c, in_dims.h }});
+    }
 
     auto ln_scale = std::make_shared<cl_ml_tensor_memory_desc_qcom>();
     auto ln_bias = std::make_shared<cl_ml_tensor_memory_desc_qcom>();
 
-    ln_scale = MakeCLMLTensorFromJSONEntry(node.GetInputs()[1].id_, ln_shape,
+    ln_scale = MakeCLMLTensorFromJSONEntry(node.GetInputs()[1].id_, {1, 1, 1, ln_dims.n},
                                            CL_TENSOR_LAYOUT_OPTIMAL_QCOM, cl_dtype,
                                            CL_TENSOR_USAGE_PARAMETER_QCOM);
-    ln_bias = MakeCLMLTensorFromJSONEntry(node.GetInputs()[2].id_, ln_shape,
+    ln_bias = MakeCLMLTensorFromJSONEntry(node.GetInputs()[2].id_, {1, 1, 1, bias_dims.n},
                                           CL_TENSOR_LAYOUT_OPTIMAL_QCOM, cl_dtype,
                                           CL_TENSOR_USAGE_PARAMETER_QCOM);
 
-    auto output = MakeCLMLTensorFromJSONEntry(nid, {}, CL_TENSOR_LAYOUT_OPTIMAL_QCOM, cl_dtype,
-                                              CL_TENSOR_USAGE_TNN_QCOM);
     cl_ml_op_layernorm_desc_qcom ln_desc = {CL_LAYERNORM_MODE_WIDTH_QCOM, epsilon,
                                             cl_arithmetic_mode};
     CLML_CALL_clCreateMLOpLayerNormForwardQCOM(CLML_CTX, nullptr, &ln_desc, input->tensor,
@@ -1867,6 +1885,166 @@ class CLMLRuntime : public JSONRuntimeBase {
     layer->function.push_back(op);
     return;
   }
+
+  void CreateMultiHeadAttentionLayer(CachedLayer* layer, const JSONGraphNode& node, size_t nid) {
+    cl_ml_op_qcom op = nullptr;
+    cl_uint num_heads = std::stoi(node.GetAttr<std::vector<std::string>>("num_heads")[0]);
+    DLDataType tvm_dtype = node.GetOpDataType()[0];
+    cl_channel_type cl_dtype = MakeCLDataType(tvm_dtype);
+    cl_arithmetic_mode_qcom cl_arithmetic_mode = MakeCLArithMode(cl_dtype, cl_dtype);
+    cl_ml_tensor_layout_qcom layout;
+    cl_bool is_casual = false;
+    int num_inputs = node.GetInputs().size();
+    bool has_bias;
+    bool has_attn_mask;
+    has_bias = (num_inputs == 11) || (num_inputs == 12);
+    has_attn_mask = (num_inputs == 12);
+    auto q_bias = std::make_shared<cl_ml_tensor_memory_desc_qcom>();
+    auto k_bias = std::make_shared<cl_ml_tensor_memory_desc_qcom>();
+    auto v_bias = std::make_shared<cl_ml_tensor_memory_desc_qcom>();
+
+    auto attn_mask = std::make_shared<cl_ml_tensor_memory_desc_qcom>();
+
+    auto out_bias_dims = GetTensorDims(nodes_[node.GetInputs()[0].id_]);
+    auto output_bias = std::make_shared<cl_ml_tensor_memory_desc_qcom>();
+
+    output_bias = MakeCLMLTensorFromJSONEntry(node.GetInputs()[0].id_, {1, 1, 1, out_bias_dims.n},
+                                              CL_TENSOR_LAYOUT_OPTIMAL_QCOM, cl_dtype,
+                                              CL_TENSOR_USAGE_PARAMETER_QCOM);
+
+    auto query_dims = GetTensorDims(nodes_[node.GetInputs()[1].id_]);
+    auto query =
+        MakeCLMLTensorFromJSONEntry(node.GetInputs()[1].id_, {1, 1, query_dims.n, query_dims.c},
+                                    CL_TENSOR_LAYOUT_NCHW_QCOM, cl_dtype, CL_TENSOR_USAGE_TNN_QCOM);
+
+    auto key_dims = GetTensorDims(nodes_[node.GetInputs()[3].id_]);
+    auto key =
+        MakeCLMLTensorFromJSONEntry(node.GetInputs()[3].id_, {1, 1, key_dims.n, key_dims.c},
+                                    CL_TENSOR_LAYOUT_NCHW_QCOM, cl_dtype, CL_TENSOR_USAGE_TNN_QCOM);
+
+    auto value_dims = GetTensorDims(nodes_[node.GetInputs()[5].id_]);
+    auto value =
+        MakeCLMLTensorFromJSONEntry(node.GetInputs()[5].id_, {1, 1, value_dims.n, value_dims.c},
+                                    CL_TENSOR_LAYOUT_NCHW_QCOM, cl_dtype, CL_TENSOR_USAGE_TNN_QCOM);
+
+    auto query_wt_dims = GetTensorDims(nodes_[node.GetInputs()[2].id_]);
+    auto query_weight = std::make_shared<cl_ml_tensor_memory_desc_qcom>();
+    query_weight = MakeCLMLTensorFromJSONEntry(
+        node.GetInputs()[2].id_, {1, 1, query_wt_dims.n, query_wt_dims.c},
+        CL_TENSOR_LAYOUT_OPTIMAL_QCOM, cl_dtype, CL_TENSOR_USAGE_PARAMETER_QCOM);
+
+    auto key_wt_dims = GetTensorDims(nodes_[node.GetInputs()[4].id_]);
+    auto key_weight = std::make_shared<cl_ml_tensor_memory_desc_qcom>();
+    key_weight = MakeCLMLTensorFromJSONEntry(
+        node.GetInputs()[4].id_, {1, 1, key_wt_dims.n, key_wt_dims.c},
+        CL_TENSOR_LAYOUT_OPTIMAL_QCOM, cl_dtype, CL_TENSOR_USAGE_PARAMETER_QCOM);
+
+    auto value_wt_dims = GetTensorDims(nodes_[node.GetInputs()[6].id_]);
+    auto value_weight = std::make_shared<cl_ml_tensor_memory_desc_qcom>();
+
+    value_weight = MakeCLMLTensorFromJSONEntry(
+        node.GetInputs()[6].id_, {1, 1, value_wt_dims.n, value_wt_dims.c},
+        CL_TENSOR_LAYOUT_OPTIMAL_QCOM, cl_dtype, CL_TENSOR_USAGE_PARAMETER_QCOM);
+
+    auto out_wt_dims = GetTensorDims(nodes_[node.GetInputs()[7].id_]);
+    auto output_weight = std::make_shared<cl_ml_tensor_memory_desc_qcom>();
+
+    output_weight = MakeCLMLTensorFromJSONEntry(
+        node.GetInputs()[7].id_, {1, 1, out_wt_dims.n, out_wt_dims.c},
+        CL_TENSOR_LAYOUT_OPTIMAL_QCOM, cl_dtype, CL_TENSOR_USAGE_PARAMETER_QCOM);
+
+    if (has_bias || has_attn_mask) {
+      auto q_bias_dims = GetTensorDims(nodes_[node.GetInputs()[8].id_]);
+
+      q_bias = MakeCLMLTensorFromJSONEntry(node.GetInputs()[8].id_, {1, 1, 1, q_bias_dims.n},
+                                           CL_TENSOR_LAYOUT_OPTIMAL_QCOM, cl_dtype,
+                                           CL_TENSOR_USAGE_PARAMETER_QCOM);
+
+      auto k_bias_dims = GetTensorDims(nodes_[node.GetInputs()[9].id_]);
+
+      k_bias = MakeCLMLTensorFromJSONEntry(node.GetInputs()[9].id_, {1, 1, 1, k_bias_dims.n},
+                                           CL_TENSOR_LAYOUT_OPTIMAL_QCOM, cl_dtype,
+                                           CL_TENSOR_USAGE_PARAMETER_QCOM);
+      auto v_bias_dims = GetTensorDims(nodes_[node.GetInputs()[10].id_]);
+
+      v_bias = MakeCLMLTensorFromJSONEntry(node.GetInputs()[10].id_, {1, 1, 1, v_bias_dims.n},
+                                           CL_TENSOR_LAYOUT_OPTIMAL_QCOM, cl_dtype,
+                                           CL_TENSOR_USAGE_PARAMETER_QCOM);
+
+    } else {
+      q_bias->tensor = layer_.unusedTensor;
+      k_bias->tensor = layer_.unusedTensor;
+      v_bias->tensor = layer_.unusedTensor;
+    }
+
+    if (has_attn_mask) {
+      auto attn_mask_dims = GetTensorDims(nodes_[node.GetInputs()[11].id_]);
+
+      attn_mask = MakeCLMLTensorFromJSONEntry(
+          node.GetInputs()[11].id_, {1, attn_mask_dims.c, attn_mask_dims.h, attn_mask_dims.w},
+          CL_TENSOR_LAYOUT_OPTIMAL_QCOM, cl_dtype, CL_TENSOR_USAGE_PARAMETER_QCOM);
+    } else {
+      attn_mask->tensor = layer_.unusedTensor;
+    }
+    cl_ml_tensor_desc_qcom desc = {};
+    desc.num_dimensions = CL_TENSOR_UNUSED_QCOM;
+    CLML_CALL_clCreateMLTensorQCOM(CLML_CTX, nullptr, &desc, CL_TENSOR_USAGE_UNUSED_QCOM,
+                                   &layer_.unusedTensor);
+
+    auto output =
+        MakeCLMLTensorFromJSONEntry(nid, {1, 1, query_dims.n, query_dims.c},
+                                    CL_TENSOR_LAYOUT_NCHW_QCOM, cl_dtype, CL_TENSOR_USAGE_TNN_QCOM);
+    layer->out_shapes.insert({nid, { 1, 1, query_dims.n, query_dims.c }});
+
+    cl_uint key_dim = key_wt_dims.n / num_heads;
+    cl_uint value_dim = value_wt_dims.n / num_heads;
+    cl_softmax_mode_qcom softmax_mode = CL_SOFTMAX_MODE_WIDTH_QCOM;
+    cl_multi_head_attn_weights_transform_qcom weights_transform =
+        CL_MULTI_HEAD_ATTN_WEIGHTS_TRANSFORM_TRANSPOSE_QCOM;
+
+    cl_ml_op_multi_head_attention_desc_qcom mha_desc = {
+        num_heads,         key_dim,   value_dim,         softmax_mode,
+        weights_transform, is_casual, cl_arithmetic_mode};
+
+    if (!has_bias && !has_attn_mask) {
+      CLML_CALL_clCreateMLOpMultiHeadAttentionForwardQCOM(
+          CLML_CTX, nullptr, &mha_desc, query->tensor, key->tensor, value->tensor,
+          query_weight->tensor, layer_.unusedTensor, key_weight->tensor, layer_.unusedTensor,
+          value_weight->tensor, layer_.unusedTensor, output_weight->tensor, output_bias->tensor,
+          layer_.unusedTensor, layer_.unusedTensor, layer_.unusedTensor, output->tensor, &op,
+          layer_.tuning_cache);
+
+      ICHECK(op) << "MultiHeadAttention Layer Error:";
+
+      layer->function.push_back(op);
+
+    } else if (has_bias && !has_attn_mask) {
+      CLML_CALL_clCreateMLOpMultiHeadAttentionForwardQCOM(
+          CLML_CTX, nullptr, &mha_desc, query->tensor, key->tensor, value->tensor,
+          query_weight->tensor, q_bias->tensor, key_weight->tensor, k_bias->tensor,
+          value_weight->tensor, v_bias->tensor, output_weight->tensor, output_bias->tensor,
+          layer_.unusedTensor, layer_.unusedTensor, layer_.unusedTensor, output->tensor, &op,
+          layer_.tuning_cache);
+      ICHECK(op) << "MultiHeadAttention Layer Error:";
+
+      layer->function.push_back(op);
+
+    } else if (has_bias && has_attn_mask) {
+      CLML_CALL_clCreateMLOpMultiHeadAttentionForwardQCOM(
+          CLML_CTX, nullptr, &mha_desc, query->tensor, key->tensor, value->tensor,
+          query_weight->tensor, q_bias->tensor, key_weight->tensor, k_bias->tensor,
+          value_weight->tensor, v_bias->tensor, output_weight->tensor, output_bias->tensor,
+          attn_mask->tensor, layer_.unusedTensor, layer_.unusedTensor, output->tensor, &op,
+          layer_.tuning_cache);
+      ICHECK(op) << "MultiHeadAttention Layer Error:";
+
+      layer->function.push_back(op);
+    } else {
+      LOG(FATAL) << "CLML Error: - Unsupported MultiHeadAttention Layer Error";
+    }
+    return;
+  }
+
 #endif
 
   /*!

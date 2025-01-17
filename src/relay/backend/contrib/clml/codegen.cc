@@ -97,6 +97,8 @@ class CLMLJSONSerializer : public backend::contrib::JSONSerializer {
       json_node = CreatePadJSONNode(cn);
     } else if (name == "clml.concat") {
       json_node = CreateConcatJSONNode(cn);
+    } else if (name == "clml.mha") {
+      json_node = CreateMultiheadattentionJSONNode(cn);
     } else {
       json_node = CreateGenericJSONNode(cn);
     }
@@ -396,6 +398,137 @@ class CLMLJSONSerializer : public backend::contrib::JSONSerializer {
     std::vector<dmlc::any> pad_mode_attr;
     pad_mode_attr.emplace_back(pad_mode);
     json_node->SetAttr("pad_mode", pad_mode_attr);
+
+    return json_node;
+  }
+
+  /*!
+   * \brief Extract number of heads from MultiHeadAttention pattern.
+   *
+   * \param cn The call to be represented.
+   * \return int representing num of heads.
+   */
+  int VisitMHAExpr(const Expr& expr) {
+    if (const auto* call_node = expr.as<CallNode>()) {
+      if (call_node->op.as<OpNode>()) {
+        const auto* op_node = call_node->op.as<OpNode>();
+        if (op_node->name == "reshape") {
+          const auto* reshape_attr = call_node->attrs.as<ReshapeAttrs>();
+          if (reshape_attr) {
+            auto newshape = reshape_attr->newshape;
+            // Pattern: [1, -1, num_heads, attn_heads_dim]
+            if (newshape.size() == 4 && newshape[0].as<IntImmNode>()->value == 1 &&
+                newshape[1].as<IntImmNode>()->value == -1 && newshape[2].as<IntImmNode>()) {
+              return newshape[2].as<IntImmNode>()->value;
+            }
+          }
+        }
+      }
+      // Visit all arguments
+      for (const auto& arg : call_node->args) {
+        int num_heads = VisitMHAExpr(arg);
+        if (num_heads != -1) {
+          return num_heads;
+        }
+      }
+    }
+    return -1;
+  }
+
+  /*!
+   * \brief Create a JSON representation of a MultiHeadAttention operator.
+   * \param cn The call to be represented.
+   * \return A JSON representation of a specific operator.
+   */
+
+  std::shared_ptr<JSONGraphNode> CreateMultiheadattentionJSONNode(const CallNode* cn) {
+    const auto* fn = cn->op.as<FunctionNode>();
+    ICHECK(fn);
+
+    // Find num_heads using MHA-specific visitor
+    int num_heads = VisitMHAExpr(fn->body);
+    ICHECK(num_heads != -1) << "Could not extract num_heads from MHA pattern";
+
+    // Get input tensors
+    CHECK_GE(cn->args.size(), 8) << "Expected at least 7 arguments for MHA";
+
+    int num_inputs = cn->args.size();
+    bool has_bias;
+    bool has_attn_mask;
+    has_bias = (num_inputs == 11) || (num_inputs == 12);
+    has_attn_mask = (num_inputs == 12);
+    int q_idx = 1;
+    int k_idx = has_bias ? 4 : 3;
+    int v_idx = has_bias ? (has_attn_mask ? 8 : 7) : 5;
+
+    int q_wt_idx = 2;
+    int k_wt_idx = has_bias ? 5 : 4;
+    int v_wt_idx = has_bias ? (has_attn_mask ? 9 : 8) : 6;
+    int out_wt_idx = has_bias ? (has_attn_mask ? 11 : 10) : 7;
+    auto out_bias = cn->args[0];
+    auto query = cn->args[q_idx];
+    auto key = cn->args[k_idx];
+    auto value = cn->args[v_idx];
+    auto q_weight = cn->args[q_wt_idx];
+    auto k_weight = cn->args[k_wt_idx];
+    auto v_weight = cn->args[v_wt_idx];
+    auto out_weight = cn->args[out_wt_idx];
+
+    auto q_bias = tvm::relay::Expr();
+    auto k_bias = tvm::relay::Expr();
+    auto v_bias = tvm::relay::Expr();
+    auto attn_mask = tvm::relay::Expr();
+    if (has_bias || has_attn_mask) {
+      int v_bias_idx = has_attn_mask ? 10 : 9;
+      q_bias = cn->args[3];
+      k_bias = cn->args[6];
+      v_bias = cn->args[v_bias_idx];
+    }
+    if (has_attn_mask) {
+      attn_mask = cn->args[7];
+    }
+    // Prepare inputs for JSON node
+    std::vector<JSONGraphNodeEntry> inputs;
+    auto out_bias_entries = VisitExpr(out_bias);
+    auto query_entries = VisitExpr(query);
+    auto key_entries = VisitExpr(key);
+    auto value_entries = VisitExpr(value);
+    auto q_weight_entries = VisitExpr(q_weight);
+    auto k_weight_entries = VisitExpr(k_weight);
+    auto v_weight_entries = VisitExpr(v_weight);
+    auto out_weight_entries = VisitExpr(out_weight);
+
+    inputs.push_back(out_bias_entries[0]);
+    inputs.push_back(query_entries[0]);
+    inputs.push_back(q_weight_entries[0]);
+    inputs.push_back(key_entries[0]);
+    inputs.push_back(k_weight_entries[0]);
+    inputs.push_back(value_entries[0]);
+    inputs.push_back(v_weight_entries[0]);
+    inputs.push_back(out_weight_entries[0]);
+
+    if (has_bias || has_attn_mask) {
+      auto q_bias_entries = VisitExpr(q_bias);
+      auto k_bias_entries = VisitExpr(k_bias);
+      auto v_bias_entries = VisitExpr(v_bias);
+      inputs.push_back(q_bias_entries[0]);
+      inputs.push_back(k_bias_entries[0]);
+      inputs.push_back(v_bias_entries[0]);
+    }
+
+    if (has_attn_mask) {
+      auto attn_mask_entries = VisitExpr(attn_mask);
+      inputs.push_back(attn_mask_entries[0]);
+    }
+
+    // Create JSON node
+    auto json_node = std::make_shared<JSONGraphNode>("clml.mha", "kernel", inputs, 1);
+
+    // Set num_heads attribute
+    std::vector<std::string> num_heads_str = {std::to_string(num_heads)};
+    std::vector<dmlc::any> num_heads_attr;
+    num_heads_attr.emplace_back(num_heads_str);
+    json_node->SetAttr("num_heads", num_heads_attr);
 
     return json_node;
   }

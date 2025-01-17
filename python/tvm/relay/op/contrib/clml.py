@@ -341,6 +341,7 @@ def clml_pattern_table():
     def dense2d_pattern():
         """Create a dense pattern for 2d matrix to matrix multiple."""
         pattern = is_op("nn.dense")(wildcard(), is_constant())
+
         return pattern
 
     def pad_pattern():
@@ -358,6 +359,77 @@ def clml_pattern_table():
         pattern = is_op("nn.layer_norm")(wildcard(), is_constant(), is_constant())
         return pattern
 
+    def mha_pattern():
+        p1 = is_op("nn.dense")(wildcard(), wildcard())  # q, q_wt
+        p2 = is_op("reshape")(p1)
+        p2_1 = p2.optional(lambda x: is_op("add")(wildcard(), p2))  # q_bias
+
+        p3 = is_op("multiply")(p2_1, is_constant())
+        p3 = is_op("reshape")(p3)
+        p3 = is_op("transpose")(p3)
+
+        p4 = is_op("reshape")(p2_1)
+        p4 = is_op("transpose")(p4)
+        p4 = is_op("multiply")(p4, is_constant())
+
+        p5 = p3 | p4
+
+        p8 = is_op("nn.dense")(wildcard(), wildcard())  # k, k_wt
+        p9 = is_op("reshape")(p8)
+        p9_1 = p9.optional(lambda x: is_op("add")(wildcard(), p9))  # k_bias
+        p10 = is_op("reshape")(p9_1)
+        p11 = is_op("transpose")(p10)
+
+        p12_1 = is_op("multiply")(p11, is_constant())
+        p12_2 = is_op("reshape")(p12_1)
+
+        p13_1 = is_op("reshape")(p11)
+        p13_2 = is_op("transpose")(p13_1)
+
+        p13 = p12_2 | p13_2
+
+        p14 = is_op("reshape")(p5)
+        p15 = is_op("transpose")(p13)
+        p16 = is_op("nn.batch_matmul")(p14, p15)
+        p16_1 = p16.optional(lambda x: is_op("reshape")(p16))
+        p16_2 = p16_1.optional(lambda x: is_op("reshape")(p16_1))
+        p16_3 = p16_2.optional(lambda x: is_op("add")(p16_2, wildcard()))  # attn_mask
+        p17 = is_op("reshape")(p16_3)
+        p18 = is_op("cast")(p17)
+        p19 = is_op("nn.softmax")(p18)
+        p20 = p19.optional(lambda x: is_op("reshape")(p19))
+        p23 = is_op("nn.dense")(wildcard(), wildcard())  # v,v_wt
+        p24 = is_op("reshape")(p23)
+        p24_1 = p24.optional(lambda x: is_op("add")(wildcard(), p24))  # v_bias
+        p25 = is_op("reshape")(p24_1)
+        p26 = is_op("transpose")(p25)
+        p27 = is_op("reshape")(p26)
+        p28 = is_op("cast")(p20)
+        p29 = is_op("transpose")(p27)
+        p30 = is_op("nn.batch_matmul")(p28, p29)
+
+        p31_1 = is_op("reshape")(p30)
+        p32_1 = is_op("transpose")(p31_1)
+        p33_1 = is_op("reshape")(p32_1)
+        p34_1 = is_op("cast")(p33_1)
+        p35_1 = is_op("reshape")(p34_1)
+        p36_1 = is_op("cast")(p35_1)
+
+        p31_2 = is_op("reshape")(p30)
+        p32_2 = is_op("reshape")(p31_2)
+        p33_2 = is_op("transpose")(p32_2)
+        p34_2 = is_op("reshape")(p33_2)
+        p35_2 = is_op("reshape")(p34_2)
+
+        p36 = p35_2 | p36_1
+
+        p37 = is_op("nn.dense")(p36, wildcard())  # out_wt
+        p38 = is_op("reshape")(p37)
+        p39 = is_op("add")(wildcard(), p38)  # out_bias
+        p40 = is_op("divide")(p39, is_constant())
+
+        return p40
+
     def check_groupnorm_op(extract):
         call = extract
         # channel axis other than 1 is not supported in CLML
@@ -368,9 +440,18 @@ def clml_pattern_table():
 
     def check_layernorm_op(extract):
         call = extract
-        # width axis other than 3 is not supported in CLML
-        if call.attrs["axis"] != 3:
+        call_shape = call.checked_type.shape
+        # only width axis is supported in CLML
+        if (len(call_shape) == 4) and (call.attrs["axis"] != 3 and (call.attrs["axis"] != -1)):
             return False
+
+        if (len(call_shape) == 3) and (call.attrs["axis"] != 2 and (call.attrs["axis"] != -1)):
+            return False
+
+        return check_norm_op(call)
+
+    def check_mha_op(extract):
+        call = extract
         call_shape = call.checked_type.shape
 
         # channel dim other than 1 is not supported in CLML
@@ -668,11 +749,12 @@ def clml_pattern_table():
         ),
     ]
     CLML4_ops = [
+        ("clml.mha", mha_pattern(), check_mha_op),
         ("clml.group_norm", group_norm_pattern(), check_groupnorm_op),
         ("clml.layer_norm", layer_norm_pattern(), check_layernorm_op),
     ]
     if (target_version >= 4) and (clml_sdk_version() >= 4):
-        return CLML3_ops + CLML4_ops
+        return CLML4_ops + CLML3_ops
     else:
         return CLML3_ops
 
