@@ -115,6 +115,15 @@ for node_id in $CLML_TESTS; do
     i=$((i+1))
 done
 
+# Relax test
+RELAX_TESTS=$(./ci/scripts/jenkins/pytest_ids.py --folder tests/python/relax/backend/clml)
+i=0
+for node_id in $RELAX_TESTS; do
+    echo "$node_id"
+    CXX=${TVM_NDK_CC} run_pytest ctypes "$TVM_INTEGRATION_TESTSUITE_NAME-openclml-$i" "$node_id" --reruns=0
+    i=$((i+1))
+done
+
 kill ${TRACKER_PID} || true
 kill ${DEVICE_PID} || true
 clean_ports
