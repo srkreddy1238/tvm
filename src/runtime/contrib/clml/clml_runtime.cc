@@ -766,13 +766,10 @@ class CLMLRuntime : public JSONRuntimeBase {
     // other than CL_TENSOR_LAYOUT_OPTIMAL_QCOM.
     for (nid = 0; nid < nodes_.size(); ++nid) {
       const auto& node = nodes_[nid];
-      if ("nn.dense" == node.GetOpName())
-          CreateDenseLayerTensor(&layer_, node, nid);
-      if ("nn.batch_matmul" == node.GetOpName())
-          CreateBatchMatmulLayerTensor(&layer_, node, nid);
-      if ("nn.softmax" == node.GetOpName()
-            || PatternMatch(node.GetOpName(), "nn.softmax"))
-          CreateSoftmaxLayerTensor(&layer_, node, nid);
+      if ("nn.dense" == node.GetOpName()) CreateDenseLayerTensor(&layer_, node, nid);
+      if ("nn.batch_matmul" == node.GetOpName()) CreateBatchMatmulLayerTensor(&layer_, node, nid);
+      if ("nn.softmax" == node.GetOpName() || PatternMatch(node.GetOpName(), "nn.softmax"))
+        CreateSoftmaxLayerTensor(&layer_, node, nid);
     }
 
     for (nid = 0; nid < nodes_.size(); ++nid) {
@@ -781,8 +778,7 @@ class CLMLRuntime : public JSONRuntimeBase {
         // Layers may request for different layout. Differ the input allocation.
       } else if (node.GetOpType() == "kernel") {
         auto op_name = node.GetOpName();
-        if (PatternMatch(op_name, "nn.conv2d") ||
-            PatternMatch(op_name, "nn.pad_conv2d"))
+        if (PatternMatch(op_name, "nn.conv2d") || PatternMatch(op_name, "nn.pad_conv2d"))
           CreateConvolution2DLayer(&layer_, node, CL_CONVOLUTION_MODE_CONVOLUTION_QCOM, nid);
         else if (PatternMatch(op_name, "nn.depthwise_conv2d"))
           CreateConvolution2DLayer(&layer_, node, CL_CONVOLUTION_MODE_DEPTHWISE_QCOM, nid);
@@ -795,19 +791,18 @@ class CLMLRuntime : public JSONRuntimeBase {
         else if (PatternMatch(op_name, "nn.batch_norm"))
           CreateBatchNormLayer(&layer_, node, nid);
         else if ("nn.max_pool2d" == op_name || "nn.avg_pool2d" == op_name ||
-                 "nn.l2_pool2d" == op_name ||
-                 PatternMatch(op_name, "nn.max_pool2d") ||
-                 PatternMatch(op_name, "nn.avg_pool2d") )
+                 "nn.l2_pool2d" == op_name || PatternMatch(op_name, "nn.max_pool2d") ||
+                 PatternMatch(op_name, "nn.avg_pool2d"))
           CreatePoolingLayer(&layer_, node, nid);
         else if ("nn.global_max_pool2d" == op_name || "nn.global_avg_pool2d" == op_name ||
-                PatternMatch(op_name, "nn.global_avg_pool2d") ||
-                PatternMatch(op_name, "nn.global_max_pool2d"))
+                 PatternMatch(op_name, "nn.global_avg_pool2d") ||
+                 PatternMatch(op_name, "nn.global_max_pool2d"))
           CreateGlobalPoolingLayer(&layer_, node, nid);
-        else if ("reshape" == op_name ||  PatternMatch(op_name, "reshape"))
+        else if ("reshape" == op_name || PatternMatch(op_name, "reshape"))
           CreateReshapeLayer(&layer_, node, nid);
         else if ("concatenate" == op_name)
           CreateConcatLayer(&layer_, node, nid);
-        else if ("nn.dense" == op_name )
+        else if ("nn.dense" == op_name)
           CreateDenseLayer(&layer_, node, nid);
         else if ("nn.softmax" == op_name || PatternMatch(op_name, "nn.softmax"))
           CreateSoftMaxLayer(&layer_, node, nid);
@@ -819,11 +814,9 @@ class CLMLRuntime : public JSONRuntimeBase {
           CreateClipLayer(&layer_, node, nid);
         else if ("add" == op_name || "subtract" == op_name || "multiply" == op_name ||
                  "minimum" == op_name || "maximum" == op_name || "divide" == op_name ||
-                 PatternMatch(op_name, "relax.add") ||
-                 PatternMatch(op_name, "relax.subtract") ||
+                 PatternMatch(op_name, "relax.add") || PatternMatch(op_name, "relax.subtract") ||
                  PatternMatch(op_name, "relax.multiply") ||
-                 PatternMatch(op_name, "relax.minimum") ||
-                 PatternMatch(op_name, "relax.maximum") ||
+                 PatternMatch(op_name, "relax.minimum") || PatternMatch(op_name, "relax.maximum") ||
                  PatternMatch(op_name, "relax.divide"))
           CreateBinaryLayer(&layer_, node, nid);
         else if ("nn.depth_to_space" == op_name)
@@ -1054,13 +1047,13 @@ class CLMLRuntime : public JSONRuntimeBase {
     auto input =
         MakeCLMLTensorFromJSONEntry(inputs[0].id_, {}, CL_TENSOR_LAYOUT_OPTIMAL_QCOM, cl_dtype);
     // Weight
-    auto weight = MakeCLMLTensorFromJSONEntry(inputs[1].id_, {},
-                                              CL_TENSOR_LAYOUT_OPTIMAL_QCOM, cl_dtype);
+    auto weight =
+        MakeCLMLTensorFromJSONEntry(inputs[1].id_, {}, CL_TENSOR_LAYOUT_OPTIMAL_QCOM, cl_dtype);
     // Bias
     auto bias = std::make_shared<cl_ml_tensor_memory_desc_qcom>();
     if (has_bias) {
-       bias = MakeCLMLTensorFromJSONEntry(inputs[2].id_, {},
-                                         CL_TENSOR_LAYOUT_OPTIMAL_QCOM, cl_dtype);
+      bias =
+          MakeCLMLTensorFromJSONEntry(inputs[2].id_, {}, CL_TENSOR_LAYOUT_OPTIMAL_QCOM, cl_dtype);
     } else {
       cl_ml_tensor_desc_qcom desc = {};
       desc.num_dimensions = CL_TENSOR_UNUSED_QCOM;
@@ -1119,18 +1112,15 @@ class CLMLRuntime : public JSONRuntimeBase {
 
       cl_ml_op_batchnorm_desc_qcom bn_desc = {CL_BATCHNORM_MODE_SPATIAL_QCOM, cl_arithmetic_mode};
       if (!has_act) {
-        CLML_CALL(clCreateMLOpFusedConvolutionBatchNormForwardQCOM,
-                  CLML_CTX, opProperties.data(), &conv_desc,
-                  &bn_desc, input->tensor, weight->tensor, bias->tensor, output->tensor,
+        CLML_CALL(clCreateMLOpFusedConvolutionBatchNormForwardQCOM, CLML_CTX, opProperties.data(),
+                  &conv_desc, &bn_desc, input->tensor, weight->tensor, bias->tensor, output->tensor,
                   bn_mean->tensor, bn_var->tensor, bn_scale->tensor, bn_bias->tensor, &op,
                   layer_.tuning_cache);
       } else {
-        CLML_CALL(
-                  clCreateMLOpFusedConvolutionBatchNormActivationForwardQCOM,
-                  CLML_CTX, opProperties.data(),
-                  &conv_desc, &bn_desc, &act_desc, input->tensor, weight->tensor, bias->tensor,
-                  output->tensor, nullptr, bn_mean->tensor, bn_var->tensor, bn_scale->tensor,
-                  bn_bias->tensor, &op, layer_.tuning_cache);
+        CLML_CALL(clCreateMLOpFusedConvolutionBatchNormActivationForwardQCOM, CLML_CTX,
+                  opProperties.data(), &conv_desc, &bn_desc, &act_desc, input->tensor,
+                  weight->tensor, bias->tensor, output->tensor, nullptr, bn_mean->tensor,
+                  bn_var->tensor, bn_scale->tensor, bn_bias->tensor, &op, layer_.tuning_cache);
       }
       layer->function.push_back(op);
     }
@@ -1249,9 +1239,9 @@ class CLMLRuntime : public JSONRuntimeBase {
     std::vector<cl_uint> clml_padding = GetVectorValues(padding);
 
     cl_ml_op_pooling_desc_qcom pool_desc = {
-        ((node.GetOpName() == "nn.max_pool2d") ||
-        PatternMatch(node.GetOpName(), "nn.max_pool2d")) ?
-        CL_POOLING_MODE_MAX_QCOM : CL_POOLING_MODE_AVERAGE_EXCLUDE_PADDING_QCOM,
+        ((node.GetOpName() == "nn.max_pool2d") || PatternMatch(node.GetOpName(), "nn.max_pool2d"))
+            ? CL_POOLING_MODE_MAX_QCOM
+            : CL_POOLING_MODE_AVERAGE_EXCLUDE_PADDING_QCOM,
         4,  // reserved
         {clml_padding[0], clml_padding[1]},
         {clml_padding[2], clml_padding[3]},
@@ -1296,8 +1286,9 @@ class CLMLRuntime : public JSONRuntimeBase {
     auto in_dims = GetTensorDims(nodes_[node.GetInputs()[0].id_]);
     cl_ml_op_pooling_desc_qcom pool_desc = {
         ((node.GetOpName() == "nn.global_max_pool2d") ||
-        PatternMatch(node.GetOpName(), "nn.global_max_pool2d")) ?
-        CL_POOLING_MODE_MAX_QCOM : CL_POOLING_MODE_AVERAGE_EXCLUDE_PADDING_QCOM,
+         PatternMatch(node.GetOpName(), "nn.global_max_pool2d"))
+            ? CL_POOLING_MODE_MAX_QCOM
+            : CL_POOLING_MODE_AVERAGE_EXCLUDE_PADDING_QCOM,
         4,  // reserved
         {0, 0},
         {0, 0},
@@ -1499,7 +1490,7 @@ class CLMLRuntime : public JSONRuntimeBase {
     return;
   }
 
-   /*!
+  /*!
    * \brief Create a dense layer.
    *
    *

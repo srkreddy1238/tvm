@@ -123,7 +123,6 @@ inline const CallNode* TryGetOpInFunction(Function f, const std::string& op_name
   return nullptr;
 }
 
-
 /*!
  * \brief Return a call node within the function which calls an op with the given name
  * The function must contain exactly one call to such op.
@@ -161,7 +160,6 @@ std::string to_str(const Type& value) {
   os << std::setprecision(12) << value;
   return os.str();
 }
-
 
 /*!
  * \brief Utility function to find the string pattern in string str

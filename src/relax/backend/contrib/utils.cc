@@ -71,8 +71,8 @@ Map<String, IntImm> ExtractArgIdx(String pattern_name, Function f) {
  * \return return true if the main string ends with pattern, false otherwise
  */
 bool EndsWithPattern(const std::string& str, const std::string& pattern) {
-    if (str.length() < pattern.length()) return false;
-    return str.compare(str.length() - pattern.length(), pattern.length(), pattern) == 0;
+  if (str.length() < pattern.length()) return false;
+  return str.compare(str.length() - pattern.length(), pattern.length(), pattern) == 0;
 }
 
 TVM_REGISTER_GLOBAL("relax.contrib.extract_arg_idx").set_body_typed(ExtractArgIdx);
