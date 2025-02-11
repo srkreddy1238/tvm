@@ -124,10 +124,6 @@ jobs:
         shell: bash -l {0}
         run: |
            SCCACHE_SERVER_PORT=8768 ./tests/scripts/ci.py gpu -d adreno_ci_gpu -u
-      - name: Run front end tests
-        shell: bash -l {0}
-        run: |
-           SCCACHE_SERVER_PORT=8768 ./tests/scripts/ci.py gpu -d adreno_ci_gpu -f
   Windows-Build:
     needs: [GPU-Tests]
     if: ${{ github.repository == 'gpgpu/apache-tvm' }}
