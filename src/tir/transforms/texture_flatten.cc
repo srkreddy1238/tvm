@@ -119,7 +119,7 @@ class TextureFlattener : public TextureLoweringBase {
           ApplyTexture2DFlattening<PrimExpr>(ShapeFromRange{op->bounds}, op->bounds.size(), axis);
       Array<PrimExpr> args;
       args.push_back(StringImm(storage_scope));
-      args.push_back(IntImm(DataType::Int(64), 2));  // 2d
+      args.push_back(IntImm(DataType::Int(64), 3));  // 2D-Array
       args.push_back(Call(DataType::Handle(), builtin::tvm_stack_make_shape(),
                           {texture.width, texture.height}));
       stmt = LetStmt(buffer_var, Call(buffer_var.dtype(), builtin::nd_mem_alloc_with_scope(), args),

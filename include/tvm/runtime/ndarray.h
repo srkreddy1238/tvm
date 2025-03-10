@@ -207,6 +207,9 @@ class NDArray : public ObjectRef {
 
   TVM_DLL ShapeTuple Shape() const;
   TVM_DLL runtime::DataType DataType() const;
+
+  TVM_DLL void SetScope(String scope);
+  TVM_DLL String GetScope() const;
   /*!
    * \brief Check conditions for construction NDArray over DLTensor without copying.
    * There are three conditions to check:
@@ -264,7 +267,7 @@ class NDArray : public ObjectRef {
  * \param strm The output stream
  * \param tensor The tensor to be saved.
  */
-inline bool SaveDLTensor(dmlc::Stream* strm, const DLTensor* tensor);
+inline bool SaveDLTensor(dmlc::Stream* strm, const DLTensor* tensor, String scope = "global");
 
 /*!
  * \brief The container base structure
@@ -297,6 +300,12 @@ class NDArray::ContainerBase {
    *  can be used for shape data.
    */
   ShapeTuple shape_;
+
+  /*!
+   * \brief The memory scope
+   * represents the underlaying scope information of device
+   */
+  String scope = "global";
 };
 
 /*!
@@ -316,7 +325,8 @@ class NDArray::Container : public Object, public NDArray::ContainerBase {
     dl_tensor.byte_offset = 0;
   }
 
-  Container(void* data, ShapeTuple shape, DLDataType dtype, Device dev) {
+  Container(void* data, ShapeTuple shape, DLDataType dtype, Device dev,
+            Optional<String> mem_scope = String("global")) {
     // Initialize the type index.
     type_index_ = Container::RuntimeTypeIndex();
     dl_tensor.data = data;
@@ -327,6 +337,9 @@ class NDArray::Container : public Object, public NDArray::ContainerBase {
     dl_tensor.strides = nullptr;
     dl_tensor.byte_offset = 0;
     dl_tensor.device = dev;
+    if (mem_scope.defined()) {
+      scope = mem_scope.value();
+    }
   }
   /*!
    * \brief Set the deleter field.
@@ -450,8 +463,10 @@ inline Object* TVMArrayHandleToObjectHandle(TVMArrayHandle handle) {
 /*! \brief Magic number for NDArray file */
 constexpr uint64_t kTVMNDArrayMagic = 0xDD5E40F096B4A13F;
 
-inline bool SaveDLTensor(dmlc::Stream* strm, const DLTensor* tensor) {
-  uint64_t header = kTVMNDArrayMagic, reserved = 0;
+constexpr uint64_t kTVMNDArrayScopedMagic = 0xDD5E40F096B4A13E;
+
+inline bool SaveDLTensor(dmlc::Stream* strm, const DLTensor* tensor, String scope) {
+  uint64_t header = kTVMNDArrayScopedMagic, reserved = 0;
   strm->Write(header);
   strm->Write(reserved);
   // Always save data as CPU context
@@ -471,6 +486,7 @@ inline bool SaveDLTensor(dmlc::Stream* strm, const DLTensor* tensor) {
   strm->Write(tensor->dtype);
   int ndim = tensor->ndim;
   strm->WriteArray(tensor->shape, ndim);
+  strm->Write(std::string(scope));
   int type_bytes = (tensor->dtype.bits + 7) / 8;
   int64_t num_elems = 1;
   for (int i = 0; i < ndim; ++i) {
@@ -497,13 +513,16 @@ inline bool SaveDLTensor(dmlc::Stream* strm, const DLTensor* tensor) {
   return true;
 }
 
-inline void NDArray::Save(dmlc::Stream* strm) const { SaveDLTensor(strm, operator->()); }
+inline void NDArray::Save(dmlc::Stream* strm) const {
+  SaveDLTensor(strm, operator->(), GetScope());
+}
 
 inline bool NDArray::Load(dmlc::Stream* strm) {
   uint64_t header, reserved;
   ICHECK(strm->Read(&header)) << "Invalid DLTensor file format";
   ICHECK(strm->Read(&reserved)) << "Invalid DLTensor file format";
-  ICHECK(header == kTVMNDArrayMagic) << "Invalid DLTensor file format";
+  ICHECK((header == kTVMNDArrayMagic) || (header == kTVMNDArrayScopedMagic))
+      << "Invalid DLTensor file format";
   Device dev;
   int ndim;
   DLDataType dtype;
@@ -520,6 +539,11 @@ inline bool NDArray::Load(dmlc::Stream* strm) {
   int elem_bytes = (ret->dtype.bits + 7) / 8;
   for (int i = 0; i < ret->ndim; ++i) {
     num_elems *= ret->shape[i];
+  }
+  if (header == kTVMNDArrayScopedMagic) {
+    std::string scope;
+    strm->Read(&scope);
+    ret.SetScope(scope);
   }
   int64_t data_byte_size;
   ICHECK(strm->Read(&data_byte_size)) << "Invalid DLTensor file format";

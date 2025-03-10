@@ -208,8 +208,15 @@ NDArray NDArray::CreateView(ShapeTuple shape, DLDataType dtype, uint64_t relativ
 
   NDArray ret = Internal::Create(shape, dtype, curr_dl_tensor.device);
 
-  size_t curr_size = GetDataSize(this->get_mutable()->dl_tensor);
-  size_t view_size = GetDataSize(ret.get_mutable()->dl_tensor);
+  // size_t curr_size = GetDataSize(this->get_mutable()->dl_tensor);
+  // size_t view_size = GetDataSize(ret.get_mutable()->dl_tensor);
+
+  size_t curr_size =
+      DeviceAPI::Get(this->get_mutable()->dl_tensor.device)
+          ->GetDataSize(this->get_mutable()->dl_tensor, String(this->get_mutable()->scope));
+  size_t view_size =
+      DeviceAPI::Get(ret.get_mutable()->dl_tensor.device)
+          ->GetDataSize(ret.get_mutable()->dl_tensor, String(ret.get_mutable()->scope));
   CHECK_LE(relative_byte_offset + view_size, curr_size)
       << "ValueError: "
       << "View with shape " << shape << " and datatype " << dtype << " would have a size of "
@@ -236,6 +243,9 @@ NDArray NDArray::Empty(ShapeTuple shape, DLDataType dtype, Device dev, Optional<
   ret.get_mutable()->dl_tensor.data =
       DeviceAPI::Get(ret->device)
           ->AllocDataSpace(ret->device, shape.size(), shape.data(), ret->dtype, mem_scope);
+  if (mem_scope.defined()) {
+    ret.get_mutable()->scope = mem_scope.value();
+  }
   return ret;
 }
 
@@ -334,6 +344,14 @@ ShapeTuple NDArray::Shape() const {
 
 runtime::DataType NDArray::DataType() const {
   return runtime::DataType(get_mutable()->dl_tensor.dtype);
+}
+
+void NDArray::SetScope(String scope) {
+  static_cast<NDArray::Container*>(data_.get())->scope = std::move(scope);
+}
+
+String NDArray::GetScope() const {
+  return static_cast<const NDArray::Container*>(data_.get())->scope;
 }
 
 bool NDArray::AbilityOfZeroCopyForDLTensor(DLTensor* tensor, const Device& dev) {

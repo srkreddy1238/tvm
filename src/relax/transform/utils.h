@@ -394,6 +394,17 @@ inline int GetDeviceIndex(const IRModule& mod, const VDevice& vdevice) {
   return -1;
 }
 
+inline Optional<VDevice> GetGlobalVDevice(const IRModule& mod, const int index) {
+  Optional<VDevice> ret;
+  if (mod->global_infos.find("vdevice") != mod->global_infos.end()) {
+    Array<GlobalInfo> vdevices = mod->global_infos["vdevice"];
+    if (index < static_cast<int>(vdevices.size())) {
+      ret = vdevices[index].as<VDevice>();
+    }
+  }
+  return std::move(ret);
+}
+
 /* \brief Eliminate common subexpressions
  *
  * Utility for simplifying relax expressions by removing common

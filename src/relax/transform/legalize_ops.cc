@@ -220,9 +220,6 @@ class LegalizeMutator : public ExprMutator {
       out_sinfo = TupleStructInfo(sinfo_fields);
     }
 
-    if (out_sinfo->IsInstance<TensorStructInfoNode>()) {
-      LOG(WARNING) << "New Struct Info:" << Downcast<TensorStructInfo>(out_sinfo);
-    }
     return Call(call_tir_op, call->args, call->attrs, {out_sinfo});
   }
 

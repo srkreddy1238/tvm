@@ -761,6 +761,7 @@ void OpenCLWorkspace::Init(const std::string& type_key, const std::string& devic
 }
 
 TVM_REGISTER_GLOBAL("device_api.opencl.alloc_nd").set_body([](TVMArgs args, TVMRetValue* rv) {
+  LOG(WARNING) << "device_api.opencl.alloc_nd called";
   int32_t device_type = args[0];
   int32_t device_id = args[1];
   int32_t dtype_code_hint = args[2];
@@ -768,7 +769,7 @@ TVM_REGISTER_GLOBAL("device_api.opencl.alloc_nd").set_body([](TVMArgs args, TVMR
   std::string scope = args[4];
   CHECK(scope.find("texture") != std::string::npos);
   int64_t ndim = args[5];
-  CHECK_EQ(ndim, 2);
+  CHECK_EQ(ndim, 3);
   int64_t* shape = static_cast<int64_t*>(static_cast<void*>(args[6]));
   int64_t width = shape[0];
   int64_t height = shape[1];

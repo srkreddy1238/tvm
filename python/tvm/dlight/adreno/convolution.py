@@ -24,7 +24,7 @@ from tvm.target import Target
 from tvm.tir import IterVar
 from tvm.tir.schedule.schedule import BlockRV
 
-from ..analysis import BlockInfo, IterInfo
+from ..analysis import BlockInfo, IterInfo, get_root_block
 from .base import AdrenoScheduleRule
 
 
@@ -160,7 +160,7 @@ class Conv2d(AdrenoScheduleRule):
             sch = tir.Schedule(func)
 
         # config = self.get_configs(target)
-        root_block = analysis.get_root_block(sch)
+        root_block = get_root_block(sch)
         blocks = sch.get_child_blocks(root_block)
         reduction_block = get_reduction_blocks(sch, blocks)
 
