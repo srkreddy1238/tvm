@@ -29,8 +29,8 @@ executor_type = tvm.testing.parameter("ge", "vm")
 dtype = tvm.testing.parameter("float32")
 
 
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl -device=adreno")
+@tvm.testing.requires_opencl_vulkan
+@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
 def test_conv2d_transpose_adreno(remote, target, executor_type, dtype):
     # Conv2d transpose test cases lists
     trials = [
@@ -55,48 +55,93 @@ def test_conv2d_transpose_adreno(remote, target, executor_type, dtype):
         [],
     ]
     # Tensors memory scope with vm executor build
-    vm_texture_scopes = [
-        """
-        VM VirtualDevice[0]: device type 1, id 0 and mem_scope
-        VM VirtualDevice[1]: device type 4, id 0 and mem_scope
-        VM VirtualDevice[2]: device type 4, id 0 and mem_scope global.texture-nhwc
-        VM VirtualDevice[3]: device type 4, id 0 and mem_scope global.texture-weight
-        """,
-        """
-        VM VirtualDevice[0]: device type 1, id 0 and mem_scope
-        VM VirtualDevice[1]: device type 4, id 0 and mem_scope
-        VM VirtualDevice[2]: device type 4, id 0 and mem_scope global.texture-nhwc
-        VM VirtualDevice[3]: device type 4, id 0 and mem_scope global.texture-weight
-        """,
-        """
-        VM VirtualDevice[0]: device type 1, id 0 and mem_scope
-        VM VirtualDevice[1]: device type 4, id 0 and mem_scope
-        VM VirtualDevice[2]: device type 4, id 0 and mem_scope global.texture-nhwc
-        VM VirtualDevice[3]: device type 4, id 0 and mem_scope global.texture-weight
-        VM VirtualDevice[4]: device type 4, id 0 and mem_scope global.texture-weight
-        """,
-        """
-        VM VirtualDevice[0]: device type 1, id 0 and mem_scope
-        VM VirtualDevice[1]: device type 4, id 0 and mem_scope
-        VM VirtualDevice[2]: device type 4, id 0 and mem_scope global.texture-nhwc
-        VM VirtualDevice[3]: device type 4, id 0 and mem_scope global.texture-weight
-        """,
-        """
-        VM VirtualDevice[0]: device type 1, id 0 and mem_scope
-        VM VirtualDevice[1]: device type 4, id 0 and mem_scope
-        VM VirtualDevice[2]: device type 4, id 0 and mem_scope global.texture-nhwc
-        VM VirtualDevice[3]: device type 4, id 0 and mem_scope global.texture-weight
-        VM VirtualDevice[4]: device type 4, id 0 and mem_scope global.texture-weight
-        """,
-        """
-        VM VirtualDevice[0]: device type 1, id 0 and mem_scope
-        VM VirtualDevice[1]: device type 4, id 0 and mem_scope
-        VM VirtualDevice[2]: device type 4, id 0 and mem_scope global.texture-weight
-        VM VirtualDevice[3]: device type 4, id 0 and mem_scope global.texture-weight
-        """,
-        [],
-        [],
-    ]
+    vm_texture_scopes = []
+    if "opencl" in target:
+        vm_texture_scopes = [
+            """
+            VM VirtualDevice[0]: device type 1, id 0 and mem_scope
+            VM VirtualDevice[1]: device type 4, id 0 and mem_scope
+            VM VirtualDevice[2]: device type 4, id 0 and mem_scope global.texture-nhwc
+            VM VirtualDevice[3]: device type 4, id 0 and mem_scope global.texture-weight
+            """,
+            """
+            VM VirtualDevice[0]: device type 1, id 0 and mem_scope
+            VM VirtualDevice[1]: device type 4, id 0 and mem_scope
+            VM VirtualDevice[2]: device type 4, id 0 and mem_scope global.texture-nhwc
+            VM VirtualDevice[3]: device type 4, id 0 and mem_scope global.texture-weight
+            """,
+            """
+            VM VirtualDevice[0]: device type 1, id 0 and mem_scope
+            VM VirtualDevice[1]: device type 4, id 0 and mem_scope
+            VM VirtualDevice[2]: device type 4, id 0 and mem_scope global.texture-nhwc
+            VM VirtualDevice[3]: device type 4, id 0 and mem_scope global.texture-weight
+            VM VirtualDevice[4]: device type 4, id 0 and mem_scope global.texture-weight
+            """,
+            """
+            VM VirtualDevice[0]: device type 1, id 0 and mem_scope
+            VM VirtualDevice[1]: device type 4, id 0 and mem_scope
+            VM VirtualDevice[2]: device type 4, id 0 and mem_scope global.texture-nhwc
+            VM VirtualDevice[3]: device type 4, id 0 and mem_scope global.texture-weight
+            """,
+            """
+            VM VirtualDevice[0]: device type 1, id 0 and mem_scope
+            VM VirtualDevice[1]: device type 4, id 0 and mem_scope
+            VM VirtualDevice[2]: device type 4, id 0 and mem_scope global.texture-nhwc
+            VM VirtualDevice[3]: device type 4, id 0 and mem_scope global.texture-weight
+            VM VirtualDevice[4]: device type 4, id 0 and mem_scope global.texture-weight
+            """,
+            """
+            VM VirtualDevice[0]: device type 1, id 0 and mem_scope
+            VM VirtualDevice[1]: device type 4, id 0 and mem_scope
+            VM VirtualDevice[2]: device type 4, id 0 and mem_scope global.texture-weight
+            VM VirtualDevice[3]: device type 4, id 0 and mem_scope global.texture-weight
+            """,
+            [],
+            [],
+        ]
+    elif "vulkan" in target:
+        vm_texture_scopes = [
+            """
+            VM VirtualDevice[0]: device type 1, id 0 and mem_scope
+            VM VirtualDevice[1]: device type 7, id 0 and mem_scope
+            VM VirtualDevice[2]: device type 7, id 0 and mem_scope global.texture-nhwc
+            VM VirtualDevice[3]: device type 7, id 0 and mem_scope global.texture-weight
+            """,
+            """
+            VM VirtualDevice[0]: device type 1, id 0 and mem_scope
+            VM VirtualDevice[1]: device type 7, id 0 and mem_scope
+            VM VirtualDevice[2]: device type 7, id 0 and mem_scope global.texture-nhwc
+            VM VirtualDevice[3]: device type 7, id 0 and mem_scope global.texture-weight
+            """,
+            """
+            VM VirtualDevice[0]: device type 1, id 0 and mem_scope
+            VM VirtualDevice[1]: device type 7, id 0 and mem_scope
+            VM VirtualDevice[2]: device type 7, id 0 and mem_scope global.texture-nhwc
+            VM VirtualDevice[3]: device type 7, id 0 and mem_scope global.texture-weight
+            VM VirtualDevice[4]: device type 7, id 0 and mem_scope global.texture-weight
+            """,
+            """
+            VM VirtualDevice[0]: device type 1, id 0 and mem_scope
+            VM VirtualDevice[1]: device type 7, id 0 and mem_scope
+            VM VirtualDevice[2]: device type 7, id 0 and mem_scope global.texture-nhwc
+            VM VirtualDevice[3]: device type 7, id 0 and mem_scope global.texture-weight
+            """,
+            """
+            VM VirtualDevice[0]: device type 1, id 0 and mem_scope
+            VM VirtualDevice[1]: device type 7, id 0 and mem_scope
+            VM VirtualDevice[2]: device type 7, id 0 and mem_scope global.texture-nhwc
+            VM VirtualDevice[3]: device type 7, id 0 and mem_scope global.texture-weight
+            VM VirtualDevice[4]: device type 7, id 0 and mem_scope global.texture-weight
+            """,
+            """
+            VM VirtualDevice[0]: device type 1, id 0 and mem_scope
+            VM VirtualDevice[1]: device type 7, id 0 and mem_scope
+            VM VirtualDevice[2]: device type 7, id 0 and mem_scope global.texture-weight
+            VM VirtualDevice[3]: device type 7, id 0 and mem_scope global.texture-weight
+            """,
+            [],
+            [],
+        ]
 
     for i, (
         kernel_h,
@@ -172,8 +217,8 @@ def test_conv2d_transpose_adreno(remote, target, executor_type, dtype):
             )
 
 
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl -device=adreno")
+@tvm.testing.requires_opencl_vulkan
+@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
 def test_conv2d_transpose_three_layer_block(remote, target, executor_type, dtype):
     # Conv2d transpose test cases lists
     trials = [
@@ -205,29 +250,56 @@ def test_conv2d_transpose_three_layer_block(remote, target, executor_type, dtype
             "",
         ],
     ]
-    vm_texture_scopes = [
-        """
-        VM VirtualDevice[0]: device type 1, id 0 and mem_scope
-        VM VirtualDevice[1]: device type 4, id 0 and mem_scope
-        VM VirtualDevice[2]: device type 4, id 0 and mem_scope global.texture-nhwc
-        VM VirtualDevice[3]: device type 4, id 0 and mem_scope global.texture-nhwc
-        VM VirtualDevice[4]: device type 4, id 0 and mem_scope global.texture-weight
-        VM VirtualDevice[5]: device type 4, id 0 and mem_scope global.texture
-        VM VirtualDevice[6]: device type 4, id 0 and mem_scope global.texture-weight
-        VM VirtualDevice[7]: device type 4, id 0 and mem_scope global.texture-weight
-        """,
-        """
-        VM VirtualDevice[0]: device type 1, id 0 and mem_scope
-        VM VirtualDevice[1]: device type 4, id 0 and mem_scope
-        VM VirtualDevice[2]: device type 4, id 0 and mem_scope global.texture-weight
-        VM VirtualDevice[3]: device type 4, id 0 and mem_scope global.texture-weight
-        VM VirtualDevice[4]: device type 4, id 0 and mem_scope global.texture-weight
-        VM VirtualDevice[5]: device type 4, id 0 and mem_scope global.texture-weight
-        VM VirtualDevice[6]: device type 4, id 0 and mem_scope global.texture-weight
-        VM VirtualDevice[7]: device type 4, id 0 and mem_scope global.texture-weight
-        VM VirtualDevice[8]: device type 4, id 0 and mem_scope global.texture-weight
-        """,
-    ]
+
+    vm_texture_scopes = []
+    if "opencl" in target:
+        vm_texture_scopes = [
+            """
+            VM VirtualDevice[0]: device type 1, id 0 and mem_scope
+            VM VirtualDevice[1]: device type 4, id 0 and mem_scope
+            VM VirtualDevice[2]: device type 4, id 0 and mem_scope global.texture-nhwc
+            VM VirtualDevice[3]: device type 4, id 0 and mem_scope global.texture-nhwc
+            VM VirtualDevice[4]: device type 4, id 0 and mem_scope global.texture-weight
+            VM VirtualDevice[5]: device type 4, id 0 and mem_scope global.texture
+            VM VirtualDevice[6]: device type 4, id 0 and mem_scope global.texture-weight
+            VM VirtualDevice[7]: device type 4, id 0 and mem_scope global.texture-weight
+            """,
+            """
+            VM VirtualDevice[0]: device type 1, id 0 and mem_scope
+            VM VirtualDevice[1]: device type 4, id 0 and mem_scope
+            VM VirtualDevice[2]: device type 4, id 0 and mem_scope global.texture-weight
+            VM VirtualDevice[3]: device type 4, id 0 and mem_scope global.texture-weight
+            VM VirtualDevice[4]: device type 4, id 0 and mem_scope global.texture-weight
+            VM VirtualDevice[5]: device type 4, id 0 and mem_scope global.texture-weight
+            VM VirtualDevice[6]: device type 4, id 0 and mem_scope global.texture-weight
+            VM VirtualDevice[7]: device type 4, id 0 and mem_scope global.texture-weight
+            VM VirtualDevice[8]: device type 4, id 0 and mem_scope global.texture-weight
+            """,
+        ]
+    elif "vulkan" in target:
+        vm_texture_scopes = [
+            """
+            VM VirtualDevice[0]: device type 1, id 0 and mem_scope
+            VM VirtualDevice[1]: device type 7, id 0 and mem_scope
+            VM VirtualDevice[2]: device type 7, id 0 and mem_scope global.texture-nhwc
+            VM VirtualDevice[3]: device type 7, id 0 and mem_scope global.texture-nhwc
+            VM VirtualDevice[4]: device type 7, id 0 and mem_scope global.texture-weight
+            VM VirtualDevice[5]: device type 7, id 0 and mem_scope global.texture
+            VM VirtualDevice[6]: device type 7, id 0 and mem_scope global.texture-weight
+            VM VirtualDevice[7]: device type 7, id 0 and mem_scope global.texture-weight
+            """,
+            """
+            VM VirtualDevice[0]: device type 1, id 0 and mem_scope
+            VM VirtualDevice[1]: device type 7, id 0 and mem_scope
+            VM VirtualDevice[2]: device type 7, id 0 and mem_scope global.texture-weight
+            VM VirtualDevice[3]: device type 7, id 0 and mem_scope global.texture-weight
+            VM VirtualDevice[4]: device type 7, id 0 and mem_scope global.texture-weight
+            VM VirtualDevice[5]: device type 7, id 0 and mem_scope global.texture-weight
+            VM VirtualDevice[6]: device type 7, id 0 and mem_scope global.texture-weight
+            VM VirtualDevice[7]: device type 7, id 0 and mem_scope global.texture-weight
+            VM VirtualDevice[8]: device type 7, id 0 and mem_scope global.texture-weight
+            """,
+        ]
 
     for i, (
         kernel_h,

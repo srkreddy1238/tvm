@@ -30,10 +30,10 @@ executor_type = tvm.testing.parameter("ge", "vm")
 dtype = tvm.testing.parameter("float32")
 
 
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl -device=adreno")
-def test_conv2d_deeplabv3_1_257_257_32x1_1_32_16(remote, target, executor_type, dtype):
-    input_shape = (1, 257, 257, 32)
+@tvm.testing.requires_opencl_vulkan
+@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
+def test_conv2d_deeplabv3_1_255_255_32x1_1_32_16(remote, target, executor_type, dtype):
+    input_shape = (1, 255, 255, 32)
     filter_shape = (1, 1, 32, 16)
     bias_shape = (filter_shape[-1],)
     A = relay.var("data", shape=input_shape, dtype=dtype)
@@ -70,10 +70,10 @@ def test_conv2d_deeplabv3_1_257_257_32x1_1_32_16(remote, target, executor_type, 
         build_run_compare_vm(remote, mod, params1, {"data": input_shape}, {"data": dtype}, target)
 
 
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl -device=adreno")
-def test_conv2d_deeplabv3_1_257_257_32x1_1_32_16_with_padding(remote, target, executor_type, dtype):
-    input_shape = (1, 257, 257, 32)
+@tvm.testing.requires_opencl_vulkan
+@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
+def test_conv2d_deeplabv3_1_255_255_32x1_1_32_16_with_padding(remote, target, executor_type, dtype):
+    input_shape = (1, 255, 255, 32)
     filter_shape = (1, 1, 32, 16)
     bias_shape = (filter_shape[-1],)
     A = relay.var("data", shape=input_shape, dtype=dtype)
@@ -113,8 +113,8 @@ def test_conv2d_deeplabv3_1_257_257_32x1_1_32_16_with_padding(remote, target, ex
         build_run_compare_vm(remote, mod, params1, {"data": input_shape}, {"data": dtype}, target)
 
 
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl -device=adreno")
+@tvm.testing.requires_opencl_vulkan
+@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
 def test_conv2d_4_35_35_32x3_3_144_16(remote, target, executor_type, dtype):
     input_shape = (4, 35, 35, 32)
     filter_shape = (3, 3, 32, 16)
@@ -154,8 +154,8 @@ def test_conv2d_4_35_35_32x3_3_144_16(remote, target, executor_type, dtype):
         build_run_compare_vm(remote, mod, params1, {"data": input_shape}, {"data": dtype}, target)
 
 
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl -device=adreno")
+@tvm.testing.requires_opencl_vulkan
+@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
 def test_conv2d_deeplabv3_1_513_513_3x3_3_3_32(remote, target, executor_type, dtype):
     input_shape = (1, 513, 513, 3)
     filter_shape = (3, 3, 3, 32)
@@ -195,8 +195,8 @@ def test_conv2d_deeplabv3_1_513_513_3x3_3_3_32(remote, target, executor_type, dt
         build_run_compare_vm(remote, mod, params1, {"data": input_shape}, {"data": dtype}, target)
 
 
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl -device=adreno")
+@tvm.testing.requires_opencl_vulkan
+@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
 def test_conv2d_inceptionv3_64x35x35_96x64x3x3_nopad(remote, target, executor_type, dtype):
     input_shape = (1, 42, 42, 32)
     filter_shape = (3, 3, 32, 96)
@@ -242,8 +242,8 @@ def test_conv2d_inceptionv3_64x35x35_96x64x3x3_nopad(remote, target, executor_ty
         )
 
 
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl -device=adreno")
+@tvm.testing.requires_opencl_vulkan
+@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
 def test_conv2d_inceptionv3_64x35x35_96x64x3x3_nopad_pass(remote, target, executor_type, dtype):
     input_shape = (1, 40, 40, 32)
     filter_shape = (2, 2, 32, 96)
@@ -289,8 +289,8 @@ def test_conv2d_inceptionv3_64x35x35_96x64x3x3_nopad_pass(remote, target, execut
         )
 
 
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl -device=adreno")
+@tvm.testing.requires_opencl_vulkan
+@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
 def test_conv2d_inceptionv3_35_35_strides(remote, target, executor_type, dtype):
     input_shape = (1, 35, 35, 48)
     filter_shape = (5, 5, 48, 64)
@@ -336,8 +336,8 @@ def test_conv2d_inceptionv3_35_35_strides(remote, target, executor_type, dtype):
         )
 
 
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl -device=adreno")
+@tvm.testing.requires_opencl_vulkan
+@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
 def test_conv2d_resnet50_v2_nhwc_3c(remote, target, executor_type, dtype):
     input_shape = (1, 224, 224, 3)
     filter_shape = (7, 7, 3, 64)
@@ -380,8 +380,8 @@ def test_conv2d_resnet50_v2_nhwc_3c(remote, target, executor_type, dtype):
         build_run_compare_vm(remote, mod, params1, {"data": input_shape}, {"data": dtype}, target)
 
 
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl -device=adreno")
+@tvm.testing.requires_opencl_vulkan
+@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
 def test_conv2d_inceptionv3_nhwc_3c(remote, target, executor_type, dtype):
     input_shape = (1, 299, 299, 3)
     filter_shape = (3, 3, 3, 64)
@@ -423,8 +423,8 @@ def test_conv2d_inceptionv3_nhwc_3c(remote, target, executor_type, dtype):
         build_run_compare_vm(remote, mod, params1, {"data": input_shape}, {"data": dtype}, target)
 
 
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl -device=adreno")
+@tvm.testing.requires_opencl_vulkan
+@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
 def test_conv2d_1x1_16c16spatial(remote, target, executor_type, dtype):
     input_shape = (1, 128, 128, 16)
     filter_shape = (4, 4, 16, 32)
@@ -466,8 +466,8 @@ def test_conv2d_1x1_16c16spatial(remote, target, executor_type, dtype):
         build_run_compare_vm(remote, mod, params1, {"data": input_shape}, {"data": dtype}, target)
 
 
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl -device=adreno")
+@tvm.testing.requires_opencl_vulkan
+@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
 def test_conv2d_4x4_16c16pad(remote, target, executor_type, dtype):
     input_shape = (1, 256, 256, 32)
     filter_shape = (4, 4, 32, 32)
@@ -509,8 +509,8 @@ def test_conv2d_4x4_16c16pad(remote, target, executor_type, dtype):
         build_run_compare_vm(remote, mod, params1, {"data": input_shape}, {"data": dtype}, target)
 
 
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl -device=adreno")
+@tvm.testing.requires_opencl_vulkan
+@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
 def test_conv2d_4x4x4_16c16pad(remote, target, executor_type, dtype):
     input_shape = (1, 256, 256, 32)
     filter_shape = (4, 4, 32, 4)
@@ -551,8 +551,8 @@ def test_conv2d_4x4x4_16c16pad(remote, target, executor_type, dtype):
         build_run_compare_vm(remote, mod, params1, {"data": input_shape}, {"data": dtype}, target)
 
 
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl -device=adreno")
+@tvm.testing.requires_opencl_vulkan
+@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
 def test_conv2d_yolov3_v2_nhwc_3c(remote, target, executor_type, dtype):
     input_shape = (1, 13, 13, 1024)
     filter_shape = (1, 1, 1024, 255)
@@ -587,8 +587,8 @@ def test_conv2d_yolov3_v2_nhwc_3c(remote, target, executor_type, dtype):
         build_run_compare_vm(remote, mod, params, {"data": input_shape}, {"data": dtype}, target)
 
 
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl -device=adreno")
+@tvm.testing.requires_opencl_vulkan
+@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
 def test_conv2d_vgg16_winograd_4d(remote, target, executor_type, dtype):
     input_shape = (1, 28, 28, 512)
     filter_shape = (3, 3, 512, 512)
@@ -654,8 +654,8 @@ def test_conv2d_vgg16_winograd_4d(remote, target, executor_type, dtype):
         assert len(matches) > 0
 
 
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl -device=adreno")
+@tvm.testing.requires_opencl_vulkan
+@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
 def test_conv2d_vgg16_winograd_4d_expand_spatial_dims(remote, target, executor_type, dtype):
     input_shape = (1, 28, 28, 1)
     filter_shape = (3, 3, 1, 64)
@@ -720,8 +720,8 @@ def test_conv2d_vgg16_winograd_4d_expand_spatial_dims(remote, target, executor_t
         assert len(matches) > 0
 
 
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl -device=adreno")
+@tvm.testing.requires_opencl_vulkan
+@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
 def test_conv2d_winograd_conv(remote, target, executor_type, dtype):
     input_shape = (1, 3, 3, 4)
     A = relay.var("data", shape=input_shape, dtype=dtype)
@@ -800,8 +800,8 @@ def test_conv2d_winograd_conv(remote, target, executor_type, dtype):
         assert len(matches) > 0
 
 
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl -device=adreno")
+@tvm.testing.requires_opencl_vulkan
+@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
 def test_conv2d_winograd_non_rect(remote, target, executor_type, dtype):
     input_shape = (1, 36, 64, 771)
     A = relay.var("data", shape=input_shape, dtype=dtype)
@@ -859,8 +859,8 @@ def test_conv2d_winograd_non_rect(remote, target, executor_type, dtype):
         assert len(matches) > 0
 
 
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl -device=adreno")
+@tvm.testing.requires_opencl_vulkan
+@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
 def test_conv2d_to_3_channels(remote, target, executor_type, dtype):
     input_shape = (1, 200, 200, 256)
     filter_shape = (1, 1, 256, 3)

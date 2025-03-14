@@ -24,8 +24,8 @@ executor_type = tvm.testing.parameter("ge", "vm")
 dtype = tvm.testing.parameter("float32")
 
 
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl -device=adreno")
+@tvm.testing.requires_opencl_vulkan
+@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
 def test_global_pool2d_nchw_wide(remote, target, executor_type, dtype):
     """
     Use case of NCHW global pooling with big spatial valies
@@ -41,8 +41,8 @@ def test_global_pool2d_nchw_wide(remote, target, executor_type, dtype):
         build_run_compare_vm(remote, mod, {}, {"data": input_shape}, {"data": dtype}, target)
 
 
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl -device=adreno")
+@tvm.testing.requires_opencl_vulkan
+@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
 def test_global_pool2d_nchw4c_wide(remote, target, executor_type, dtype):
     """
     Use case of blocked NCHW4c global pooling with big spatial valies
@@ -58,8 +58,8 @@ def test_global_pool2d_nchw4c_wide(remote, target, executor_type, dtype):
         build_run_compare_vm(remote, mod, {}, {"data": input_shape}, {"data": dtype}, target)
 
 
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl -device=adreno")
+@tvm.testing.requires_opencl_vulkan
+@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
 def test_global_pool2d_nchw_deep(remote, target, executor_type, dtype):
     """
     Use case of NCHW deep global pooling
@@ -75,8 +75,8 @@ def test_global_pool2d_nchw_deep(remote, target, executor_type, dtype):
         build_run_compare_vm(remote, mod, {}, {"data": input_shape}, {"data": dtype}, target)
 
 
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl -device=adreno")
+@tvm.testing.requires_opencl_vulkan
+@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
 def test_global_pool2d_nchw4c_deep(remote, target, executor_type, dtype):
     """
     Use case of blocked NCHW4c deep global pooling
@@ -92,8 +92,8 @@ def test_global_pool2d_nchw4c_deep(remote, target, executor_type, dtype):
         build_run_compare_vm(remote, mod, {}, {"data": input_shape}, {"data": dtype}, target)
 
 
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl -device=adreno")
+@tvm.testing.requires_opencl_vulkan
+@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
 def test_global_pool2d_nhwc(remote, target, executor_type, dtype):
     """
     Use case of NHWC global pooling with big spatial valies
@@ -109,8 +109,8 @@ def test_global_pool2d_nhwc(remote, target, executor_type, dtype):
         build_run_compare_vm(remote, mod, {}, {"data": input_shape}, {"data": dtype}, target)
 
 
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl -device=adreno")
+@tvm.testing.requires_opencl_vulkan
+@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
 def test_global_pool2d_nhwc4c(remote, target, executor_type, dtype):
     """
     Use case of NHWC deep global pooling
@@ -126,8 +126,8 @@ def test_global_pool2d_nhwc4c(remote, target, executor_type, dtype):
         build_run_compare_vm(remote, mod, {}, {"data": input_shape}, {"data": dtype}, target)
 
 
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl -device=adreno")
+@tvm.testing.requires_opencl_vulkan
+@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
 def test_global_max_pool2d_nchw_wide(remote, target, executor_type, dtype):
     """
     Use case of NCHW global pooling with big spatial valies
@@ -143,8 +143,8 @@ def test_global_max_pool2d_nchw_wide(remote, target, executor_type, dtype):
         build_run_compare_vm(remote, mod, {}, {"data": input_shape}, {"data": dtype}, target)
 
 
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl -device=adreno")
+@tvm.testing.requires_opencl_vulkan
+@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
 def test_global_max_pool2d_nchw4c_wide(remote, target, executor_type, dtype):
     """
     Use case of blocked NCHW4c global pooling with big spatial valies

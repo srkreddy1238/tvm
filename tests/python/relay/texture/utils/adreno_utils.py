@@ -76,6 +76,14 @@ def build_run_compare(
     else:
         tvm_mod_nchwc = tvm_mod
 
+    # Extract the device type from the target
+    if "opencl" in target:
+        device_type = "opencl"
+    elif "vulkan" in target:
+        device_type = "vulkan"
+    else:
+        device_type = "llvm"  # Default to llvm for CPU targets
+
     if stat_file is not None:
         with autotvm.apply_history_best(stat_file):
             with tvm.transform.PassContext(opt_level=3):
@@ -90,6 +98,7 @@ def build_run_compare(
 
     # verification that storage_scope has expected textures scopes
     graph_json = json.loads(graph)
+
     if "storage_scope" in graph_json["attrs"]:
         assert (
             len(static_mem_scopes) == len(graph_json["attrs"]["storage_scope"][1])
@@ -102,13 +111,23 @@ def build_run_compare(
         assert static_mem_scopes[i] == graph_json["attrs"]["storage_scope"][1][i]
 
     if remote is None:
-        ctx = tvm.opencl()
+        if device_type == "opencl":
+            ctx = tvm.opencl()
+        elif device_type == "vulkan":
+            ctx = tvm.vulkan()
+        else:
+            raise ValueError(f"Unsupported device type: {device_type}")
         m = graph_runtime.create(graph, lib, ctx)
     else:
         temp = utils.tempdir()
         dso_binary = get_unique_dso_lib()
         dso_binary_path = temp.relpath(dso_binary)
-        ctx = remote.cl(0)
+        if device_type == "opencl":
+            ctx = remote.cl(0)
+        elif device_type == "vulkan":
+            ctx = remote.vulkan(0)
+        else:
+            raise ValueError(f"Unsupported device type: {device_type}")
         lib.export_library(dso_binary_path, fcompile=ndk.create_shared)
         remote.upload(dso_binary_path)
         rlib = remote.load_module(dso_binary)
@@ -116,15 +135,15 @@ def build_run_compare(
     m.set_input(**params)
     inputs = []
     for key in input_shape:
-        inputs.append(np.random.normal(size=input_shape[key]).astype(dtypes[key]))
-        m.set_input(key, inputs[-1])
-    m.run()
+        input_data = np.random.normal(size=input_shape[key]).astype(dtypes[key])
+        inputs.append(input_data)
+        m.set_input(key, input_data)
 
+    m.run()
     ref_outputs = get_cpu_reference(tvm_mod, params1, input_shape, inputs)
     for i, ref_output in enumerate(ref_outputs):
         tvm_output = m.get_output(i)
         output = tvm_output.asnumpy()
-
         np.testing.assert_allclose(output, ref_output, rtol=1e-1, atol=1e-1)
     return graph
 
@@ -155,6 +174,14 @@ def build_run_compare_vm(
         module["main"] = tvm_mod_nchwc
         tvm_mod_nchwc = module
 
+    # Extract the device type from the target
+    if "opencl" in target:
+        device_type = "opencl"
+    elif "vulkan" in target:
+        device_type = "vulkan"
+    else:
+        device_type = "llvm"  # Default to llvm for CPU targets
+
     if stat_file is not None:
         with autotvm.apply_history_best(stat_file):
             with tvm.transform.PassContext(opt_level=3):
@@ -174,17 +201,28 @@ def build_run_compare_vm(
             assert mem_scopes_lines[i].strip() == vm_lines[i].strip()
 
     if remote is None:
-        dev = tvm.opencl()
+        if device_type == "opencl":
+            dev = tvm.opencl()
+        elif device_type == "vulkan":
+            dev = tvm.vulkan()
+        else:
+            raise ValueError(f"Unsupported device type: {device_type}")
         vm = VirtualMachine(vmc, dev, "naive")
     else:
         temp = utils.tempdir()
         dso_binary = get_unique_dso_lib()
         dso_binary_path = temp.relpath(dso_binary)
-        dev = remote.cl(0)
+        if device_type == "opencl":
+            dev = remote.cl(0)
+        elif device_type == "vulkan":
+            dev = remote.vulkan(0)
+        else:
+            raise ValueError(f"Unsupported device type: {device_type}")
         vmc.mod.export_library(dso_binary_path, fcompile=ndk.create_shared)
         remote.upload(dso_binary_path)
         rlib = remote.load_module(dso_binary)
         vm = VirtualMachine(rlib, dev, "naive")
+
     data = {}
     inputs = []
     for key in input_shape:

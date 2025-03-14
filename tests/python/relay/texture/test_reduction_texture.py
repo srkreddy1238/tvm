@@ -28,8 +28,8 @@ executor_type = tvm.testing.parameter("ge", "vm")
 dtype = tvm.testing.parameter("float32")
 
 
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl -device=adreno")
+@tvm.testing.requires_opencl_vulkan
+@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
 def test_mean(remote, target, executor_type, dtype):
     # NCHW
     input_shape = (1, 3, 720, 1280)
@@ -43,8 +43,8 @@ def test_mean(remote, target, executor_type, dtype):
         build_run_compare_vm(remote, mod, {}, {"data": input_shape}, {"data": dtype}, target)
 
 
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl -device=adreno")
+@tvm.testing.requires_opencl_vulkan
+@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
 def test_argmax(remote, target, executor_type, dtype):
     # NCHW
     input_shape = (1, 3, 720, 1280)
@@ -58,8 +58,8 @@ def test_argmax(remote, target, executor_type, dtype):
         build_run_compare_vm(remote, mod, {}, {"data": input_shape}, {"data": dtype}, target)
 
 
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl -device=adreno")
+@tvm.testing.requires_opencl_vulkan
+@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
 def test_reduction_max(remote, target, executor_type, dtype):
     # NCHW
     input_shape = (1, 3, 720, 1280)
@@ -73,8 +73,8 @@ def test_reduction_max(remote, target, executor_type, dtype):
         build_run_compare_vm(remote, mod, {}, {"data": input_shape}, {"data": dtype}, target)
 
 
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl -device=adreno")
+@tvm.testing.requires_opencl_vulkan
+@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
 def test_mean_nd4(remote, target, executor_type, dtype):
     # NCHW
     input_shape = (1, 3, 729, 729)
@@ -88,8 +88,8 @@ def test_mean_nd4(remote, target, executor_type, dtype):
         build_run_compare_vm(remote, mod, {}, {"data": input_shape}, {"data": dtype}, target)
 
 
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl -device=adreno")
+@tvm.testing.requires_opencl_vulkan
+@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
 def test_argmax_nd4(remote, target, executor_type, dtype):
     # NCHW
     input_shape = (1, 3, 729, 729)
@@ -103,8 +103,8 @@ def test_argmax_nd4(remote, target, executor_type, dtype):
         build_run_compare_vm(remote, mod, {}, {"data": input_shape}, {"data": dtype}, target)
 
 
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl -device=adreno")
+@tvm.testing.requires_opencl_vulkan
+@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
 def test_reduction_max_nd4(remote, target, executor_type, dtype):
     # NCHW
     input_shape = (1, 3, 729, 729)
@@ -118,8 +118,8 @@ def test_reduction_max_nd4(remote, target, executor_type, dtype):
         build_run_compare_vm(remote, mod, {}, {"data": input_shape}, {"data": dtype}, target)
 
 
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl -device=adreno")
+@tvm.testing.requires_opencl_vulkan
+@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
 def test_mean_b4(remote, target, executor_type, dtype):
     # NCHW
     input_shape = (1, 3, 720, 320, 4)
@@ -133,8 +133,8 @@ def test_mean_b4(remote, target, executor_type, dtype):
         build_run_compare_vm(remote, mod, {}, {"data": input_shape}, {"data": dtype}, target)
 
 
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl -device=adreno")
+@tvm.testing.requires_opencl_vulkan
+@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
 def test_argmax_b4(remote, target, executor_type, dtype):
     # NCHW
     input_shape = (1, 3, 720, 320, 4)
@@ -148,8 +148,8 @@ def test_argmax_b4(remote, target, executor_type, dtype):
         build_run_compare_vm(remote, mod, {}, {"data": input_shape}, {"data": dtype}, target)
 
 
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl -device=adreno")
+@tvm.testing.requires_opencl_vulkan
+@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
 def test_reduction_max_b4(remote, target, executor_type, dtype):
     # NCHW
     input_shape = (1, 3, 720, 320, 4)
@@ -163,8 +163,8 @@ def test_reduction_max_b4(remote, target, executor_type, dtype):
         build_run_compare_vm(remote, mod, {}, {"data": input_shape}, {"data": dtype}, target)
 
 
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl -device=adreno")
+@tvm.testing.requires_opencl_vulkan
+@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
 def test_mean_global_pooling(remote, target, executor_type, dtype):
     """
     Use case of blocked NCHW4c global pooling with big spatial valies
@@ -180,8 +180,8 @@ def test_mean_global_pooling(remote, target, executor_type, dtype):
         build_run_compare_vm(remote, mod, {}, {"data": input_shape}, {"data": dtype}, target)
 
 
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl -device=adreno")
+@tvm.testing.requires_opencl_vulkan
+@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
 def test_mean_global_pooling_block4(remote, target, executor_type, dtype):
     """
     Use case of blocked NCHW4c global pooling with big spatial valies
@@ -197,8 +197,8 @@ def test_mean_global_pooling_block4(remote, target, executor_type, dtype):
         build_run_compare_vm(remote, mod, {}, {"data": input_shape}, {"data": dtype}, target)
 
 
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl -device=adreno")
+@tvm.testing.requires_opencl_vulkan
+@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
 def test_max_global_pooling_block4(remote, target, executor_type, dtype):
     """
     Use case of blocked NCHW4c global pooling with big spatial valies
@@ -214,8 +214,8 @@ def test_max_global_pooling_block4(remote, target, executor_type, dtype):
         build_run_compare_vm(remote, mod, {}, {"data": input_shape}, {"data": dtype}, target)
 
 
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl -device=adreno")
+@tvm.testing.requires_opencl_vulkan
+@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
 def test_sum_cast(remote, target, dtype):
     shape = (10,)
     A = relay.var("A", shape=shape)

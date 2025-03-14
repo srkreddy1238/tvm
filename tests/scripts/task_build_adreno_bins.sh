@@ -42,6 +42,7 @@ echo set\(USE_OPENCL "${ADRENO_OPENCL}"\) >> config.cmake
 else
 echo set\(USE_OPENCL ON\) >> config.cmake
 fi
+echo set\(USE_VULKAN "${ADRENO_VULKAN_SDK}"\) >> config.cmake
 echo set\(USE_RPC ON\) >> config.cmake
 echo set\(USE_CPP_RPC ON\) >> config.cmake
 echo set\(USE_CPP_RTVM ON\) >> config.cmake
@@ -54,7 +55,7 @@ echo set\(ANDROID_PLATFORM android-28\) >> config.cmake
 echo set\(MACHINE_NAME aarch64-linux-gnu\) >> config.cmake
 
 echo set\(USE_OPENCL_GTEST ON\) >> config.cmake
-
+echo set\(USE_VULKAN_GTEST ON\) >> config.cmake
 echo set\(USE_OPENCL_EXTN_QCOM ON\) >> config.cmake
 # Enable for OpenCL Shader dumps
 #echo set\(PROFILE_SHADER_DUMP ON\) >> config.cmake
@@ -70,4 +71,4 @@ cmake -DCMAKE_TOOLCHAIN_FILE="${ANDROID_NDK_HOME}/build/cmake/android.toolchain.
       -DCMAKE_C_COMPILER="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android28-clang" \
       -DMACHINE_NAME="aarch64-linux-gnu" ..
 
-make -j$(nproc) tvm_rpc rtvm opencl-cpptest
+make -j$(nproc) tvm_rpc rtvm opencl-cpptest vulkan-cpptest

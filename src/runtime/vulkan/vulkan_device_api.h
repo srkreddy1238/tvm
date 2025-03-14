@@ -21,11 +21,14 @@
 #define TVM_RUNTIME_VULKAN_VULKAN_DEVICE_API_H_
 
 #include <tvm/runtime/device_api.h>
+#include <tvm/runtime/ndarray.h>
 #include <vulkan/vulkan_core.h>
 
+#include <memory>
 #include <string>
 #include <vector>
 
+#include "../texture.h"
 #include "../thread_map.h"
 #include "../workspace_pool.h"
 #include "vulkan/vulkan_core.h"
@@ -47,8 +50,22 @@ class VulkanDeviceAPI final : public DeviceAPI {
   void GetAttr(Device dev, DeviceAttrKind kind, TVMRetValue* rv) final;
 
   // Implement memory management required by DeviceAPI
+  void* AllocVulkanBuffer(Device dev, size_t nbytes, DLDataType type_hint,
+                          std::shared_ptr<VulkanMemory> memory);
+  void* AllocVulkanImage(Device dev, size_t width, size_t height, size_t layers,
+                         DLDataType type_hint, Optional<String> mem_scope,
+                         std::shared_ptr<VulkanMemory> memory);
   void* AllocDataSpace(Device dev, size_t nbytes, size_t alignment, DLDataType type_hint) final;
+  void* AllocDataSpace(Device dev, int ndim, const int64_t* shape, DLDataType dtype,
+                       Optional<String> mem_scope = NullOpt) final;
+  void* AllocDataSpace(Device dev, size_t width, size_t height, size_t depth, DLDataType type_hint,
+                       Optional<String> mem_scope = NullOpt);
+  void* AllocDataSpaceView(Device dev, void* data, ShapeTuple shape, DLDataType dtype,
+                           Optional<String> mem_scope = NullOpt) final;
+
   void FreeDataSpace(Device dev, void* ptr) final;
+  void FreeDataSpaceView(Device dev, void* ptr) final;
+
   void* AllocWorkspace(Device dev, size_t size, DLDataType type_hint) final;
   void FreeWorkspace(Device dev, void* data) final;
 
@@ -63,11 +80,59 @@ class VulkanDeviceAPI final : public DeviceAPI {
   void StreamSync(Device dev, TVMStreamHandle stream) final;
   void SetStream(Device dev, TVMStreamHandle stream) final;
   TVMStreamHandle GetCurrentStream(Device dev) final;
+  size_t GetDataSize(const DLTensor& arr, Optional<String> mem_scope = NullOpt) final;
 
- protected:
-  void CopyDataFromTo(const void* from, size_t from_offset, void* to, size_t to_offset, size_t size,
-                      Device dev_from, Device dev_to, DLDataType type_hint,
-                      TVMStreamHandle stream) final;
+  void CopyDataFromTo(DLTensor* from, DLTensor* to, TVMStreamHandle stream) final;
+
+  // Check if the device is a Vulkan device
+  virtual bool IsVulkanDevice(Device dev) { return dev.device_type == kDLVulkan; }
+
+  inline VkFormat DTypeToVulkanFormat(DLDataType data_type, int num_channels = 4) {
+    DataType dtype(data_type);
+
+    // Print information about the DataType for debugging
+    // PrintDataTypeInfo(dtype);
+    if (num_channels == 1) {
+      if (dtype == DataType::Float(32)) {
+        return VK_FORMAT_R32_SFLOAT;
+      } else if (dtype == DataType::Float(16)) {
+        return VK_FORMAT_R16_SFLOAT;
+      } else if (dtype == DataType::Int(8)) {
+        return VK_FORMAT_R8_SINT;
+      } else if (dtype == DataType::Int(16)) {
+        return VK_FORMAT_R16_SINT;
+      } else if (dtype == DataType::Int(32)) {
+        return VK_FORMAT_R32_SINT;
+      } else if (dtype == DataType::UInt(8)) {
+        return VK_FORMAT_R8_UINT;
+      } else if (dtype == DataType::UInt(16)) {
+        return VK_FORMAT_R16_UINT;
+      } else if (dtype == DataType::UInt(32)) {
+        return VK_FORMAT_R32_UINT;
+      }
+    } else if (num_channels == 4) {
+      if (dtype == DataType::Float(32)) {
+        return VK_FORMAT_R32G32B32A32_SFLOAT;  // 4-channel 32-bit float
+      } else if (dtype == DataType::Float(16)) {
+        return VK_FORMAT_R16G16B16A16_SFLOAT;  // 4-channel 16-bit float
+      } else if (dtype == DataType::Int(8)) {
+        return VK_FORMAT_R8G8B8A8_SINT;  // 4-channel 8-bit signed integer
+      } else if (dtype == DataType::Int(16)) {
+        return VK_FORMAT_R16G16B16A16_SINT;  // 4-channel 16-bit signed integer
+      } else if (dtype == DataType::Int(32)) {
+        return VK_FORMAT_R32G32B32A32_SINT;  // 4-channel 32-bit signed integer
+      } else if (dtype == DataType::UInt(8)) {
+        return VK_FORMAT_R8G8B8A8_UINT;  // 4-channel 8-bit unsigned integer
+      } else if (dtype == DataType::UInt(16)) {
+        return VK_FORMAT_R16G16B16A16_UINT;  // 4-channel 16-bit unsigned integer
+      } else if (dtype == DataType::UInt(32)) {
+        return VK_FORMAT_R32G32B32A32_UINT;  // 4-channel 32-bit unsigned integer
+      }
+    }
+    LOG(FATAL) << "Unsupported data type or channel count for Vulkan runtime: " << dtype
+               << ", channels: " << num_channels;
+    return VK_FORMAT_UNDEFINED;  // Fallback, should not reach here
+  }
 
   // End of required methods for the DeviceAPI interface
 
@@ -108,6 +173,8 @@ class VulkanDeviceAPI final : public DeviceAPI {
    * device initialization.
    */
   void GetTargetProperty(Device dev, const std::string& property, TVMRetValue* rv) final;
+
+  size_t GetImageAlignment(Device dev);
 
  private:
   std::vector<uint32_t> GetComputeQueueFamilies(VkPhysicalDevice phy_dev);

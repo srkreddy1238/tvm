@@ -600,6 +600,7 @@ generated = [
                 [
                     "./tests/scripts/task_java_unittest.sh",
                     "./tests/scripts/task_opencl_cpp_unittest.sh {build_dir}",
+                    "./tests/scripts/task_vulkan_cpp_unittest.sh {build_dir}",
                     "./tests/scripts/task_python_unittest_gpuonly.sh",
                     "./tests/scripts/task_python_integration_gpuonly.sh",
                 ],
@@ -701,6 +702,7 @@ generated = [
         env={
             "ADRENO_OPENCL": "/adreno-opencl",
             "ADRENOACCL_SDK": "/AdrenoAcCL",
+            "ADRENO_VULKAN_SDK": "/AdrenoSDKVulkan-master",
             "ADRENO_TARGET_CLML_VERSION": os.environ.get("ADRENO_TARGET_CLML_VERSION", "3"),
         },
         options={

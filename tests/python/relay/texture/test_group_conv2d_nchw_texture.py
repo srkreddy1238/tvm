@@ -16,24 +16,23 @@
 # under the License.
 
 import os
+import re
 import tvm
 import numpy as np
 from tvm import relay
 from tvm.relay import testing
 from utils.adreno_utils import build_run_compare, build_run_compare_vm
 
-
 executor_type = tvm.testing.parameter("ge", "vm")
 dtype = tvm.testing.parameter("float32")
 
 
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl -device=adreno")
-def test_depthwise_conv2d_deeplabv3_1_129_129_144x3_3_144_1(remote, target, executor_type, dtype):
-    input_shape = (1, 129, 129, 144)
-    filter_shape = (3, 3, 144, 1)
-    kernel_size = (filter_shape[0], filter_shape[1])
-    bias_shape = (filter_shape[2],)
+@tvm.testing.requires_opencl_vulkan
+@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
+def test_group_conv2d_nchwc_adreno_encoder1(remote, target, executor_type, dtype):
+    input_shape = (1, 512, 56, 100)
+    filter_shape = (512, 64, 3, 3)
+    bias_shape = (1, 512, 1, 1)
     A = relay.var("data", shape=input_shape, dtype=dtype)
     B = relay.var("weight", shape=filter_shape, dtype=dtype)
     bias = relay.var("bias", shape=bias_shape, dtype=dtype)
@@ -41,18 +40,20 @@ def test_depthwise_conv2d_deeplabv3_1_129_129_144x3_3_144_1(remote, target, exec
     conv = relay.nn.conv2d(
         A,
         B,
-        data_layout="NHWC",
-        kernel_layout="HWOI",
+        data_layout="NCHW",
+        kernel_layout="OIHW",
+        padding=[1, 1, 1, 1],
+        strides=[1, 1],
         out_dtype=dtype,
-        groups=filter_shape[2],
-        channels=filter_shape[2],
-        kernel_size=kernel_size,
+        channels=512,
+        groups=8,
+        dilation=1,
+        kernel_size=(3, 3),
     )
     D = relay.op.add(conv, bias)
     D = relay.op.nn.relu(D)
 
     mod = relay.Function([A, B, bias], D)
-    mod = relay.Function([A, B, bias], conv)
     np.random.seed(1)
     initializer = relay.testing.init.Xavier()
     filter_data = np.zeros(filter_shape).astype(dtype)
@@ -70,13 +71,12 @@ def test_depthwise_conv2d_deeplabv3_1_129_129_144x3_3_144_1(remote, target, exec
         build_run_compare_vm(remote, mod, params1, {"data": input_shape}, {"data": dtype}, target)
 
 
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl -device=adreno")
-def test_depthwise_conv2d_deeplabv3_4_35_35_576x3_3_576_1(remote, target, executor_type, dtype):
-    input_shape = (4, 35, 35, 576)
-    filter_shape = (3, 3, 576, 1)
-    kernel_size = (filter_shape[0], filter_shape[1])
-    bias_shape = (filter_shape[2],)
+@tvm.testing.requires_opencl_vulkan
+@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
+def test_group_conv2d_nchwc_adreno_encoder2(remote, target, executor_type, dtype):
+    input_shape = (1, 1024, 56, 100)
+    filter_shape = (512, 128, 3, 3)
+    bias_shape = (1, 512, 1, 1)
     A = relay.var("data", shape=input_shape, dtype=dtype)
     B = relay.var("weight", shape=filter_shape, dtype=dtype)
     bias = relay.var("bias", shape=bias_shape, dtype=dtype)
@@ -84,65 +84,20 @@ def test_depthwise_conv2d_deeplabv3_4_35_35_576x3_3_576_1(remote, target, execut
     conv = relay.nn.conv2d(
         A,
         B,
-        data_layout="NHWC",
-        kernel_layout="HWOI",
-        out_dtype=dtype,
-        groups=filter_shape[2],
-        channels=filter_shape[2],
-        kernel_size=kernel_size,
-    )
-    D = relay.op.add(conv, bias)
-    D = relay.op.nn.relu(D)
-
-    mod = relay.Function([A, B, bias], D)
-    mod = relay.Function([A, B, bias], conv)
-    np.random.seed(1)
-    initializer = relay.testing.init.Xavier()
-    filter_data = np.zeros(filter_shape).astype(dtype)
-    bias_data = np.zeros(bias_shape).astype(dtype)
-    initializer("weight", filter_data)
-    initializer("bias", bias_data)
-    params1 = {
-        "weight": tvm.nd.array(filter_data),
-        "bias": tvm.nd.array(bias_data),
-    }
-
-    if executor_type == "ge":
-        build_run_compare(remote, mod, params1, {"data": input_shape}, {"data": dtype}, target)
-    else:
-        build_run_compare_vm(remote, mod, params1, {"data": input_shape}, {"data": dtype}, target)
-
-
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl -device=adreno")
-def test_depthwise_conv2d_deeplabv3_1_129_129_144x3_3_144_1_with_padding(
-    remote, target, executor_type, dtype
-):
-    input_shape = (1, 129, 129, 144)
-    filter_shape = (3, 3, 144, 1)
-    kernel_size = (filter_shape[0], filter_shape[1])
-    bias_shape = (filter_shape[2],)
-    A = relay.var("data", shape=input_shape, dtype=dtype)
-    B = relay.var("weight", shape=filter_shape, dtype=dtype)
-    bias = relay.var("bias", shape=bias_shape, dtype=dtype)
-
-    conv = relay.nn.conv2d(
-        A,
-        B,
-        data_layout="NHWC",
-        kernel_layout="HWOI",
+        data_layout="NCHW",
+        kernel_layout="OIHW",
         padding=[3, 3, 3, 3],
         strides=[2, 2],
         out_dtype=dtype,
-        groups=filter_shape[2],
-        channels=filter_shape[2],
-        kernel_size=kernel_size,
+        channels=512,
+        groups=8,
+        dilation=2,
+        kernel_size=(3, 3),
     )
     D = relay.op.add(conv, bias)
     D = relay.op.nn.relu(D)
 
     mod = relay.Function([A, B, bias], D)
-    # mod, params = relay.testing.init.create_workload(func)
     np.random.seed(1)
     initializer = relay.testing.init.Xavier()
     filter_data = np.zeros(filter_shape).astype(dtype)
@@ -160,13 +115,12 @@ def test_depthwise_conv2d_deeplabv3_1_129_129_144x3_3_144_1_with_padding(
         build_run_compare_vm(remote, mod, params1, {"data": input_shape}, {"data": dtype}, target)
 
 
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl -device=adreno")
-def test_depthwise_conv2d_1_513_513_7x3_3_7_1(remote, target, executor_type, dtype):
-    input_shape = (1, 513, 513, 7)
-    filter_shape = (3, 3, 7, 1)
-    bias_shape = (filter_shape[2],)
-    kernel_size = (filter_shape[0], filter_shape[1])
+@tvm.testing.requires_opencl_vulkan
+@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
+def test_group_conv2d_nchwc_adreno_nontrivial(remote, target, executor_type, dtype):
+    input_shape = (1, 56, 56, 100)
+    filter_shape = (112, 8, 7, 3)
+    bias_shape = (1, 112, 1, 1)
     A = relay.var("data", shape=input_shape, dtype=dtype)
     B = relay.var("weight", shape=filter_shape, dtype=dtype)
     bias = relay.var("bias", shape=bias_shape, dtype=dtype)
@@ -174,110 +128,80 @@ def test_depthwise_conv2d_1_513_513_7x3_3_7_1(remote, target, executor_type, dty
     conv = relay.nn.conv2d(
         A,
         B,
-        data_layout="NHWC",
-        kernel_layout="HWOI",
+        data_layout="NCHW",
+        kernel_layout="OIHW",
+        padding=[3, 3, 3, 3],
+        strides=[1, 2],
         out_dtype=dtype,
-        channels=filter_shape[2],
-        groups=filter_shape[2],
-        kernel_size=kernel_size,
+        channels=112,
+        groups=7,
+        dilation=2,
+        kernel_size=(7, 3),
     )
     D = relay.op.add(conv, bias)
     D = relay.op.nn.relu(D)
 
     mod = relay.Function([A, B, bias], D)
     np.random.seed(1)
-    initializer = relay.testing.init.Xavier()
-    filter_data = np.ones(filter_shape).astype(dtype)
-    bias_data = np.ones(bias_shape).astype(dtype)
-    initializer("weight", filter_data)
-    initializer("bias", bias_data)
-    params1 = {
-        "weight": tvm.nd.array(filter_data),
-        "bias": tvm.nd.array(bias_data),
-    }
-
-    if executor_type == "ge":
-        build_run_compare(remote, mod, params1, {"data": input_shape}, {"data": dtype}, target)
-    else:
-        build_run_compare_vm(remote, mod, params1, {"data": input_shape}, {"data": dtype}, target)
-
-
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl -device=adreno")
-def test_depthwise_conv2d_1_513_513_3x3_3_3_1(remote, target, executor_type, dtype):
-    input_shape = (1, 513, 513, 3)
-    filter_shape = (3, 3, 3, 1)
-    bias_shape = (filter_shape[2],)
-    kernel_size = (filter_shape[0], filter_shape[1])
-    A = relay.var("data", shape=input_shape, dtype=dtype)
-    B = relay.var("weight", shape=filter_shape, dtype=dtype)
-    bias = relay.var("bias", shape=bias_shape, dtype=dtype)
-
-    conv = relay.nn.conv2d(
-        A,
-        B,
-        data_layout="NHWC",
-        kernel_layout="HWOI",
-        out_dtype=dtype,
-        channels=filter_shape[2],
-        groups=filter_shape[2],
-        kernel_size=kernel_size,
-    )
-    D = relay.op.add(conv, bias)
-    D = relay.op.nn.relu(D)
-
-    mod = relay.Function([A, B, bias], D)
-    np.random.seed(1)
-    initializer = relay.testing.init.Xavier()
-    filter_data = np.ones(filter_shape).astype(dtype)
-    bias_data = np.ones(bias_shape).astype(dtype)
-    initializer("weight", filter_data)
-    initializer("bias", bias_data)
-    params1 = {
-        "weight": tvm.nd.array(filter_data),
-        "bias": tvm.nd.array(bias_data),
-    }
-
-    if executor_type == "ge":
-        build_run_compare(remote, mod, params1, {"data": input_shape}, {"data": dtype}, target)
-    else:
-        build_run_compare_vm(remote, mod, params1, {"data": input_shape}, {"data": dtype}, target)
-
-
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl -device=adreno")
-def test_conv2d_to_3_channels(remote, target, executor_type, dtype):
-    input_shape = (1, 200, 200, 3)
-    filter_shape = (1, 1, 3, 1)
-    A = relay.var("data", shape=input_shape, dtype=dtype)
-    B = relay.var("weight", shape=filter_shape, dtype=dtype)
-
-    D = relay.nn.conv2d(
-        A,
-        B,
-        data_layout="NHWC",
-        kernel_layout="HWOI",
-        padding=[0, 0, 0, 0],
-        out_dtype=dtype,
-        channels=3,
-        groups=3,
-        kernel_size=(1, 1),
-    )
-    mod = relay.Function([A, B], D)
-    np.random.seed(0)
     initializer = relay.testing.init.Xavier()
     filter_data = np.zeros(filter_shape).astype(dtype)
+    bias_data = np.zeros(bias_shape).astype(dtype)
     initializer("weight", filter_data)
+    initializer("bias", bias_data)
     params1 = {
         "weight": tvm.nd.array(filter_data),
+        "bias": tvm.nd.array(bias_data),
     }
 
     if executor_type == "ge":
-        build_run_compare(remote, mod, params1, {"data": input_shape}, {"data": dtype}, target, [])
+        build_run_compare(remote, mod, params1, {"data": input_shape}, {"data": dtype}, target)
     else:
-        build_run_compare_vm(
-            remote, mod, params1, {"data": input_shape}, {"data": dtype}, target, []
-        )
+        build_run_compare_vm(remote, mod, params1, {"data": input_shape}, {"data": dtype}, target)
+
+
+@tvm.testing.requires_opencl_vulkan
+@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
+def test_group_conv2d_nchwc_default(remote, target, executor_type, dtype):
+    input_shape = (1, 49, 56, 100)
+    filter_shape = (343, 7, 3, 3)
+    bias_shape = (1, 343, 1, 1)
+    A = relay.var("data", shape=input_shape, dtype=dtype)
+    B = relay.var("weight", shape=filter_shape, dtype=dtype)
+    bias = relay.var("bias", shape=bias_shape, dtype=dtype)
+
+    # C = relay.nn.relu(A)
+    conv = relay.nn.conv2d(
+        A,
+        B,
+        data_layout="NCHW",
+        kernel_layout="OIHW",
+        padding=[1, 1, 1, 1],
+        strides=[1, 1],
+        out_dtype=dtype,
+        channels=343,
+        groups=7,
+        dilation=1,
+        kernel_size=(3, 3),
+    )
+    D = relay.op.add(conv, bias)
+    D = relay.op.nn.relu(D)
+
+    mod = relay.Function([A, B, bias], D)
+    np.random.seed(1)
+    initializer = relay.testing.init.Xavier()
+    filter_data = np.zeros(filter_shape).astype(dtype)
+    bias_data = np.zeros(bias_shape).astype(dtype)
+    initializer("weight", filter_data)
+    initializer("bias", bias_data)
+    params1 = {
+        "weight": tvm.nd.array(filter_data),
+        "bias": tvm.nd.array(bias_data),
+    }
+
+    if executor_type == "ge":
+        build_run_compare(remote, mod, params1, {"data": input_shape}, {"data": dtype}, target)
+    else:
+        build_run_compare_vm(remote, mod, params1, {"data": input_shape}, {"data": dtype}, target)
 
 
 if __name__ == "__main__":

@@ -43,6 +43,7 @@ void FunctionInfo::Save(dmlc::JSONWriter* writer) const {
   writer->BeginObject();
   writer->WriteObjectKeyValue("name", name);
   writer->WriteObjectKeyValue("arg_types", sarg_types);
+  writer->WriteObjectKeyValue("storage_scopes", storage_scopes);
   writer->WriteObjectKeyValue("launch_param_tags", launch_param_tags);
   writer->EndObject();
 }
@@ -52,6 +53,7 @@ void FunctionInfo::Load(dmlc::JSONReader* reader) {
   std::vector<std::string> sarg_types;
   helper.DeclareField("name", &name);
   helper.DeclareField("arg_types", &sarg_types);
+  helper.DeclareOptionalField("storage_scopes", &storage_scopes);
   helper.DeclareOptionalField("launch_param_tags", &launch_param_tags);
   helper.DeclareOptionalField("thread_axis_tags",
                               &launch_param_tags);  // for backward compatibility
@@ -65,12 +67,14 @@ void FunctionInfo::Load(dmlc::JSONReader* reader) {
 void FunctionInfo::Save(dmlc::Stream* writer) const {
   writer->Write(name);
   writer->Write(arg_types);
+  writer->Write(storage_scopes);
   writer->Write(launch_param_tags);
 }
 
 bool FunctionInfo::Load(dmlc::Stream* reader) {
   if (!reader->Read(&name)) return false;
   if (!reader->Read(&arg_types)) return false;
+  if (!reader->Read(&storage_scopes)) return false;
   if (!reader->Read(&launch_param_tags)) return false;
   return true;
 }

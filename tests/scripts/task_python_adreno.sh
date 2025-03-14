@@ -18,8 +18,8 @@
 
 set -euxo pipefail
 
-export TVM_TEST_TARGETS="opencl"
-export TVM_RELAY_OPENCL_TEXTURE_TARGETS="opencl -device=adreno"
+export TVM_TEST_TARGETS="opencl;vulkan"
+export TVM_RELAY_TEXTURE_TARGETS="opencl -device=adreno;vulkan -device=adreno;"
 
 source tests/scripts/setup-pytest-env.sh
 export LD_LIBRARY_PATH="build:${LD_LIBRARY_PATH:-}"
@@ -96,8 +96,8 @@ make cython3
 
 # The RPC to remote Android device has issue of hang after few tests with in CI environments.
 # Lets run them individually on fresh rpc session.
-# OpenCL texture test on Adreno
-TEXTURE_TESTS=$(./ci/scripts/jenkins/pytest_ids.py --folder tests/python/relay/opencl_texture)
+# OpenCL and Vulkan texture test on Adreno
+TEXTURE_TESTS=$(./ci/scripts/jenkins/pytest_ids.py --folder tests/python/relay/texture)
 i=0
 IFS=$'\n'
 for node_id in $TEXTURE_TESTS; do

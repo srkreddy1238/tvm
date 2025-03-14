@@ -17,7 +17,6 @@
 
 # Be compatible with older version of CMake
 find_vulkan(${USE_VULKAN} ${USE_KHRONOS_SPIRV})
-
 if(USE_VULKAN)
   if(NOT Vulkan_FOUND)
     message(FATAL_ERROR "Cannot find Vulkan, USE_VULKAN=" ${USE_VULKAN})
@@ -30,6 +29,16 @@ if(USE_VULKAN)
   message(STATUS "Build with Vulkan support")
   tvm_file_glob(GLOB RUNTIME_VULKAN_SRCS src/runtime/vulkan/*.cc)
   tvm_file_glob(GLOB COMPILER_VULKAN_SRCS src/target/spirv/*.cc)
+
+  if(Build_GTests)
+    message(STATUS "Building Vulkan GTests")
+    tvm_file_glob(GLOB_RECURSE VULKAN_TEST_SRCS "tests/cpp-runtime/vulkan/*.cc")
+    add_executable(vulkan-cpptest ${VULKAN_TEST_SRCS})
+    target_link_libraries(vulkan-cpptest PRIVATE gtest_main tvm_runtime)
+  else()
+    message(STATUS "Couldn't build Vulkan-Gtests")
+  endif()
+
   list(APPEND RUNTIME_SRCS ${RUNTIME_VULKAN_SRCS})
   list(APPEND COMPILER_SRCS ${COMPILER_VULKAN_SRCS})
   list(APPEND TVM_LINKER_LIBS ${Vulkan_SPIRV_TOOLS_LIBRARY})

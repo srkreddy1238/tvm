@@ -47,7 +47,6 @@ def _test_mobilenet_v1(remote, target, calc_dtype, executor_type, acc_dtype):
                 "mixed_precision_calculation_type": calc_dtype,
                 "mixed_precision_acc_type": acc_dtype,
             },
-            params,
         )
 
     if executor_type == "ge":
@@ -57,23 +56,23 @@ def _test_mobilenet_v1(remote, target, calc_dtype, executor_type, acc_dtype):
 
 
 @pytest.mark.skip(reason="See https://github.com/apache/tvm/issues/13443")
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl -device=adreno")
+@tvm.testing.requires_opencl_vulkan
+@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
 @pytest.mark.skipif(tvm.testing.utils.IS_IN_CI, reason="CI doesn't support fp16(half datatypes)")
 def test_mobilenet_v1_fp16(remote, target, executor_type):
     _test_mobilenet_v1(remote, target, "float16", executor_type, "float16")
 
 
 @pytest.mark.skip(reason="See https://github.com/apache/tvm/issues/13443")
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl -device=adreno")
+@tvm.testing.requires_opencl_vulkan
+@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
 def test_mobilenet_v1_fp32(remote, target, executor_type):
     _test_mobilenet_v1(remote, target, "float32", executor_type, "float32")
 
 
 @pytest.mark.skip(reason="See https://github.com/apache/tvm/issues/13443")
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl -device=adreno")
+@tvm.testing.requires_opencl_vulkan
+@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
 def test_mobilenet_v1_fp16_acc32(remote, target, executor_type):
     _test_mobilenet_v1(remote, target, "float16", executor_type, "float32")
 

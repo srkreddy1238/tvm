@@ -97,7 +97,7 @@ class VulkanModuleNode final : public runtime::ModuleNode {
   PackedFunc GetFunction(const String& name, const ObjectPtr<Object>& sptr_to_self) final;
 
   std::shared_ptr<VulkanPipeline> GetPipeline(size_t device_id, const std::string& func_name,
-                                              size_t num_pack_args);
+                                              size_t num_pack_args, size_t num_buffer_args);
 
   void SaveToFile(const String& file_name, const String& format) final;
 

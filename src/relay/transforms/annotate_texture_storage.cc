@@ -679,5 +679,8 @@ tvm::transform::Pass AnnotateMemoryScope() {
 TVM_REGISTER_GLOBAL("relay.backend.opencl.adreno._CollectStorageInfo")
     .set_body_typed(CollectTextureStorage);
 
+TVM_REGISTER_GLOBAL("relay.backend.vulkan.adreno._CollectStorageInfo")
+    .set_body_typed(CollectTextureStorage);
+
 }  // namespace relay
 }  // namespace tvm

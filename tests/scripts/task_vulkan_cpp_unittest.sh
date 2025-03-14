@@ -16,13 +16,23 @@
 # specific language governing permissions and limitations
 # under the License.
 
-set -exo pipefail
+set -euxo pipefail
 
-export TVM_TEST_TARGETS="cuda;opencl;metal;rocm;nvptx;opencl -device=mali,aocl_sw_emu,adreno"
-export PYTEST_ADDOPTS="-m gpu $PYTEST_ADDOPTS"
-export TVM_RELAY_TEST_TARGETS="cuda"
-export TVM_RELAY_TEXTURE_TARGETS="opencl -device=adreno;vulkan -device=adreno"
-export TVM_INTEGRATION_TESTSUITE_NAME=python-integration-gpu
-export TVM_INTEGRATION_GPU_ONLY=1
+if [ $# -gt 0 ]; then
+    BUILD_DIR="$1"
+elif [ -n "${TVM_BUILD_PATH:-}" ]; then
+    # TVM_BUILD_PATH may contain multiple space-separated paths.  If
+    # so, use the first one.
+    BUILD_DIR=$(IFS=" "; set -- $TVM_BUILD_PATH; echo $1)
+else
+    BUILD_DIR=build
+fi
 
-./tests/scripts/task_python_integration.sh
+# to avoid CI thread throttling.
+export TVM_BIND_THREADS=0
+export OMP_NUM_THREADS=1
+
+pushd "${BUILD_DIR}"
+# run cpp test executable
+./vulkan-cpptest
+popd

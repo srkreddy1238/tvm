@@ -28,8 +28,8 @@ executor_type = tvm.testing.parameter("ge", "vm")
 dtype = tvm.testing.parameter("float32")
 
 
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl -device=adreno")
+@tvm.testing.requires_opencl_vulkan
+@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
 def test_mod(remote, target, executor_type, dtype):
     # NCHW
     input_shape = (1, 25, 38, 64)
@@ -44,11 +44,13 @@ def test_mod(remote, target, executor_type, dtype):
         build_run_compare_vm(remote, mod, {}, {"data": input_shape}, {"data": dtype}, target)
 
 
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl -device=adreno")
+@tvm.testing.requires_opencl_vulkan
+@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
 def test_scatter_nd_add(remote, target, executor_type, dtype):
     # NCHW
-
+    if "vulkan" in target:
+        print("Skipping test for Vulkan as int64 is not supported")
+        return
     A = relay.var("data", shape=(6, 30, 30, 256), dtype=dtype)
     indices = relay.const(tvm.nd.array(np.random.randint(0, 1, (2, 6, 30, 30))), dtype="int64")
     update = relay.const(

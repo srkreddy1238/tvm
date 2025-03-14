@@ -70,6 +70,7 @@ constexpr const char* kUseDynamicSharedMemoryTag = "tir.use_dyn_shared_memory";
 struct FunctionInfo {
   std::string name;
   std::vector<DLDataType> arg_types;
+  std::vector<std::string> storage_scopes;
   std::vector<std::string> launch_param_tags;
 
   void Save(dmlc::JSONWriter* writer) const;

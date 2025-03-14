@@ -27,6 +27,7 @@ from tvm import te
 from tvm.relay import testing
 from tvm.contrib.utils import tempdir
 import tvm.contrib.graph_executor as runtime
+from tvm.runtime.vm import VirtualMachine
 from tvm import relay
 from tvm import autotvm
 from tvm.contrib import utils, ndk
@@ -228,8 +229,86 @@ def evaluate_network(network, target, target_host, dtype, repeat):
 
     # evaluate
     print_progress("%-20s evaluating..." % network)
-    ftimer = module.module.time_evaluator("run", dev, number=1, repeat=repeat)
+    ftimer = module.module.time_evaluator("run", dev, number=10, repeat=repeat)
     prof_res = np.array(ftimer().results) * 1000  # multiply 1000 for converting to millisecond
+    print(
+        "%-20s %-19s (%s)"
+        % (network + "-" + dtype, "%.2f ms" % np.mean(prof_res), "%.2f ms" % np.std(prof_res))
+    )
+    return (np.mean(prof_res), np.std(prof_res))
+
+
+def evaluate_network_vm(network, target, target_host, dtype, repeat):
+    print_progress(network)
+    net, params, input_shape, output_shape = get_network(network, batch_size=1, dtype=dtype)
+
+    # Auto Tuning
+    tune_log = "adreno-" + network + "-" + dtype + ".log"
+    tuning_options = {
+        "log_filename": tune_log,
+        "early_stopping": None,
+        "measure_option": autotvm.measure_option(
+            builder=autotvm.LocalBuilder(build_func=ndk.create_shared, timeout=15),
+            runner=autotvm.RPCRunner(
+                args.rpc_key,
+                host=args.host,
+                port=args.port,
+                number=3,
+                timeout=600,
+            ),
+        ),
+    }
+    if args.tune:
+        tasks = autotvm.task.extract_from_program(
+            net, target=target, target_host=target_host, params=params
+        )
+        tune_tasks(tasks, **tuning_options)
+
+    print_progress("%-20s building..." % network)
+
+    # Build the tuning log
+    if os.path.exists(tune_log):
+        with autotvm.apply_history_best(tune_log):
+            with tvm.transform.PassContext(opt_level=3):
+                vmc = relay.vm.compile(
+                    net, target=tvm.target.Target(target, host=target_host), params=params
+                )
+    else:
+        with tvm.transform.PassContext(opt_level=3):
+            vmc = relay.vm.compile(
+                net, target=tvm.target.Target(target, host=target_host), params=params
+            )
+
+    tmp = tempdir()
+    dso_binary = "%s.so" % network
+    dso_binary_path = tmp.relpath(dso_binary)
+    vmc.mod.export_library(dso_binary_path, fcompile=ndk.create_shared)
+
+    # Upload library and VM executable
+    print_progress("%-20s uploading..." % network)
+
+    # Connect to remote device
+    tracker = tvm.rpc.connect_tracker(args.host, args.port)
+    remote = tracker.request(args.rpc_key)
+
+    dev = remote.device(str(target), 0)
+    remote.upload(dso_binary_path)
+    rlib = remote.load_module(dso_binary)
+    vm = VirtualMachine(rlib, dev, "naive")
+
+    data = {}
+    inputdct = {"data": input_shape}
+    inputs = []
+    for key in inputdct:
+        inputs.append(np.random.normal(size=inputdct[key]).astype(dtype))
+        data[key] = tvm.nd.array(inputs[-1], dev)
+    vm.set_input("main", **data)
+    vm.invoke_stateful("main")
+
+    # Evaluate
+    print_progress("%-20s evaluating..." % network)
+    profile = vm.benchmark(dev, repeat=repeat, number=10, min_repeat_ms=0, func_name="main", **data)
+    prof_res = np.array(profile.results) * 1000  # multiply 1000 for converting to millisecond
     print(
         "%-20s %-19s (%s)"
         % (network + "-" + dtype, "%.2f ms" % np.mean(prof_res), "%.2f ms" % np.std(prof_res))
@@ -261,6 +340,17 @@ if __name__ == "__main__":
     parser.add_argument("--rpc-key", type=str, default="android")
     parser.add_argument("--repeat", type=int, default=30)
     parser.add_argument("--tune", type=bool, default=False)
+    parser.add_argument(
+        "--target", type=str, choices=["opencl", "vulkan"], required=True, help="The target device"
+    )
+    parser.add_argument("--texture", type=bool, default=True, help="Enable texture flag")
+    parser.add_argument(
+        "--executor_type",
+        type=str,
+        choices=["ge", "vm"],
+        default="ge",
+        help="Specify the executor type: 'ge' for Graph Executor or 'vm' for Virtual Machine",
+    )
     args = parser.parse_args()
 
     if args.network is None:
@@ -279,7 +369,11 @@ if __name__ == "__main__":
     else:
         networks = [args.network]
 
-    target = "opencl -device=adreno"
+    if args.texture:
+        target = f"{args.target} -device=adreno"
+    else:
+        target = args.target
+
     target_host = "llvm -mtriple=arm64-linux-android"
 
     print("--------------------------------------------------")
@@ -287,12 +381,18 @@ if __name__ == "__main__":
     print("--------------------------------------------------")
 
     results = {}
-
     for network in networks:
-        ftime = evaluate_network(network, target, target_host, "float32", args.repeat)
-        results[network + "-float32"] = ftime
-        ftime = evaluate_network(network, target, target_host, "float16", args.repeat)
-        results[network + "-float16"] = ftime
+        if args.executor_type == "ge":
+            ftime = evaluate_network(network, target, target_host, "float32", args.repeat)
+            results[network + "-float32"] = ftime
+            ftime = evaluate_network(network, target, target_host, "float16", args.repeat)
+            results[network + "-float16"] = ftime
+
+        else:
+            ftime = evaluate_network_vm(network, target, target_host, "float32", args.repeat)
+            results[network + "-float32"] = ftime
+            ftime = evaluate_network_vm(network, target, target_host, "float16", args.repeat)
+            results[network + "-float16"] = ftime
 
     print("----------------------------------------------------------------------")
     print("%-30s %-30s" % ("Network Name", "Mean Inference Time        (std dev)"))
