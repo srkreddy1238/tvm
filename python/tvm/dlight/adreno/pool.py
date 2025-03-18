@@ -17,11 +17,14 @@
 # pylint: disable=missing-docstring
 """ Pool schedule rule for Adreno operators."""
 
+import tvm
 from tvm import tir
+from tvm.tir import Block, BufferStore
+from tvm.tir.expr import Cast, BufferLoad, Call
 from tvm.target import Target
 
 from .base import AdrenoScheduleRule
-from ..analysis import get_block_info
+from ..base import analysis
 
 
 class Pool2D(AdrenoScheduleRule):
@@ -46,25 +49,25 @@ class Pool2D(AdrenoScheduleRule):
             sch.vectorize(veclp)
             b = sch.fuse(*lps)
             tx_extent = min(int(sch.get(b).extent) & ~int(sch.get(b).extent - 1), 256)
-            bx_, tx_ = sch.split(b, [None, tx_extent])
-            sch.bind(bx_, "blockIdx.x")
-            sch.bind(tx_, "threadIdx.x")
+            bx, tx = sch.split(b, [None, tx_extent])
+            sch.bind(bx, "blockIdx.x")
+            sch.bind(tx, "threadIdx.x")
 
         def schedule_max_pool(blk: tir.schedule.BlockRV):
-            block_info = get_block_info(sch, blk)
+            block_info = analysis.get_block_info(sch, blk)
             iters_kind = "".join([_iter.kind for _iter in block_info.iters])
             if iters_kind != "SSSSSRR":
                 return None
 
             lps = sch.get_loops(blk)
-            block_lps, vec_lp, _ = lps[:4], lps[4], lps[5:]
+            block_lps, vec_lp, red_lps = lps[:4], lps[4], lps[5:]
             write_blk = sch.cache_write(blk, 0, "local")
             sch.reverse_compute_at(write_blk, vec_lp)
             b = sch.fuse(*block_lps)
             tx_extent = min(int(sch.get(b).extent) & ~int(sch.get(b).extent - 1), 256)
-            bx_, tx_ = sch.split(b, [None, tx_extent])
-            sch.bind(bx_, "blockIdx.x")
-            sch.bind(tx_, "threadIdx.x")
+            bx, tx = sch.split(b, [None, tx_extent])
+            sch.bind(bx, "blockIdx.x")
+            sch.bind(tx, "threadIdx.x")
             sch.vectorize(vec_lp)
 
             return True
@@ -77,7 +80,8 @@ class Pool2D(AdrenoScheduleRule):
                 sch.get(blk).name_hint == "adaptive_pool_sum"
                 or sch.get(blk).name_hint == "pool_max"
             ):
-                if not schedule_max_pool(blk):
+                ok = schedule_max_pool(blk)
+                if not ok:
                     return None
                 passed_reduction = True
             else:
@@ -86,6 +90,6 @@ class Pool2D(AdrenoScheduleRule):
                         sch.reverse_compute_inline(blk)
                     else:
                         sch.compute_inline(blk)
-                except Exception: # pylint: disable=broad-except
+                except:
                     pass
         return sch

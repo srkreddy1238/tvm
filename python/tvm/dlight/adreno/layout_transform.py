@@ -1,4 +1,4 @@
-# licensed to the apache software foundation (asf) under one
+# Licensed to the apache software foundation (asf) under one
 # or more contributor license agreements.  See the NOTICE file
 # distributed with this work for additional information
 # regarding copyright ownership.  The ASF licenses this file
@@ -14,161 +14,126 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-"Texture Layout Transform Schedules for Adreno"
+"Schedules for Texture Based Layout Transforms"
 from typing import List, Union, Dict
 
 from collections import namedtuple
-from tvm import tir
+from tvm import arith, tir
 from tvm.target import Target
+from tvm.tir import Schedule
+from tvm.tir.schedule import BlockRV
 from tvm._ffi import get_global_func
+from ..base import analysis
 
+from ..base import (
+    detect_dominant_read,
+    normalize_prim_func,
+    try_inline_contiguous_spatial,
+)
 from .base import AdrenoScheduleRule
 
-get_blockrealize = get_global_func("tir.schedule.GetBlockRealize")
 
-# BufferIndex Types
-Index = namedtuple("Index", ["sub"])  # c
-RemIndex = namedtuple("RemIndex", ["sub", "div"])  # c%len
-DivIndex = namedtuple("DivIndex", ["sub", "div"])  # c//len
-MergeIndex = namedtuple("MulIndex", ["dom", "mul", "sub"])  # co*len + cb
-BufIndex = List[Union[Index, RemIndex, DivIndex, MergeIndex, None]]
+class LayoutTransform(AdrenoScheduleRule):
+    """Texture based Layout Transform Dlight Schedule for Adreno"""
 
-def extract_index_types(buf: tir.BufferRegion) -> BufIndex:
-    """Helper util """
-    buf_index = []
-    for expr in buf.region:
-        expr = expr.min
-        dim = None
-        if isinstance(expr, tir.expr.Add) and isinstance(expr.b, tir.expr.Var):
-            var_add = expr.b
-            if (
-                isinstance(expr, tir.expr.Mul)
-                and isinstance(expr.a, tir.expr.Var)
-                and isinstance(expr.b, tir.expr.IntImm)
-            ):
-                mul = expr.b
-                var_mul = expr.a
-                dim = MergeIndex(var_mul, mul, var_add)
-        elif (
-            isinstance(expr, tir.expr.FloorMod)
-            and isinstance(expr.a, tir.expr.Var)
-            and isinstance(expr.b, tir.expr.IntImm)
-        ):
-            dim = RemIndex(expr.a, expr.b)
-        elif (
-            isinstance(expr, tir.expr.FloorDiv)
-            and isinstance(expr.a, tir.expr.Var)
-            and isinstance(expr.b, tir.expr.IntImm)
-        ):
-            dim = DivIndex(expr.a, expr.b)
-        elif isinstance(expr, tir.expr.Var):
-            dim = Index(expr)
-        buf_index.append(dim)
-    return buf_index
+    def __init__(self, use_op_name=True):
+        self.use_op_name = use_op_name
 
-
-def extract_vector_loop(
-    buf: tir.BufferRegion, var_lp: Dict[tir.Var, tir.schedule.LoopRV]
-) -> tir.schedule.LoopRV:
-    end_index = extract_index_types(buf)[-1]
-    if isinstance(end_index, DivIndex):
-        return None
-    end_var = getattr(end_index, "sub")
-    return var_lp[end_var]
-
-
-class TextureTranspose(AdrenoScheduleRule):
-    """Texture Layout Transform Schedules for Adreno"""
-
+    # TODO: Try using Coalesced Writes...
     def apply(  # pylint: disable=too-many-locals
         self,
-        func: tir.PrimFunc,
+        func: Union[tir.PrimFunc, tir.Schedule],
         target: Target,
         _: bool,
     ) -> Union[None, tir.Schedule, List[tir.Schedule]]:
         # pylint: disable=invalid-name
-
-        if not isinstance(func, tir.PrimFunc) or not self.is_target_available(target):
+        if not (
+            isinstance(func, tir.PrimFunc) or isinstance(func, tir.Schedule)
+        ) or not self.is_target_available(target):
             return None
 
-        bf_vlen = 8
+        if isinstance(func, tir.PrimFunc):
+            sch = tir.Schedule(func)
+            sch.work_on("main")
+        elif isinstance(func, tir.Schedule):
+            sch = func
 
-        sch = tir.Schedule(func)
-        root_block = sch.get_block("root")
-        can_handle = False
-        for block in sch.get_child_blocks(root_block):
-            if "te_layout_transform" == sch.get(block).name_hint:
-                can_handle = True
-
-        if not can_handle:
-            return None
+        root_block = analysis.get_root_block(sch, sch.func_working_on)
 
         if len(sch.get_child_blocks(root_block)) != 1:
             return None
 
-        def is_compatible(sch: tir.Schedule, blk: tir.schedule.BlockRV):
-            # Supports Transform Layouts of the Form
-            # [A, B, C, D] <-> [X//len,..., X%len] <-> [Xo*len + Xb,...,]
-            block = sch.get(blk)
-            bufs = [*block.reads, *block.writes]
-            buf_exprs = [extract_index_types(buf) for buf in bufs]
-            return not any(buf_exprs[-1] is None for buf_exprs in buf_exprs)
-
-        blk, block = sch.get_child_blocks(root_block)[0], sch.get(
-            sch.get_child_blocks(root_block)[0]
-        )
-
-        if not is_compatible(sch, blk): # pylint: disable=too-many-arguments
+        blk = sch.get_child_blocks(root_block)[0]
+        block_info = analysis.get_block_info(sch, blk)
+        if not (
+            (self.use_op_name and block_info.name == "te_layout_transform")
+            or (not self.use_op_name and block_info.is_layout_transform())
+        ):
             return None
 
-        read_buf, write_buf = (block.reads[0], block.writes[0])
-        lps = sch.get_loops(blk)
-        loops = [sch.get(lp) for lp in lps]
-        iter_vars = [Var.var for Var in block.iter_vars]
-        iter_values = get_blockrealize(sch, blk).iter_values
-        var_lp = dict([loop.loop_var, lp] for loop, lp in zip(loops, lps))
-        val_lp = dict(zip(iter_vars, [var_lp.get(val, None) for val in iter_values]))
+        read_buf, write_buf = (block_info.read_bufs[0], block_info.write_bufs[0])
+        lps = block_info.get_loops()
         lpv_read, lpv_write = (
-            extract_vector_loop(read_buf, val_lp),
-            extract_vector_loop(write_buf, val_lp),
+            read_buf.assoc_lps[-1],
+            write_buf.assoc_lps[-1],
         )
-        #vlen_read, vlen_write = min(bf_vlen, read_buf.region[-1].extent), min(
-        #    bf_vlen, write_buf.region[-1].extent
-        #)
+
         if lpv_read is None or lpv_write is None:
             return None
 
-        local_cache = sch.get(lpv_read) != sch.get(lpv_write)
+        vlen_read, vlen_write = read_buf.get_vecsize(), write_buf.get_vecsize()
+        local_cache = sch.get(lpv_read) != sch.get(lpv_write) or vlen_read != vlen_write
         block_loops = [
             lp
             for lp in lps
             if sch.get(lp) != sch.get(lpv_read) and sch.get(lp) != sch.get(lpv_write)
         ]
-        vec_loops = (lpv_read, lpv_write) if local_cache else (lpv_read,)
-        vlps = []
-        for lp in vec_loops:
-            extent = min(int(sch.get(lp).extent) & ~(int(sch.get(lp).extent) - 1), bf_vlen)
-            blk_lp, vec_lp = sch.split(lp, [None, extent])
-            block_loops.append(blk_lp)
-            vlps.append(vec_lp)
-        vec_loops = vlps
-        #print([sch.get(lp).loop_var for lp in [*block_loops, *vec_loops]])
-
+        vec_loops = (
+            [lpv_read, lpv_write] if sch.get(lpv_read) != sch.get(lpv_write) else (lpv_read,)
+        )
         sch.reorder(*block_loops, *vec_loops)
+        # TODO: Additional Pragmas and stuff
         if local_cache:
-            rblk = sch.cache_read(blk, 0, "local")
-            sch.compute_at(rblk, block_loops[-1])
-            #print(sch.mod)
-            lpv = sch.get_loops(rblk)[-1]
-            sch.vectorize(lpv)
-        wblk = sch.cache_write(blk, 0, "local")
-        sch.reverse_compute_at(wblk, vec_loops[-2] if len(vec_loops) > 1 else block_loops[-1])
-        sch.vectorize(sch.get_loops(wblk)[-1])
+            if sch.get(lpv_read) != sch.get(lpv_write):
+                blp_read, vlp_read = sch.split(
+                    lpv_read, [None, vlen_read], preserve_unit_iters=True
+                )
+                blp_write, vlp_write = sch.split(
+                    lpv_write, [None, vlen_write], preserve_unit_iters=True
+                )
+                sch.reorder(blp_read, blp_write, vlp_read, vlp_write)
+                block_loops += [blp_read, blp_write]
+                rblk = sch.cache_read(blk, 0, "local")
+                sch.compute_at(rblk, block_loops[-1], preserve_unit_loops=True)
+                sch.vectorize(sch.get_loops(rblk)[-1])
+                sch.vectorize(vlp_write)
+            else:
+                if vlen_read > vlen_write:
+                    read_lp, vec_lp = sch.split(blk, [None, vlen_write], preserve_unit_iters=True)
+                    rblk = sch.cache_read(blk, 0, "local")
+                    sch.compute_at(rblk, read_lp, preserve_unit_loops=True)
+                    sch.vectorize(sch.get_loops(rblk)[-1])
+                    sch.vectorize(vec_lp)
+                else:
+                    rblk = sch.cache_read(blk, 0, "local")
+                    sch.compute_at(rblk, block_loops[-1], preserve_unit_loops=True)
+                    _, vread_lp = sch.split(
+                        sch.get_loops(rblk)[-1], vlen_read, preserve_unit_iters=True
+                    )
+                    sch.vectorize(vread_lp)
+                    sch.vectorize(vlp_write)
+        else:
+            blp, vlp = sch.split(lpv_read, [None, vlen_read], preserve_unit_iters=True)
+            block_loops += [blp]
+            sch.vectorize(vlp)
 
         b = sch.fuse(*block_loops)
         tx_extent = min(sch.get(b).extent, 256)
-        bx, tx = sch.split(b, [None, tx_extent])
+        candidates = [1, 2, 4, 8, 16, 32]
+        ux = sch.sample_categorical(
+            candidates, [1 / len(candidates) for _ in range(len(candidates))]
+        )
+        bx, tx = sch.split(b, [None, 256], preserve_unit_iters=True)
         sch.bind(bx, "blockIdx.x")
         sch.bind(tx, "threadIdx.x")
-
         return sch

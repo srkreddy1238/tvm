@@ -56,19 +56,6 @@ def customize_legalize_conv2d(bb: relax.BlockBuilder, call: relax.Call) -> relax
     )
 
 
-def customize_legalize_conv2d_legacy(bb: relax.BlockBuilder, call: relax.Call) -> relax.Expr:
-    return bb.call_te(
-        topi.adreno.conv2d_nchw.conv_nchwc_oihwo,
-        inp=call.args[0],
-        filt=call.args[1],
-        stride=call.attrs.strides,
-        padding=call.attrs.padding,
-        dilation=call.attrs.dilation,
-        out_dtype=call.attrs.out_dtype,
-        primfunc_name_hint="conv2d_NCHWc",
-    )
-
-
 def build_and_run(mod, inputs_np, target, rpc=None, params_np={}, load_path="vm_library.so", is_adreno=False):
     skip_ops = [
         "relax.nn.conv2d",
@@ -116,8 +103,9 @@ def build_and_run(mod, inputs_np, target, rpc=None, params_np={}, load_path="vm_
         if is_adreno:
             mod =  dl.ApplyDefaultSchedule(
                 dl.adreno.Conv2d(),
-                dl.adreno.TextureTranspose(),
+                dl.adreno.LayoutTransform(),
                 dl.adreno.Pool2D(),
+                dl.adreno.Fallback(),
             )(mod)
 
         mod =  dl.ApplyDefaultSchedule(
@@ -137,7 +125,7 @@ def build_and_run(mod, inputs_np, target, rpc=None, params_np={}, load_path="vm_
         mod = tvm.relax.transform.VMShapeLower()(mod)
         mod = tvm.relax.transform.AttachGlobalSymbol()(mod)
 
-    #print("Transformed:", mod)
+    print("Transformed:", mod)
     #exit(0)
     """
     for k, v in mod.functions.items():
@@ -154,12 +142,12 @@ def build_and_run(mod, inputs_np, target, rpc=None, params_np={}, load_path="vm_
     #exit(0)
     if rpc:
         ex = relax.build(mod, tgt)
-        if is_adreno:
-          for smod in ex.mod.imported_modules:
-            print("Mod:", smod.type_key)
-            for imp_mod in smod.imported_modules:
-                print("Imp Mod:", imp_mod.type_key)
-                print(imp_mod.get_source())
+        #if is_adreno:
+        #  for smod in ex.mod.imported_modules:
+        #    print("Mod:", smod.type_key)
+        #    for imp_mod in smod.imported_modules:
+        #        print("Imp Mod:", imp_mod.type_key)
+        #        print(imp_mod.get_source())
         temp = utils.tempdir()
         path = temp.relpath(load_path)
         path = "./" + load_path
@@ -167,7 +155,12 @@ def build_and_run(mod, inputs_np, target, rpc=None, params_np={}, load_path="vm_
         rpc.upload(path)
         rexec = rpc.load_module(load_path)
         dev = rpc.cl(0)
-        vm = relax.VirtualMachine(rexec, [dev, dev, dev])
+        if "vdevice" in mod.global_infos :
+            device_arr = [dev for ii in range(len(mod.global_infos["vdevice"]))]
+        else:
+            device_arr = [dev]
+
+        vm = relax.VirtualMachine(rexec, device_arr)
     else:
         ex = relax.build(mod, target)
         dev = tvm.device(target, 0)
@@ -215,8 +208,8 @@ def verify(mod):
     mod1 = copy.deepcopy(mod)
     ret1 = build_and_run(mod, inputs, "opencl -device=adreno", rpc=rpc, params_np={}, load_path="vm_library_opencl-texture.so", is_adreno=True)
     ret2 = build_and_run(mod1, inputs, "opencl", rpc=rpc, params_np={}, load_path="vm_library_opencl.so", is_adreno=False)
-    print(ret1)
-    print(ret2)
+    #print(ret1)
+    #print(ret2)
 
     if isinstance(ret1, tuple):
         for val1, val2 in zip(ret1, ret2):
@@ -495,8 +488,8 @@ def test_network1():
                 lv125: R.Tensor((512, 1000), dtype="float32") = R.permute_dims(resnetv22_dense0_weight, axes=[1, 0])
                 lv126: R.Tensor((1, 1000), dtype="float32") = R.matmul(lv124, lv125, out_dtype="void")
                 gv: R.Tensor((1, 1000), dtype="float32") = R.add(lv126, resnetv22_dense0_bias)
-                R.output(lv22)
-            return lv22
+                R.output(gv)
+            return gv
 
     verify(Resnet)
 
