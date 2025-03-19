@@ -39,3 +39,4 @@ class AdrenoScheduleRule(ScheduleRule):  # pylint: disable=too-few-public-method
             Whether the target is available for this rule.
         """
         return super().is_target_available(target) and "adreno" in target.keys
+

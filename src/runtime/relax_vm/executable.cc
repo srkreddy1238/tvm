@@ -268,7 +268,9 @@ void VMExecutable::SaveConstantSection(dmlc::Stream* strm) {
   for (const auto& it : this->constants) {
     if (it.IsObjectRef<runtime::NDArray>()) {
       strm->Write(ConstantType::kNDArray);
-      runtime::SaveDLTensor(strm, it.operator DLTensor*());
+      runtime::NDArray param = it.operator runtime::NDArray();
+      param.Save(strm);
+      // runtime::SaveDLTensor(strm, it.operator DLTensor*());
     } else if (it.IsObjectRef<ShapeTuple>()) {
       ShapeTuple shape = it.operator ShapeTuple();
       strm->Write(ConstantType::kShapeTuple);

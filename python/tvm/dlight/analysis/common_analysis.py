@@ -171,6 +171,32 @@ def normalize_prim_func(sch: tir.Schedule) -> Optional[List[BlockInfo]]:
     return blocks
 
 
+def get_block_info(sch: tir.Schedule, block: tir.schedule.BlockRV) -> BlockInfo:
+    def _iter_kind(loop: tir.IterVar) -> str:
+        return {tir.IterVar.DataPar: "S", tir.IterVar.CommReduce: "R"}.get(loop.iter_type, "O")
+
+    def _is_reduction_block(block: tir.schedule.BlockRV):
+        for iter_var in sch.get(block).iter_vars:
+            if _iter_kind(iter_var) == "R":
+                return True
+        return False
+
+    return BlockInfo(
+        name=sch.get(block).name_hint,
+        iters=[
+            IterInfo(
+                kind=_iter_kind(iter_var),
+                var=iter_var.var,
+                dom=iter_var.dom.extent,
+                loop_rv=loop_rv,
+            )
+            for loop_rv, iter_var in zip(sch.get_loops(block), sch.get(block).iter_vars)
+        ],
+        block_rv=block,
+        reduction_block=_is_reduction_block(block),
+    )
+
+
 def _assert_gpu_target(target: Target):
     if "gpu" not in target.keys:
         raise ValueError(f"Expect a GPU target, but got {target}")

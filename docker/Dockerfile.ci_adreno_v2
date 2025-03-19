@@ -16,7 +16,7 @@
 # under the License.
 
 # CI docker GPU env
-FROM tlcpack/ci-gpu
+FROM tvm.ci_gpu
 
 COPY utils/apt-install-and-clear.sh /usr/local/bin/apt-install-and-clear
 
@@ -36,5 +36,7 @@ ENV PATH /opt/android-sdk-linux/platform-tools:$PATH
  
 COPY install/ubuntu_install_vulkan.sh /install/ubuntu_install_vulkan.sh
 RUN bash /install/ubuntu_install_vulkan.sh
+
+RUN apt-install-and-clear -y adb
  
 ENV VULKAN_SDK=/usr

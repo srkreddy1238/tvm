@@ -19,8 +19,8 @@
 set -e
 set -u
 set -o pipefail
-
-wget -qO - http://packages.lunarg.com/lunarg-signing-key-pub.asc | apt-key add -
-wget -qO /etc/apt/sources.list.d/lunarg-vulkan-1.2.135-xenial.list http://packages.lunarg.com/vulkan/1.2.135/lunarg-vulkan-1.2.135-xenial.list
+ 
+wget -qO- https://packages.lunarg.com/lunarg-signing-key-pub.asc | tee /etc/apt/trusted.gpg.d/lunarg.asc
+wget -qO /etc/apt/sources.list.d/lunarg-vulkan-1.4.304-jammy.list https://packages.lunarg.com/vulkan/1.4.304/lunarg-vulkan-1.4.304-jammy.list
 apt-get update
 apt-install-and-clear -y vulkan-sdk

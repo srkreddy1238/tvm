@@ -277,12 +277,37 @@ class CollectConsumerScopeInfo : public ExprVisitor {
     mod_ = mod;
     target_ = target;
     VisitExpr(func->body);
-    // Extend the scope for tuple items
-    for (const auto& val : arg_to_binding) {
+
+    for (const auto& val : tuple_item_to_binding) {
+      if (scope_info.find(val.first) != scope_info.end()) {
+        for (const auto& item_val : val.second) {
+          // TODO: Siva How about ops that generate tuples like split ?
+          if (tuples_to_binding.find(item_val.first) == tuples_to_binding.end()) {
+            continue;
+          }
+          auto producer_var = tuples_to_binding[item_val.first][item_val.second];
+          if (scope_info.find(producer_var) == scope_info.end()) {
+            //LOG(WARNING) << "Extend scope for :" << producer_var << " From:" << val.first;
+            scope_info.Set(producer_var, scope_info[val.first]);
+          } else {
+            //LOG(WARNING) << "Extend scope for :" << producer_var << " From:" << val.first;
+            auto ent = scope_info[producer_var];
+            for (auto ent_val : scope_info[val.first]) {
+              ent.Set(ent_val.first, ent_val.second);
+            }
+            scope_info.Set(producer_var, ent);
+          }
+        }
+      }
+    }
+   #if 0
+    for (const auto& val : tuple_item_to_binding) {
       if (scope_info.find(val.first) != scope_info.end()) {
         if (scope_info.find(val.second) == scope_info.end()) {
+          LOG(WARNING) << "Extend scope for :" << val.second << " From:" << val.first;
           scope_info.Set(val.second, scope_info[val.first]);
         } else {
+          LOG(WARNING) << "Extend scope for :" << val.second << " From:" << val.first;
           auto ent = scope_info[val.second];
           for (auto ent_val : scope_info[val.first]) {
             ent.Set(ent_val.first, ent_val.second);
@@ -290,17 +315,98 @@ class CollectConsumerScopeInfo : public ExprVisitor {
           scope_info.Set(val.second, ent);
         }
       }
+      if (tuples_to_binding.find(val.second) != tuples_to_binding.end()) {
+        LOG(WARNING) << "Scope for produer of " << val.second << " can be populated:" << tuples_to_binding[val.second][0];
+        // Populating same scope for return items
+      }
     }
+    #endif
+
+    // Extend the scope for tuple items
+ #if 0
+    LOG(WARNING) << "Extending:";
+    for (const auto& field_map : tuple_item_to_binding) {
+      LOG(WARNING) << "Extending: B1:" << field_map.first;
+      //auto tuple = field_map.first.as<TupleNode>();
+      auto tuple = Downcast<Tuple>(field_map.first);
+      for (const auto& binding : field_map.second) {
+      LOG(WARNING) << "Extending: B2";
+        //auto tuple_item = binding.first.as<TupleGetItemNode>();
+        auto tuple_item = Downcast<TupleGetItem>(binding.first);
+        int index = tuple_item->index;
+        if (scope_info.find(binding.second) != scope_info.end()) {
+          LOG(WARNING) << "Extending: B3:" << tuple->fields;
+          if (scope_info.find(tuple->fields[index]) == scope_info.end()) {
+            LOG(WARNING) << "Extending: B4";
+            scope_info.Set(tuple->fields[index], scope_info[binding.second]);
+            LOG(WARNING) << "Extending: B5";
+          } else {
+            LOG(WARNING) << "Extending: B6";
+            auto ent = scope_info[tuple->fields[index]];
+            for (auto ent_val : scope_info[binding.second]) {
+              ent.Set(ent_val.first, ent_val.second);
+            }
+            scope_info.Set(tuple->fields[index], ent);
+            LOG(WARNING) << "Extending: B7";
+          }
+          LOG(WARNING) << "Extending: B8";
+        }
+      }
+    }
+    LOG(WARNING) << "Extending: End";
+#endif
 
     return std::make_pair(call_scope_info, scope_info);
   }
 
   void VisitBinding_(const VarBindingNode* binding,
                      const TupleGetItemNode* tuple_get_item_node) final {
-    if (arg_to_binding.find(GetRef<Expr>(binding->var.get())) == arg_to_binding.end()) {
-      arg_to_binding.Set(GetRef<Expr>(binding->var.get()),
+    //LOG(WARNING) << "VisitBinding_: TupleGetItemNode:" << binding->var << " : " << tuple_get_item_node->tuple;
+
+    /* 
+     * lv9 = R.call_tir(add, (lv7, m
+     * lv: R.Tuple(
+     *     R.Tensor((1, 3, 224, 224), dtype="float32"),
+     *     R.Tensor((3,), dtype="float32"),
+     *     R.Tensor((3,), dtype="float32")
+     * ) = lv9, metadata["relax.expr.Constant"][4], metadata["relax.expr.Constant"][5]
+     * lv1_1: R.Tensor((1, 3, 224, 224), dtype="float32") = lv[0]
+     * lv4: R.Tensor((1, 64, 112, 112), dtype="float32") = R.nn.conv2d(lv1_1, .....
+     *
+     * lv1_1 scope is requested by conv2d now we need to populate the same to lv9
+     * Capture essestial information here as 
+     *
+     * lv => {(0, lv1_1), (1, ) ...}
+     */
+#if 0
+    if (tuple_item_to_binding.find(GetRef<Expr>(binding->var.get())) == tuple_item_to_binding.end()) {
+      tuple_item_to_binding.Set(GetRef<Expr>(binding->var.get()),
                          GetRef<Expr>(tuple_get_item_node->tuple.get()));
+      tuple_item_to_index.Set(GetRef<Expr>(tuple_get_item_node->tuple.get()), tuple_get_item_node->index);
     }
+#endif
+#if 0
+    Map<Expr, tvm::runtime::Int> field_map;
+    if (tuple_item_to_binding.find(tuple_get_item_node->tuple) != tuple_item_to_binding.end()) {
+      field_map = tuple_item_to_binding[tuple_get_item_node->tuple];
+    }
+    field_map.Set(GetRef<Expr>(tuple_get_item_node), GetRef<Expr>(binding->var.get()));
+    tuple_item_to_binding.Set(GetRef<Expr>(tuple_get_item_node->tuple.get()), field_map);
+    LOG(WARNING) << "Map Add:" << tuple_get_item_node->tuple << " : " << tuple_get_item_node->tuple;
+#else
+    Map<Expr, tvm::runtime::Int> field_map;
+    if (tuple_item_to_binding.find(GetRef<Expr>(binding->var.get())) != tuple_item_to_binding.end()) {
+      field_map = tuple_item_to_binding[GetRef<Expr>(binding->var.get())];
+    }
+    field_map.Set(GetRef<Expr>(tuple_get_item_node->tuple.get()), tuple_get_item_node->index);
+    tuple_item_to_binding.Set(GetRef<Expr>(binding->var.get()), field_map);
+    //LOG(WARNING) << "Map Add:" << binding->var << " => " << tuple_get_item_node->tuple << " : " << tuple_get_item_node->index;
+#endif
+  }
+
+  void VisitBinding_(const VarBindingNode* binding, const TupleNode* tuple) final {
+    //LOG(WARNING) << "VisitBinding_ Tuple Node:" << binding->var << " : " << tuple->fields[0];
+    tuples_to_binding.Set(GetRef<Expr>(binding->var.get()), tuple->fields);
   }
 
   void VisitExpr_(const CallNode* call) final {
@@ -410,6 +516,7 @@ class CollectConsumerScopeInfo : public ExprVisitor {
       int a2 = shape[2].as<IntImmNode>()->value;
       int a3 = shape[3].as<IntImmNode>()->value;
 
+#if 0
       int d1r = a0 * a1;
       int d2r = a2 * a3;
       int d3r = a1 * a2 * a3;
@@ -421,6 +528,30 @@ class CollectConsumerScopeInfo : public ExprVisitor {
       else if (d1r < depth_limit && a2 < spatial_limit && a3 < spatial_limit)
         scope += ".texture";
       return scope;
+#endif
+     
+      int d3l = a0 * a1 * a2;
+      int d3r = a3;
+      int diff3 = d3l > d3r ? d3l - d3r : d3r - d3l;
+      if (d3l < spatial_limit && d3r < spatial_limit) diffs[diff3] = "";
+
+      int d2l = a0 * a1;
+      int d2r = a2 * a3;
+      int diff2 = d2l > d2r ? d2l - d2r : d2r - d2l;
+      if (d2l < spatial_limit && d2r < spatial_limit) diffs[diff2] = "nhwc";
+
+      int d1l = a0;
+      int d1r = a1 * a2 * a3;
+      int diff1 = d1l > d1r ? d1l - d1r : d1r - d1l;
+      if (d1l < spatial_limit && d1r < spatial_limit) diffs[diff1] = "weight";
+      if (!diffs.empty()) {
+        std::string scope = "global.texture";
+        if (!diffs.begin()->second.empty()) {
+          scope += ("-" + diffs.begin()->second);
+        }
+        return scope;
+      }
+
     }
     return "global";
   }
@@ -429,7 +560,15 @@ class CollectConsumerScopeInfo : public ExprVisitor {
   Map<Expr, Map<Expr, Array<String>>> scope_info;
   /* A map of call node and scope info for each argument it consunes */
   Map<Expr, Array<String>> call_scope_info;
-  Map<Expr, Expr> arg_to_binding;
+#if 0
+  Map<Expr, Expr> tuple_item_to_binding;
+  Map<Expr, tvm::runtime::Int> tuple_item_to_index;
+  Map<Expr, Array<Expr>> tuples_to_binding;
+#endif
+#if 1
+  Map<Expr, Map<Expr, tvm::runtime::Int>> tuple_item_to_binding;
+  Map<Expr, Array<Expr>> tuples_to_binding;
+#endif
   IRModule mod_;
   Target target_;
 };
@@ -480,6 +619,7 @@ class CollectProducerScopeInfo : public ExprVisitor {
     // Decide the final scope based on the max consumer demand. Rest will use to_device.
     auto arg_var = binding->var.as<VarNode>();
     if (scope_info_.find(GetRef<Expr>(arg_var)) != scope_info_.end()) {
+      //LOG(WARNING) << "Scope infor found:" << binding->var;
       for (const auto& val : scope_info_[GetRef<Expr>(arg_var)]) {
         auto call_node = Downcast<Call>(val.first);
         if (scope_count.find(val.second[0]) == scope_count.end()) {
@@ -489,6 +629,8 @@ class CollectProducerScopeInfo : public ExprVisitor {
           scope_count.emplace(val.second[0], curr_count + 1);
         }
       }
+    } else {
+      //LOG(WARNING) << "Scope info not found:" << binding->var;
     }
     String final_scope = "global";
     int count = 0;
@@ -500,6 +642,9 @@ class CollectProducerScopeInfo : public ExprVisitor {
     }
     // Applying same scope for outputs
     StructInfo updated_ret_sinfo = UpdateStructInfo(out_sinfo, {final_scope});
+    if (call->op == call_tir_op) {
+      //LOG(WARNING) << "Final Ret scope:" << call->args[0] << " : " << updated_ret_sinfo;
+    }
     producer_sinfo.Set(GetRef<Expr>(call), updated_ret_sinfo);
   }
 

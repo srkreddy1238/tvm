@@ -349,6 +349,8 @@ Storage VMAllocStorage(void* ctx_ptr, ShapeTuple buffer_shape, Index device_inde
 
   auto* alloc = vm->allocators[device_index];
   ICHECK(alloc) << "Did you forget to init the VirtualMachine with devices?";
+  // LOG(WARNING) << "VMAllocStorage:" << device_index << " Shape:" << buffer_shape
+  //             << " Scope:" << mem_scope;
 
   auto buffer = alloc->Alloc(vm->devices[device_index], buffer_shape, dtype_hint, mem_scope);
 
@@ -357,7 +359,22 @@ Storage VMAllocStorage(void* ctx_ptr, ShapeTuple buffer_shape, Index device_inde
 
 TVM_REGISTER_GLOBAL("vm.builtin.alloc_storage").set_body_typed(VMAllocStorage);
 
-TVM_REGISTER_GLOBAL("vm.builtin.alloc_tensor").set_body_method<Storage>(&StorageObj::AllocNDArray);
+// TVM_REGISTER_GLOBAL("vm.builtin.alloc_tensor").set_body_method<Storage>(&StorageObj::AllocNDArray);
+
+TVM_REGISTER_GLOBAL("vm.builtin.alloc_tensor").set_body([](TVMArgs args, TVMRetValue* rv) {
+  Storage sobj = args[0];
+  int64_t offset = args[1];
+  ShapeTuple shape = args[2];
+  DLDataType dtype = args[3];
+  if (args.size() == 5) {
+    String scope = args[4];
+    *rv = sobj->AllocNDArrayScoped(offset, shape, dtype, scope);
+  } else {
+    *rv = sobj->AllocNDArray(offset, shape, dtype);
+  }
+});
+// NDArray StorageObj::AllocNDArray(int64_t offset, ShapeTuple shape, DLDataType dtype, String
+// scope) {
 
 //-------------------------------------------------
 //  Closure function handling, calling convention
@@ -419,9 +436,9 @@ TVM_REGISTER_GLOBAL("vm.builtin.null_value").set_body([](TVMArgs args, TVMRetVal
 });
 
 TVM_REGISTER_GLOBAL("vm.builtin.to_device")
-    .set_body_typed([](NDArray data, int dev_type, int dev_id) {
+    .set_body_typed([](NDArray data, int dev_type, int dev_id, String mem_scope) {
       Device dst_device = {(DLDeviceType)dev_type, dev_id};
-      return data.CopyTo(dst_device);
+      return data.CopyTo(dst_device, mem_scope);
     });
 
 /*!

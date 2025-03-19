@@ -177,6 +177,7 @@ def docker(
         "ci_hexagon",
         "ci_riscv",
         "ci_adreno",
+        "ci_adreno_v2",
     }
 
     if image in sccache_images and os.getenv("USE_SCCACHE", "1") == "1":
