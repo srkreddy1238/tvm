@@ -1,0 +1,112 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+# GH actions.
+
+name: Adreno Relax CI
+
+on:
+  push:
+    branches:
+      - relax
+  pull_request:
+    branches:
+      - relax
+  workflow_dispatch:
+
+concurrency:
+  group: CI-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  Lint:
+    if: ${{ github.repository == 'gpgpu/apache-tvm' }}
+    runs-on: tvm-linux-ci
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          submodules: 'recursive'
+          ref: 'relax'
+      - name: Run Lint
+        shell: bash -l {0}
+        run: |
+          SCCACHE_SERVER_PORT=9766 ./tests/scripts/ci.py lint -d tvm.ci_lint
+  Adreno-Tests:
+    needs: [Lint]
+    if: ${{ github.repository == 'gpgpu/apache-tvm' }}
+    runs-on: adreno-runner
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          submodules: 'recursive'
+          ref: 'relax'
+      - name: Build
+        shell: bash -l {0}
+        run: |
+           set -e
+           # Build
+           ADRENO_TARGET_CLML_VERSION=3 \
+           ADRENO_OPENCL=${ADRENO_OPENCL_V3} \
+           SCCACHE_SERVER_PORT=9769 \
+           python ./tests/scripts/ci.py adreno -d tvm.ci_adreno_v2
+  Windows-Build:
+    if: ${{ github.repository == 'gpgpu/apache-tvm' }}
+    runs-on: tvm-windows
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          submodules: 'recursive'
+          ref: 'relax'
+      - name: Compile x86
+        shell: powershell
+        run: |
+           Push-Location
+           New-Item -ItemType Directory -Force -Path "./build"
+           cd build
+           cp ../cmake/config.cmake .
+           Add-Content config.cmake "set(USE_OPENCL $ENV:OPENCL_SDK_ADRENO_X86)"
+           Add-Content config.cmake "set(USE_LLVM $ENV:LLVM_CONFIG)"
+           Add-Content config.cmake "set(USE_CLML $ENV:OPENCL_SDK_ADRENO_X86)"
+           Add-Content config.cmake "set(USE_CPP_RTVM ON)"
+           Add-Content config.cmake "set(USE_RPC ON)"
+           Add-Content config.cmake "set(USE_CPP_RPC ON)"
+           Add-Content config.cmake "set(USE_KALLOC_ALIGNMENT 32)"
+           Add-Content config.cmake "set(USE_OPENCL_EXTN_QCOM ON)"
+           cmake .. -G "Visual Studio 17 2022" -A x64
+           cmake --build . --config Release --parallel $env:NUMBER_OF_PROCESSORS
+           Pop-Location
+      - name: Check x86 Build Status
+        shell: powershell
+        run: |
+           $env:PYTHONPATH = "$pwd\python"
+           python -c "import tvm; print(tvm.__path__)"
+      - name: Compile Arm64
+        shell: powershell
+        run: |
+           Push-Location
+           New-Item -ItemType Directory -Force -Path "./build-arm64"
+           cd build-arm64
+           cp ../cmake/config.cmake .
+           Add-Content config.cmake "set(USE_OPENCL $ENV:OPENCL_SDK_ADRENO_ARM64)"
+           Add-Content config.cmake "set(USE_CLML $ENV:OPENCL_SDK_ADRENO_ARM64)"
+           Add-Content config.cmake "set(USE_RPC ON)"
+           Add-Content config.cmake "set(USE_CPP_RPC ON)"
+           Add-Content config.cmake "set(USE_KALLOC_ALIGNMENT 32)"
+           Add-Content config.cmake "set(USE_OPENCL_EXTN_QCOM ON)"
+           cmake .. -G "Visual Studio 17 2022" -A ARM64
+           cmake --build . --config Release --parallel $env:NUMBER_OF_PROCESSORS --target tvm_rpc
+           Pop-Location
