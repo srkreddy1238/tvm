@@ -175,6 +175,7 @@ def docker(
         "ci_arm",
         "ci_riscv",
         "ci_adreno",
+        "ci_adreno_v2",
     }
 
     if image in sccache_images and os.getenv("USE_SCCACHE", "1") == "1":
@@ -595,6 +596,12 @@ generated = [
                     "./tests/scripts/task_python_integration_gpuonly.sh",
                 ],
             ),
+            "opencl": (
+                "Run OpenCL CPP unittests",
+                [
+                    "./tests/scripts/task_opencl_cpp_unittest.sh {build_dir}",
+                ],
+            ),
             "frontend": ("run frontend tests", ["./tests/scripts/task_python_frontend.sh"]),
         },
     ),
@@ -678,31 +685,17 @@ generated = [
             "ADRENO_TARGET_CLML_VERSION": os.environ.get("ADRENO_TARGET_CLML_VERSION", "3"),
         },
         options={
-            "test": (
-                "run Adreno API/Python tests",
+            "adreno": (
+                "Run Adreno RPC tests",
                 [
+                    "./tests/scripts/unity/task_python_relax_adreno.sh",
                     "./tests/scripts/task_python_adreno.sh " + os.environ.get("ANDROID_SERIAL", ""),
                 ],
             ),
-            "benchmarks": (
-                "run Adreno Benchmarks (Native OpenCL, CLML SDK)",
+            "relax": (
+                "Run generic Relax compiler tests",
                 [
-                    "./apps/benchmark/adreno/bench.sh texture "
-                    + os.environ.get("ANDROID_SERIAL", ""),
-                    "./apps/benchmark/adreno/bench.sh clml " + os.environ.get("ANDROID_SERIAL", ""),
-                ],
-            ),
-            "nativebenchmarks": (
-                "run Adreno Texture Benchmarks",
-                [
-                    "./apps/benchmark/adreno/bench.sh texture "
-                    + os.environ.get("ANDROID_SERIAL", ""),
-                ],
-            ),
-            "clmlbenchmarks": (
-                "run Adreno CLML SDK Benchmarks",
-                [
-                    "./apps/benchmark/adreno/bench.sh clml " + os.environ.get("ANDROID_SERIAL", ""),
+                    "./tests/scripts/unity/task_python_relax.sh",
                 ],
             ),
         },
