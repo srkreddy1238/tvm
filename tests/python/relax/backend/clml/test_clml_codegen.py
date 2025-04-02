@@ -267,6 +267,7 @@ def test_batchnorm(dtype, trials):
                 "num_inputs": "5",
                 "num_outputs": "1",
                 "scale": [["1"]],
+                "training": [["1"]],
                 "shape": [[input_shape]],
             },
             "inputs": [[0, 0, 0], [1, 0, 0], [2, 0, 0], [3, 0, 0], [4, 0, 0]],
