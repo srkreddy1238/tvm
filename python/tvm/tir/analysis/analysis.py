@@ -134,3 +134,7 @@ def verify_well_formed(obj: PrimFunc | IRModule, assert_mode: bool = True) -> bo
         Whether it is a well-formed TIR function.
     """
     return _ffi_api.VerifyWellFormed(obj, assert_mode)  # type: ignore # pylint: disable=no-member
+
+
+def has_if_then_else(stmt: Stmt) -> bool:
+    return tvm.ffi.get_global_func("tir.schedule.HasIfThenElse")(stmt)

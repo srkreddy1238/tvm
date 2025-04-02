@@ -399,7 +399,6 @@ class CollectConsumerScopeInfo : public ExprVisitor {
 
   std::vector<bool> SupportsTexture(const ffi::Array<Attrs>& op_attrs, Integer op_pattern) {
     if (op_pattern.IntValue() < OpPatternKind::kCommReduce) return {true};
-
     for (auto attr : op_attrs) {
       if (auto conv_attr = attr.as<Conv2DAttrs>()) {
         if (conv_attr->data_layout == "NCHW4c" && conv_attr->kernel_layout == "OIHW4o") {
