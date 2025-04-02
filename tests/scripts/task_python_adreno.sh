@@ -54,7 +54,6 @@ find_free_port () {
 export TVM_TRACKER_HOST=127.0.0.1
 FREE_PORT=`find_free_port 9000 1`
 export TVM_TRACKER_PORT=$FREE_PORT
-export TVM_TRACKER_PORT=9132
 export RPC_DEVICE_KEY="android"
 export RPC_TARGET="adreno"
 export TVM_NDK_CC="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android28-clang"
@@ -77,7 +76,6 @@ fi
 adb reverse tcp:${TVM_TRACKER_PORT} tcp:${TVM_TRACKER_PORT}
 ADB_PORTS_RANGE=4
 RPC_LISTEN_PORT=`find_free_port 6000 ${ADB_PORTS_RANGE}`
-RPC_LISTEN_PORT=7000
 export DEVICE_LISTEN_PORT=${RPC_LISTEN_PORT}
 for ii in `seq 0 ${ADB_PORTS_RANGE}` ; do
   adb forward tcp:$((RPC_LISTEN_PORT+ii)) tcp:$((RPC_LISTEN_PORT+ii))
