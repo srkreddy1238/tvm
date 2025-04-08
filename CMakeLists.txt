@@ -101,6 +101,8 @@ tvm_option(USE_CLML "Build with CLML Codegen support" OFF)
 tvm_option(USE_CLML_GRAPH_EXECUTOR "Build with CLML graph runtime" OFF)
 tvm_option(USE_MSC "Enable Multi-System Compiler" OFF)
 tvm_option(USE_NVSHMEM "Build with NVSHMEM support" OFF)
+tvm_option(USE_ADRENO_ACCL "Build with Qualcomm ADRENO_ACCL Codegen support" OFF)
+tvm_option(USE_ADRENO_ACCL_GRAPH_EXECUTOR "Build with Qualcomm ADRENO_ACCL graph runtime" OFF)
 
 # Python package options
 tvm_option(TVM_BUILD_PYTHON_MODULE "Build Python module with scikit-build-core" OFF)
@@ -455,6 +457,7 @@ include(cmake/modules/contrib/MSC.cmake)
 include(cmake/modules/contrib/vllm.cmake)
 include(cmake/modules/Git.cmake)
 include(cmake/modules/LibInfo.cmake)
+include(cmake/modules/contrib/ADRENO_ACCL.cmake)
 
 set(LIBINFO_FILE ${CMAKE_CURRENT_LIST_DIR}/src/support/libinfo.cc)
 add_lib_info(${LIBINFO_FILE})

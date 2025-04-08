@@ -543,9 +543,16 @@ void OpenCLWorkspace::CopyDataFromTo(DLTensor* from, DLTensor* to, TVMStreamHand
     const auto* from_desc = static_cast<const cl::BufferDescriptor*>(from->data);
     switch (from_desc->layout) {
       case cl::BufferDescriptor::MemoryLayout::kBuffer1D:
+#if defined(OPENCL_ENABLE_HOST_PTR)
+        DeviceAPI::Get(from->device)->StreamSync(from->device, stream);
+        memcpy(static_cast<char*>(to->data) + to->byte_offset,
+               reinterpret_cast<char*>(from_desc->host_ptr) + from->byte_offset, nbytes);
+#else
         OPENCL_CALL(clEnqueueReadBuffer(
             this->GetQueue(from->device), from_desc->buffer, CL_FALSE, from->byte_offset, nbytes,
             static_cast<char*>(to->data) + to->byte_offset, 0, nullptr, nullptr));
+        OPENCL_CALL(clFinish(this->GetQueue(from->device)));
+#endif
         break;
       case cl::BufferDescriptor::MemoryLayout::kImage2DActivation:
       case cl::BufferDescriptor::MemoryLayout::kImage2DWeight:
@@ -558,16 +565,23 @@ void OpenCLWorkspace::CopyDataFromTo(DLTensor* from, DLTensor* to, TVMStreamHand
             this->GetQueue(from->device), from_desc->buffer, CL_FALSE, image_info.origin,
             image_info.region, image_info.row_pitch, image_info.slice_pitch,
             static_cast<char*>(to->data) + to->byte_offset, 0, nullptr, nullptr));
+        OPENCL_CALL(clFinish(this->GetQueue(from->device)));
         break;
     }
-    OPENCL_CALL(clFinish(this->GetQueue(from->device)));
   } else if (from->device.device_type == kDLCPU && IsOpenCLDevice(to->device)) {
     auto* to_desc = static_cast<cl::BufferDescriptor*>(to->data);
     switch (to_desc->layout) {
       case cl::BufferDescriptor::MemoryLayout::kBuffer1D:
+#if defined(OPENCL_ENABLE_HOST_PTR)
+        DeviceAPI::Get(to->device)->StreamSync(to->device, stream);
+        memcpy(reinterpret_cast<char*>(to_desc->host_ptr) + to->byte_offset,
+               static_cast<char*>(from->data) + from->byte_offset, nbytes);
+#else
         OPENCL_CALL(clEnqueueWriteBuffer(
             this->GetQueue(to->device), to_desc->buffer, CL_FALSE, to->byte_offset, nbytes,
             static_cast<const char*>(from->data) + from->byte_offset, 0, nullptr, nullptr));
+        OPENCL_CALL(clFinish(this->GetQueue(to->device)));
+#endif
         break;
       case cl::BufferDescriptor::MemoryLayout::kImage2DActivation:
       case cl::BufferDescriptor::MemoryLayout::kImage2DWeight:
@@ -577,9 +591,9 @@ void OpenCLWorkspace::CopyDataFromTo(DLTensor* from, DLTensor* to, TVMStreamHand
             this->GetQueue(to->device), to_desc->buffer, CL_FALSE, image_info.origin,
             image_info.region, image_info.row_pitch, image_info.slice_pitch,
             static_cast<const char*>(from->data) + from->byte_offset, 0, nullptr, nullptr));
+        OPENCL_CALL(clFinish(this->GetQueue(to->device)));
         break;
     }
-    OPENCL_CALL(clFinish(this->GetQueue(to->device)));
   } else {
     TVM_FFI_THROW(InternalError) << "Expect copy from/to OpenCL or between OpenCL";
   }
