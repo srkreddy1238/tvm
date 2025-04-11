@@ -124,7 +124,7 @@ class AdrenoACCLRuntime : public JSONRuntimeBase {
     workspace->Init();
     tentry = workspace->GetThreadEntry();
     device_id = workspace->GetCLDeviceID(tentry->device.device_id);
-    platform_id = workspace->device_to_platform[device_id];
+    platform_id = workspace->device_info[device_id].platform_id;
     accl = AdrenoAcCLInit(workspace->contexts[platform_id], device_id);
   }
 

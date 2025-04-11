@@ -1103,6 +1103,7 @@ def _get_prefill_kernel_config(h_kv, h_q, d, dtype, target: Target):
     ):
         tile_z = 8
         num_warps = 2
+
     if target.kind.name == "opencl" and (
         ("android" in str(target.host)) or ("adreno" in str(target.attrs))
     ):
@@ -1110,6 +1111,8 @@ def _get_prefill_kernel_config(h_kv, h_q, d, dtype, target: Target):
         NUM_BLKS = group_size * 8
         tile_x = 32
         tile_z = 4
+        if (tile_y * tile_z) % (bdx * num_warps) != 0:
+            tile_z = 16
 
     check_thread_limits(target, bdx=bdx, bdy=num_warps, bdz=1, gdz=1)
 
@@ -1698,7 +1701,6 @@ def _attention_decode(
 
     THREAD_LIMIT = 512
     TILE_SIZE_PER_BDX = 2
-    VEC_SIZE = min(max(8 // qkv_dtype_bytes, D // 32), 4)
     if target.kind.name == "opencl" and (
         ("android" in str(target.host)) or ("adreno" in str(target.attrs))
     ):
@@ -1706,7 +1708,8 @@ def _attention_decode(
         # to avoid register spill
         THREAD_LIMIT = 256
         TILE_SIZE_PER_BDX = 1
-        VEC_SIZE = min(max(16 // qkv_dtype_bytes, D // 32), 8)
+
+    VEC_SIZE = min(max(8 // qkv_dtype_bytes, D // 32), 4)
     max_num_threads_per_block = get_max_num_threads_per_block(target)
     thread_limit = min(max_num_threads_per_block, THREAD_LIMIT)
 
