@@ -165,7 +165,7 @@ def partition_for_clml(mod, params=None, **opts):
     target_version = (
         pass_context.config["relay.ext.clml.target_version"]
         if "relay.ext.clml.target_version" in pass_context.config
-        else 3
+        else 4
     )
     print("Building for CLML Target Version: ", target_version)
 
