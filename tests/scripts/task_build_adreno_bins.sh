@@ -48,7 +48,7 @@ echo set\(USE_CPP_RPC ON\) >> config.cmake
 echo set\(USE_CPP_RTVM ON\) >> config.cmake
 echo set\(USE_GRAPH_EXECUTOR ON\) >> config.cmake
 echo set\(USE_LIBBACKTRACE AUTO\) >> config.cmake
-echo set\(USE_KALLOC_ALIGNMENT 32\) >> config.cmake
+echo set\(USE_KALLOC_ALIGNMENT 16\) >> config.cmake
 
 echo set\(ANDROID_ABI arm64-v8a\) >> config.cmake
 echo set\(ANDROID_PLATFORM android-28\) >> config.cmake

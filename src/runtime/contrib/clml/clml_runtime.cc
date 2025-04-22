@@ -1745,7 +1745,6 @@ class CLMLRuntime : public JSONRuntimeBase {
       LOG(FATAL) << "Undefined binary op:" << op_name;
     cl_ml_op_binary_desc_qcom add_desc = {
         binary_op, {{1.0}, CL_FLOAT}, {{1.0}, CL_FLOAT}, {{0.0}, CL_FLOAT}, cl_arithmetic_mode};
-    LOG(INFO) << "Op name - " << op_name;
     CLML_CALL(clCreateMLOpBinaryQCOM, CLML_CTX, nullptr, &add_desc, input_a->tensor,
               input_b->tensor, output->tensor, &op, layer_.tuning_cache);
     ICHECK(op) << op_name << " Node Error";

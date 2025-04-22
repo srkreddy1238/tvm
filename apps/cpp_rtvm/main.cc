@@ -54,8 +54,9 @@ static const string kUsage =
     "--pre-compiled - The file name of a file where pre-compiled programs should be stored\n"
     "--profile      - Profile over all execution\n"
     "--dry-run      - Profile after given dry runs, default 10\n"
-    "--run-count    - Profile for given runs, default 50\n"
+    "--run-count    - Profile for given runs, default 100\n"
     "--zero-copy    - Profile with zero copy api\n"
+    "--batch-run    - Run as a batch without waiting for each completion\n"
     "\n"
     "  Example\n"
     "  ./rtvm --model=keras-resnet50 --device=\"opencl\" --dump-meta\n"
@@ -80,8 +81,9 @@ struct ToolArgs {
   bool dump_meta{false};
   bool profile{false};
   int dry_run{10};
-  int run_count{50};
+  int run_count{100};
   bool zero_copy{false};
+  bool batch_run{false};
 };
 
 /*!
@@ -99,6 +101,7 @@ void PrintArgs(const ToolArgs& args) {
   LOG(INFO) << "Dry Run       = " << args.dry_run;
   LOG(INFO) << "Run Count     = " << args.run_count;
   LOG(INFO) << "Zero Copy     = " << ((args.zero_copy) ? ("True") : ("False"));
+  LOG(INFO) << "Batch Run     = " << ((args.batch_run) ? ("True") : ("False"));
 }
 
 #if defined(__linux__) || defined(__ANDROID__)
@@ -208,6 +211,11 @@ void ParseCmdArgs(int argc, char* argv[], struct ToolArgs& args) {
   if (!pzcopy.empty()) {
     args.zero_copy = true;
   }
+
+  const string pbatchrun = GetCmdOption(argc, argv, "--batch-run", true);
+  if (!pbatchrun.empty()) {
+    args.batch_run = true;
+  }
 }
 
 /*!
@@ -236,7 +244,7 @@ int ExecuteModel(ToolArgs& args) {
   // Print Meta Information
   if (args.dump_meta) runner->PrintMetaInfo();
 
-  int total_exec_time = 0;
+  double total_exec_time = 0;
 
   if (args.profile) {
     if (args.dry_run) {
@@ -288,9 +296,13 @@ int ExecuteModel(ToolArgs& args) {
       }
     }
 
+    // Timer start
+    auto tstart = std::chrono::high_resolution_clock::now();
+
     for (int ii = 0; ii < args.run_count; ++ii) {
-      // Timer start
-      auto tstart = std::chrono::high_resolution_clock::now();
+      if (!args.batch_run) {
+        tstart = std::chrono::high_resolution_clock::now();
+      }
       // Set random input for all input
       for (auto& elem : mInfo.input_info) {
         if (args.zero_copy) {
@@ -328,10 +340,17 @@ int ExecuteModel(ToolArgs& args) {
         TVMSynchronize(GetTVMDevice(args.device), 0, nullptr);
       }
 
-      // Timer end
+      if (!args.batch_run) {
+        // Timer end
+        auto tend = std::chrono::high_resolution_clock::now();
+        LOG(INFO) << "Exec Time:" << static_cast<double>((tend - tstart).count()) / 1e6;
+        total_exec_time += static_cast<double>((tend - tstart).count()) / 1e6;
+      }
+    }
+
+    if (args.batch_run) {
       auto tend = std::chrono::high_resolution_clock::now();
-      LOG(INFO) << "Exec Time:" << static_cast<double>((tend - tstart).count()) / 1e6;
-      total_exec_time += static_cast<double>((tend - tstart).count()) / 1e6;
+      total_exec_time = static_cast<double>((tend - tstart).count()) / 1e6;
     }
 
     // Free input bufers

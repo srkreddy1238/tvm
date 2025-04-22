@@ -429,7 +429,7 @@ void OpenCLWorkspace::FreeDataSpaceView(Device dev, void* ptr) {
   if (!IsBufferToImageSupported(dev.device_id)) {
     if (desc->is_compat_view) {
       // TODO(Siva): Do we need this waiting for entire queue ?
-      OPENCL_CALL(clFinish(this->GetQueue(dev)));
+      // OPENCL_CALL(clFinish(this->GetQueue(dev)));
       OPENCL_CALL(clReleaseMemObject(desc->buffer));
       delete desc;
     }
@@ -438,7 +438,7 @@ void OpenCLWorkspace::FreeDataSpaceView(Device dev, void* ptr) {
 
   if (desc->layout != cl::BufferDescriptor::MemoryLayout::kBuffer1D) {
     // TODO(Siva): Do we need this waiting for entire queue ?
-    OPENCL_CALL(clFinish(this->GetQueue(dev)));
+    // OPENCL_CALL(clFinish(this->GetQueue(dev)));
     OPENCL_CALL(clReleaseMemObject(desc->buffer));
     delete desc;
   }
@@ -460,7 +460,7 @@ void OpenCLWorkspace::SetNativePtr(const tvm::runtime::NDArray& narr, void* host
     cl_device_id device_id = GetCLDeviceID(dev.device_id);
     auto platform = device_info[device_id].platform_id;
 
-    OPENCL_CALL(clFinish(this->GetQueue(dev)));
+    // OPENCL_CALL(clFinish(this->GetQueue(dev)));
     if (desc->host_ptr) {
       OPENCL_CALL(clEnqueueUnmapMemObject(this->GetQueue(dev), desc->buffer,
                                           reinterpret_cast<void*>(desc->host_ptr), 0, nullptr,
@@ -493,7 +493,7 @@ void OpenCLWorkspace::SetPerfHint(Device dev, cl_uint perf_hint) {
 void OpenCLWorkspace::FreeDataSpace(Device dev, void* ptr) {
   // We have to make sure that the memory object is not in the command queue
   // for some OpenCL platforms.
-  OPENCL_CALL(clFinish(this->GetQueue(dev)));
+  // OPENCL_CALL(clFinish(this->GetQueue(dev)));
 
   cl::BufferDescriptor* desc = static_cast<cl::BufferDescriptor*>(ptr);
   if (desc->back_buffer) {
@@ -510,7 +510,7 @@ void OpenCLWorkspace::FreeDataSpace(Device dev, void* ptr) {
                                             reinterpret_cast<void*>(desc->host_ptr), 0, nullptr,
                                             nullptr));
       }
-      OPENCL_CALL(clFinish(this->GetQueue(dev)));
+      // OPENCL_CALL(clFinish(this->GetQueue(dev)));
       OPENCL_CALL(clReleaseMemObject(desc->buffer));
       delete desc;
     } else if (!IsBufferToImageSupported(dev.device_id)) {
@@ -534,27 +534,56 @@ void OpenCLWorkspace::CopyDataFromTo(DLTensor* from, DLTensor* to, TVMStreamHand
     auto* to_desc = static_cast<cl::BufferDescriptor*>(to->data);
     if (to_desc->layout == cl::BufferDescriptor::MemoryLayout::kBuffer1D &&
         from_desc->layout == cl::BufferDescriptor::MemoryLayout::kBuffer1D) {
-      OPENCL_CALL(clEnqueueCopyBuffer(this->GetQueue(to->device), from_desc->buffer,
-                                      to_desc->buffer, from->byte_offset, to->byte_offset, nbytes,
-                                      0, nullptr, nullptr));
+      if (IsProfiling(to->device)) {
+        GetEventQueue(to->device).resize(GetEventQueue(to->device).size() + 1);
+        OPENCL_CALL(clEnqueueCopyBuffer(this->GetQueue(to->device), from_desc->buffer,
+                                        to_desc->buffer, from->byte_offset, to->byte_offset, nbytes,
+                                        0, nullptr, &(GetEventQueue(to->device).back())));
+      } else {
+        OPENCL_CALL(clEnqueueCopyBuffer(this->GetQueue(to->device), from_desc->buffer,
+                                        to_desc->buffer, from->byte_offset, to->byte_offset, nbytes,
+                                        0, nullptr, nullptr));
+      }
     } else if (to_desc->layout != cl::BufferDescriptor::MemoryLayout::kBuffer1D &&
                from_desc->layout == cl::BufferDescriptor::MemoryLayout::kBuffer1D) {
       auto image_info = GetImageInfo(to_desc, to);
-      OPENCL_CALL(clEnqueueCopyBufferToImage(this->GetQueue(to->device), from_desc->buffer,
-                                             to_desc->buffer, from->byte_offset, image_info.origin,
-                                             image_info.region, 0, nullptr, nullptr));
+      if (IsProfiling(to->device)) {
+        GetEventQueue(to->device).resize(GetEventQueue(to->device).size() + 1);
+        OPENCL_CALL(clEnqueueCopyBufferToImage(
+            this->GetQueue(to->device), from_desc->buffer, to_desc->buffer, from->byte_offset,
+            image_info.origin, image_info.region, 0, nullptr, &(GetEventQueue(to->device).back())));
+      } else {
+        OPENCL_CALL(clEnqueueCopyBufferToImage(
+            this->GetQueue(to->device), from_desc->buffer, to_desc->buffer, from->byte_offset,
+            image_info.origin, image_info.region, 0, nullptr, nullptr));
+      }
     } else if (to_desc->layout == cl::BufferDescriptor::MemoryLayout::kBuffer1D &&
                from_desc->layout != cl::BufferDescriptor::MemoryLayout::kBuffer1D) {
       auto image_info = GetImageInfo(from_desc, from);
-      OPENCL_CALL(clEnqueueCopyImageToBuffer(this->GetQueue(to->device), from_desc->buffer,
-                                             to_desc->buffer, image_info.origin, image_info.region,
-                                             to->byte_offset, 0, nullptr, nullptr));
+      if (IsProfiling(to->device)) {
+        GetEventQueue(to->device).resize(GetEventQueue(to->device).size() + 1);
+        OPENCL_CALL(clEnqueueCopyImageToBuffer(
+            this->GetQueue(to->device), from_desc->buffer, to_desc->buffer, image_info.origin,
+            image_info.region, to->byte_offset, 0, nullptr, &(GetEventQueue(to->device).back())));
+      } else {
+        OPENCL_CALL(clEnqueueCopyImageToBuffer(
+            this->GetQueue(to->device), from_desc->buffer, to_desc->buffer, image_info.origin,
+            image_info.region, to->byte_offset, 0, nullptr, nullptr));
+      }
     } else {
       auto to_image_info = GetImageInfo(to_desc, to);
       auto from_image_info = GetImageInfo(from_desc, from);
-      OPENCL_CALL(clEnqueueCopyImage(this->GetQueue(to->device), from_desc->buffer, to_desc->buffer,
-                                     from_image_info.origin, to_image_info.origin,
-                                     to_image_info.region, 0, nullptr, nullptr));
+      if (IsProfiling(to->device)) {
+        GetEventQueue(to->device).resize(GetEventQueue(to->device).size() + 1);
+        OPENCL_CALL(clEnqueueCopyImage(this->GetQueue(to->device), from_desc->buffer,
+                                       to_desc->buffer, from_image_info.origin,
+                                       to_image_info.origin, to_image_info.region, 0, nullptr,
+                                       &(GetEventQueue(to->device).back())));
+      } else {
+        OPENCL_CALL(clEnqueueCopyImage(
+            this->GetQueue(to->device), from_desc->buffer, to_desc->buffer, from_image_info.origin,
+            to_image_info.origin, to_image_info.region, 0, nullptr, nullptr));
+      }
     }
   } else if (IsOpenCLDevice(from->device) && to->device.device_type == kDLCPU) {
     const auto* from_desc = static_cast<const cl::BufferDescriptor*>(from->data);
@@ -563,7 +592,7 @@ void OpenCLWorkspace::CopyDataFromTo(DLTensor* from, DLTensor* to, TVMStreamHand
 #if defined(OPENCL_ENABLE_HOST_PTR)
         DeviceAPI::Get(from->device)->StreamSync(from->device, stream);
         memcpy(static_cast<char*>(to->data) + to->byte_offset,
-        reinterpret_cast<char*>(from_desc->host_ptr) + from->byte_offset, nbytes);
+               reinterpret_cast<char*>(from_desc->host_ptr) + from->byte_offset, nbytes);
 #else
         OPENCL_CALL(clEnqueueReadBuffer(
             this->GetQueue(from->device), from_desc->buffer, CL_FALSE, from->byte_offset, nbytes,
