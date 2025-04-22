@@ -129,7 +129,7 @@ jobs:
            echo set\(USE_CPP_RTVM ON\) >> config.cmake
            echo set\(USE_GRAPH_EXECUTOR ON\) >> config.cmake
            echo set\(USE_LIBBACKTRACE AUTO\) >> config.cmake
-           echo set\(USE_KALLOC_ALIGNMENT 32\) >> config.cmake
+           echo set\(USE_KALLOC_ALIGNMENT 16\) >> config.cmake
            echo set\(ANDROID_ABI arm64-v8a\) >> config.cmake
            echo set\(ANDROID_PLATFORM android-28\) >> config.cmake
            echo set\(MACHINE_NAME aarch64-linux-gnu\) >> config.cmake
@@ -183,7 +183,7 @@ jobs:
            Add-Content config.cmake "set(USE_RPC ON)"
            Add-Content config.cmake "set(USE_CPP_RPC ON)"
            Add-Content config.cmake "set(USE_GRAPH_EXECUTOR ON)"
-           Add-Content config.cmake "set(USE_KALLOC_ALIGNMENT 32)"
+           Add-Content config.cmake "set(USE_KALLOC_ALIGNMENT 16)"
            Add-Content config.cmake "set(USE_OPENCL_EXTN_QCOM ON)"
            cmake .. -G "Visual Studio 17 2022" -A x64
            cmake --build . --config Release --parallel $env:NUMBER_OF_PROCESSORS
@@ -207,7 +207,7 @@ jobs:
            Add-Content config.cmake "set(USE_RPC ON)"
            Add-Content config.cmake "set(USE_CPP_RPC ON)"
            Add-Content config.cmake "set(USE_GRAPH_EXECUTOR ON)"
-           Add-Content config.cmake "set(USE_KALLOC_ALIGNMENT 32)"
+           Add-Content config.cmake "set(USE_KALLOC_ALIGNMENT 16)"
            Add-Content config.cmake "set(USE_OPENCL_EXTN_QCOM ON)"
            cmake .. -G "Visual Studio 17 2022" -A ARM64
            cmake --build . --config Release --parallel $env:NUMBER_OF_PROCESSORS --target rtvm tvm_rpc
