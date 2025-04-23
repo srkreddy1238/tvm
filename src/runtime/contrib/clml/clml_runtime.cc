@@ -355,7 +355,8 @@ class CLMLRuntime : public JSONRuntimeBase {
           shape_str.append(profiling::ShapeString(shape, tvm_dtype));
           metrics["Argument Shapes"] = String(shape_str);
 
-          prof->StartCall("CopyIn", cws->tentry->device, metrics);
+          std::string call_name = "CopyIn:" + clml_symbol + ":" + std::to_string(i);
+          prof->StartCall(call_name, cws->tentry->device, metrics);
           CLML_CALL(clEnqueueCopyMLTensorDataQCOM, queue, layer_.in_placeholder[nid]->tensor,
                     layer_.in_placeholder[nid]->memory, layer_.inputs[nid]->tensor,
                     layer_.inputs[nid]->memory, 0, nullptr, evt);
@@ -413,7 +414,8 @@ class CLMLRuntime : public JSONRuntimeBase {
         shape_str.append(profiling::ShapeString(shape, tvm_dtype));
         metrics["Argument Shapes"] = String(shape_str);
 
-        prof->StartCall("CopyOut", cws->tentry->device, metrics);
+        std::string call_name = "CopyOut:" + clml_symbol + ":" + std::to_string(i);
+        prof->StartCall(call_name, cws->tentry->device, metrics);
         CLML_CALL(clEnqueueCopyMLTensorDataQCOM, queue, layer_.outputs[i]->tensor,
                   layer_.outputs[i]->memory, layer_.out_placeholder[i]->tensor,
                   layer_.out_placeholder[i]->memory, 0, nullptr, evt);

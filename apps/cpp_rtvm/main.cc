@@ -330,17 +330,16 @@ int ExecuteModel(ToolArgs& args) {
       // Run the model
       runner->Run();
 
-      if (!args.zero_copy) {
-        // W/o zero copy we need to invoke explicite data copy
-        for (auto& elem : mInfo.output_info) {
-          runner->GetOutput(elem.first, output_data[elem.first]);
-        }
-      } else {
-        // Just wait for the run to complete.
-        TVMSynchronize(GetTVMDevice(args.device), 0, nullptr);
-      }
-
       if (!args.batch_run) {
+        if (!args.zero_copy) {
+          // W/o zero copy we need to invoke explicite data copy
+          for (auto& elem : mInfo.output_info) {
+            runner->GetOutput(elem.first, output_data[elem.first]);
+          }
+        } else {
+          // Just wait for the run to complete.
+          TVMSynchronize(GetTVMDevice(args.device), 0, nullptr);
+        }
         // Timer end
         auto tend = std::chrono::high_resolution_clock::now();
         LOG(INFO) << "Exec Time:" << static_cast<double>((tend - tstart).count()) / 1e6;
@@ -349,6 +348,7 @@ int ExecuteModel(ToolArgs& args) {
     }
 
     if (args.batch_run) {
+      TVMSynchronize(GetTVMDevice(args.device), 0, nullptr);
       auto tend = std::chrono::high_resolution_clock::now();
       total_exec_time = static_cast<double>((tend - tstart).count()) / 1e6;
     }
