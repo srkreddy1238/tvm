@@ -35,7 +35,6 @@ from tvm.script import tir as T
 from tvm.script.ir_builder import IRBuilder
 from tvm.script.ir_builder import relax as relax_builder
 
-
 @tvm.testing.requires_opencl
 @tvm.testing.parametrize_targets("opencl")
 def test_network_resnet(target):

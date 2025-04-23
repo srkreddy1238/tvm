@@ -104,6 +104,8 @@ for node_id in $RELAX_TESTS; do
     i=$((i+1))
 done
 
+pytest tests/python/relax/texture/
+
 kill ${TRACKER_PID} || true
 kill ${DEVICE_PID} || true
 clean_ports

@@ -73,6 +73,7 @@
 #include <tvm/relax/transform.h>
 #include <tvm/tir/stmt_functor.h>
 
+#include <climits>
 #include <map>
 #include <set>
 #include <vector>
