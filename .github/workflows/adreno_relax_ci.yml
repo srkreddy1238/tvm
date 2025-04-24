@@ -67,7 +67,7 @@ jobs:
            set -e
            # OpenCL GPU Texture Tests
            SCCACHE_SERVER_PORT=7969 \
-           python ./tests/scripts/ci.py gpu -d ci_adreno_gpu_v2 --opencl
+           python ./tests/scripts/ci.py gpu -d ci_adreno_gpu_v2 --adreno
       - name: Adreno Device Tests Over RPC
         shell: bash -l {0}
         run: |

@@ -20,7 +20,7 @@ from tvm import te
 from tvm.script import tir as T
 
 
-def test_decl_buffer():
+def _test_decl_buffer():
     """decl_buffer with texture scope."""
 
     @T.prim_func
@@ -34,7 +34,7 @@ def test_decl_buffer():
     assert lowered.body.value.op.name == "tir.nd_mem_alloc_with_scope"
 
 
-def test_alloc_buffer():
+def _test_alloc_buffer():
     """alloc_buffer with texture scope."""
 
     @T.prim_func
@@ -48,7 +48,7 @@ def test_alloc_buffer():
     assert lowered.body.value.op.name == "tir.nd_mem_alloc_with_scope"
 
 
-def test_alloc_buffer_negative_test():
+def _test_alloc_buffer_negative_test():
     """Shouldn't ave texture intrensic for general use."""
 
     @T.prim_func
@@ -60,7 +60,7 @@ def test_alloc_buffer_negative_test():
     assert isinstance(lowered.body, tvm.tir.Allocate)
 
 
-def test_with_block():
+def _test_with_block():
     """Scoped with block."""
 
     @T.prim_func

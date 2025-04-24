@@ -596,10 +596,11 @@ generated = [
                     "./tests/scripts/task_python_integration_gpuonly.sh",
                 ],
             ),
-            "opencl": (
-                "Run OpenCL CPP unittests",
+            "adreno": (
+                "Run Adreno Required GPU Tests",
                 [
                     "./tests/scripts/task_opencl_cpp_unittest.sh {build_dir}",
+                    "./tests/scripts/task_python_unittest.sh",
                 ],
             ),
             "frontend": ("run frontend tests", ["./tests/scripts/task_python_frontend.sh"]),
