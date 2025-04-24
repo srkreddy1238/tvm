@@ -22,23 +22,25 @@ import json
 import numpy as np
 import pytest
 from mod_utils import (
-    get_avgpool_expected_codegen,
+    get_relax_conv2d_mod,
+    get_clml_conv2d_codegen,
+    get_relax_conv2d_transpose_mod,
+    get_conv2d_transpose_expected_codegen,
     get_batchnorm_mod,
     get_binary_op_mod,
-    get_clml_conv2d_codegen,
-    get_conv2d_transpose_expected_codegen,
-    get_global_avgpool_expected_codegen,
-    get_global_maxpool_expected_codegen,
+    get_unary_op_mod,
+    get_relax_maxpool_mod,
     get_maxpool_expected_codegen,
     get_relax_avgpool_mod,
-    get_relax_conv2d_mod,
-    get_relax_conv2d_transpose_mod,
-    get_relax_global_avgpool_mod,
-    get_relax_global_maxpool_mod,
-    get_relax_maxpool_mod,
-    get_relax_reshape_codegen,
+    get_avgpool_expected_codegen,
     get_relax_reshape_mod,
-    get_unary_op_mod,
+    get_relax_reshape_codegen,
+    get_relax_global_avgpool_mod,
+    get_global_avgpool_expected_codegen,
+    get_relax_global_maxpool_mod,
+    get_global_maxpool_expected_codegen,
+    get_dequant_matmul_module,
+    get_dequant_vec_matmul_module,
 )
 
 import tvm
@@ -70,9 +72,13 @@ def compare_codegen(clml_mod, clml_codegen):
     )
 
 
-def verify(mod, params_np, clml_codegen):
+def verify(mod, params_np, clml_codegen, enable_llm_partition=False):
+    tgt = tvm.target.Target(tvm.target.adreno(), host="llvm -mtriple=aarch64-linux-gnu")
     mod = tvm.relax.transform.BindParams("main", params_np)(mod)
-    clml_mod = OpenCLMLOffLoad()(mod)
+    if enable_llm_partition:
+        clml_mod = CLMLPartitionForLLM(tgt)(mod)
+    else:
+        clml_mod = OpenCLMLOffLoad()(mod)
     compare_codegen(clml_mod, clml_codegen)
 
 
@@ -261,7 +267,6 @@ def test_batchnorm(dtype, trials):
                 "axis": [[str(axis)]],
                 "center": [["1"]],
                 "dtype": [[dtype]],
-                "clml_version": [["3"]],
                 "momentum": [["0.10000000000000001"]],
                 "epsilon": [["0.00029999999999999997"]],
                 "num_inputs": "5",
@@ -319,7 +324,6 @@ def test_binary_ops(a_shape, b_shape, op, dtype):
             },
             {
                 "attrs": {
-                    "clml_version": [["3"]],
                     "dtype": [[dtype]],
                     "num_inputs": "2",
                     "num_outputs": "1",
@@ -368,7 +372,6 @@ def test_unary_ops(a_shape, op, dtype):
             {
                 "attrs": {
                     "activation_type": [["relu"]],
-                    "clml_version": [["3"]],
                     "dtype": [[dtype]],
                     "num_inputs": "1",
                     "num_outputs": "1",
@@ -502,6 +505,105 @@ def test_global_max_pool(dtype, trials):
         input_shape, pool_size, stride, padding, "global_max", dtype
     )
     verify(mod, params_np, exp_codegen_str)
+
+
+@pytest.mark.skipif(
+    int(tvm.support.libinfo().get("TVM_CLML_VERSION", 3)) < 5,
+    reason="Requires compiler supporting CLML v5 or above",
+)
+@pytest.mark.parametrize(
+    "K, N, M",
+    [
+        (4096, 11008, 256),
+        (2048, 32768, 128),
+        (4096, 4096, 512),
+        (8960, 1536, 1024),
+    ],
+)
+def test_dequant_matmul(K, N, M, rpc):
+
+    mod = get_dequant_matmul_module(K, N)
+    params_np = {}
+    exp_codegen_str = [
+        {
+            "op": "input",
+            "name": "",
+            "attrs": {"shape": [[[K // 8, N]]], "dtype": [["uint32"]]},
+        },
+        {
+            "op": "input",
+            "name": "",
+            "attrs": {"shape": [[[K // 32, N]]], "dtype": [["float16"]]},
+        },
+        {
+            "op": "input",
+            "name": "",
+            "attrs": {"shape": [[[1, -1, K]]], "dtype": [["float16"]]},
+        },
+        {
+            "op": "kernel",
+            "name": "",
+            "inputs": [[0, 0, 0], [1, 0, 0], [2, 0, 0]],
+            "attrs": {
+                "dtype": [["float16"]],
+                "num_inputs": "3",
+                "num_outputs": "1",
+                "out_dtype": [["float16"]],
+                "shape": [[[1, -1, N]]],
+            },
+        },
+    ]
+    verify(mod, params_np, exp_codegen_str, enable_llm_partition=True)
+
+
+@pytest.mark.skipif(
+    int(tvm.support.libinfo().get("TVM_CLML_VERSION", 3)) < 5,
+    reason="Requires compiler supporting CLML v5 or above",
+)
+@pytest.mark.parametrize(
+    "K, N",
+    [
+        (4096, 11008),
+        (14336, 4096),
+        (1536, 17920),
+        (8960, 1536),
+    ],
+)
+def test_dequant_vec_matmul(K, N, rpc):
+
+    mod = get_dequant_vec_matmul_module(K, N)
+    params_np = {}
+
+    exp_codegen_str = [
+        {
+            "op": "input",
+            "name": "",
+            "attrs": {"shape": [[[K // 8, -1]]], "dtype": [["uint32"]]},
+        },
+        {
+            "op": "input",
+            "name": "",
+            "attrs": {"shape": [[[K // 32, -1]]], "dtype": [["float16"]]},
+        },
+        {
+            "op": "input",
+            "name": "",
+            "attrs": {"shape": [[[1, 1, K]]], "dtype": [["float16"]]},
+        },
+        {
+            "op": "kernel",
+            "name": "",
+            "inputs": [[0, 0, 0], [1, 0, 0], [2, 0, 0]],
+            "attrs": {
+                "dtype": [["float16"]],
+                "num_inputs": "3",
+                "num_outputs": "1",
+                "out_dtype": [["float16"]],
+                "shape": [[[1, 1, -1]]],
+            },
+        },
+    ]
+    verify(mod, params_np, exp_codegen_str, enable_llm_partition=True)
 
 
 if __name__ == "__main__":

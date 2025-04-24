@@ -327,5 +327,78 @@ def test_global_max_pool(dtype, trials):
     run_compare(mod, inputs, params_np)
 
 
+@pytest.mark.skipif(
+    int(os.getenv("ADRENO_TARGET_CLML_VERSION", 3)) < 5,
+    reason="Requires target device with CLML v5 or above",
+)
+@pytest.mark.skipif(
+    int(tvm.support.libinfo().get("TVM_CLML_VERSION", 2)) < 5,
+    reason="Requires compiler supporting CLML v5 or above",
+)
+@pytest.mark.parametrize(
+    "K, N, M",
+    [
+        (4096, 11008, 256),
+        (2048, 32768, 128),
+        (4096, 4096, 512),
+        (4096, 22016, 64),
+        (16384, 2048, 128),
+        (2048, 2560, 1024),
+        (3072, 9216, 256),
+        (14336, 4096, 128),
+        (1536, 17920, 128),
+        (8960, 1536, 1024),
+    ],
+)
+def test_dequant_matmul(K, N, M, rpc):
+    x_data = np.random.uniform(-0.1, 0.1, size=(1, M, K)).astype("float16")
+    weight = np.random.randint(0, 100, size=(K // 8, N)).astype("uint32")
+    scale = np.random.uniform(-0.1, 0.1, size=(K // 32, N)).astype("float16")
+
+    inputs = (x_data, weight, scale)
+    params_np = {}
+
+    mod = get_dequant_matmul_module(K, N)
+
+    run_compare(mod, inputs, params_np, rpc)
+
+
+@pytest.mark.skipif(
+    int(os.getenv("ADRENO_TARGET_CLML_VERSION", 3)) < 5,
+    reason="Requires target device with CLML v5 or above",
+)
+@pytest.mark.skipif(
+    int(tvm.support.libinfo().get("TVM_CLML_VERSION", 2)) < 5,
+    reason="Requires compiler supporting CLML v5 or above",
+)
+@pytest.mark.parametrize(
+    "K, N",
+    [
+        (4096, 11008),
+        (2048, 32768),
+        (4096, 4096),
+        (4096, 22016),
+        (16384, 2048),
+        (2048, 2560),
+        (3072, 9216),
+        (4096, 28672),
+        (14336, 4096),
+        (1536, 17920),
+        (8960, 1536),
+    ],
+)
+def test_dequant_vec_matmul(K, N, rpc):
+    x_data = np.random.uniform(-0.1, 0.1, size=(1, 1, K)).astype("float16")
+    weight = np.random.randint(0, 100, size=(K // 8, N)).astype("uint32")
+    scale = np.random.uniform(-0.1, 0.1, size=(K // 32, N)).astype("float16")
+
+    inputs = (x_data, weight, scale)
+    params_np = {}
+
+    mod = get_dequant_vec_matmul_module(K, N)
+
+    run_compare(mod, inputs, params_np, rpc)
+
+
 if __name__ == "__main__":
     tvm.testing.main()

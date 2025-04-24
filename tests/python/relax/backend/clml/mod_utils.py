@@ -248,7 +248,6 @@ def get_conv2d_transpose_expected_codegen(
         "data_layout": [["NCHW"]],
         "kernel_layout": [["OIHW"]],
         "groups": [["1"]],
-        "clml_version": [["3"]],
         "dilation": [[str(p) for p in dilation]],
         "num_inputs": "2",
         "num_outputs": "1",
@@ -407,7 +406,6 @@ def get_maxpool_expected_codegen(input_shape, pool_size, stride, padding, pool_t
 
     attrs = {
         "ceil_mode": [["0"]],
-        "clml_version": [["3"]],
         "dilation": [["1", "1"]],
         "layout": [["NCHW"]],
         "num_inputs": "1",
@@ -500,7 +498,6 @@ def get_avgpool_expected_codegen(input_shape, pool_size, stride, padding, pool_t
 
     attrs = {
         "ceil_mode": [["0"]],
-        "clml_version": [["3"]],
         "dilation": [["1", "1"]],
         "layout": [["NCHW"]],
         "num_inputs": "1",
@@ -577,7 +574,6 @@ def get_relax_reshape_codegen(input_shape, output_shape, dtype):
         },
         {
             "attrs": {
-                "clml_version": [["3"]],
                 "dtype": [[dtype]],
                 "num_inputs": "1",
                 "num_outputs": "1",
@@ -636,7 +632,6 @@ def get_global_avgpool_expected_codegen(input_shape, keep_dims, dtype):
     attrs = {
         "num_inputs": "1",
         "num_outputs": "1",
-        "clml_version": [["3"]],
         "shape": [[list(output_shape)]],
         "dtype": [[dtype]],
         "axis": [["2", "3"]],
@@ -699,7 +694,6 @@ def get_global_maxpool_expected_codegen(input_shape, pool_size, stride, padding,
 
     attrs = {
         "ceil_mode": [["0"]],
-        "clml_version": [["3"]],
         "dilation": [["1", "1"]],
         "layout": [["NCHW"]],
         "num_inputs": "1",
@@ -729,3 +723,120 @@ def get_global_maxpool_expected_codegen(input_shape, pool_size, stride, padding,
         },
     ]
     return exp_codegen
+
+
+def get_dequant_matmul_module(K, N):
+    @I.ir_module
+    class DequantMatmul:
+        @R.function
+        def main(
+            input: R.Tensor((1, "seq_len", K), dtype="float16"),
+            weight: R.Tensor((K // 8, N), dtype="uint32"),
+            scale: R.Tensor((K // 32, N), dtype="float16"),
+        ):
+            seq_len = T.int64()
+            cls = DequantMatmul
+            with R.dataflow():
+                lv2 = relax.call_tir(
+                    cls.dequantize,
+                    (weight, scale),
+                    out_sinfo=R.Tensor((K, N), dtype="float16"),
+                )
+                gv: R.Tensor((1, seq_len, N), dtype="float16") = relax.op.matmul(
+                    input, lv2, out_dtype="float16"
+                )
+                R.output(gv)
+            return gv
+
+        @T.prim_func
+        def dequantize(weight: T.handle, scale: T.handle, var_dequantize: T.handle):
+            T.func_attr({"tir.noalias": T.bool(True)})
+            lm_head_q_weight1 = T.match_buffer(weight, (T.int64(K // 8), T.int64(N)), "uint32")
+            lm_head_q_scale1 = T.match_buffer(scale, (T.int64(K // 32), T.int64(N)), "float16")
+            dequantize = T.match_buffer(var_dequantize, (T.int64(K), T.int64(N)), "float16")
+            # with T.block("root"):
+            compute = T.alloc_buffer((T.int64(K), T.int64(N)), "float16")
+            for i0, i1 in T.grid(T.int64(K), T.int64(N)):
+                with T.block("compute"):
+                    v_i0, v_i1 = T.axis.remap("SS", [i0, i1])
+                    T.reads(lm_head_q_weight1[v_i0 // T.int64(8), v_i1])
+                    T.writes(compute[v_i0, v_i1])
+                    compute[v_i0, v_i1] = T.Cast(
+                        "float16",
+                        T.bitwise_and(
+                            T.shift_right(
+                                lm_head_q_weight1[v_i0 // T.int64(8), v_i1],
+                                T.Cast("uint32", v_i0 % T.int64(8) * T.int64(4)),
+                            ),
+                            T.uint32(15),
+                        ),
+                    )
+            for i0, i1 in T.grid(T.int64(K), T.int64(N)):
+                with T.block("dequantize"):
+                    v_i0, v_i1 = T.axis.remap("SS", [i0, i1])
+                    T.reads(compute[v_i0, v_i1], lm_head_q_scale1[v_i0 // T.int64(32), v_i1])
+                    T.writes(dequantize[v_i0, v_i1])
+                    dequantize[v_i0, v_i1] = (
+                        compute[v_i0, v_i1] - T.float16(7.0)
+                    ) * lm_head_q_scale1[v_i0 // T.int64(32), v_i1]
+
+    return DequantMatmul
+
+
+def get_dequant_vec_matmul_module(K, N):
+    @I.ir_module
+    class DequantVecMatmul:
+        @R.function
+        def main(
+            input: R.Tensor((1, 1, K), dtype="float16"),
+            weight: R.Tensor((K // 8, "vocab_size"), dtype="uint32"),
+            scale: R.Tensor((K // 32, "vocab_size"), dtype="float16"),
+        ):
+            vocab_size = T.int64()
+            cls = DequantVecMatmul
+            with R.dataflow():
+                lv2 = relax.call_tir(
+                    cls.dequantize,
+                    (weight, scale),
+                    out_sinfo=R.Tensor((K, vocab_size), dtype="float16"),
+                )
+                gv: R.Tensor((1, 1, vocab_size), dtype="float16") = relax.op.matmul(
+                    input, lv2, out_dtype="float16"
+                )
+                R.output(gv)
+            return gv
+
+        @T.prim_func
+        def dequantize(weight: T.handle, scale: T.handle, var_dequantize: T.handle):
+            T.func_attr({"tir.noalias": T.bool(True)})
+            vocab_size = T.int64()
+            lm_head_q_weight1 = T.match_buffer(weight, (T.int64(K // 8), vocab_size), "uint32")
+            lm_head_q_scale1 = T.match_buffer(scale, (T.int64(K // 32), vocab_size), "float16")
+            dequantize = T.match_buffer(var_dequantize, (T.int64(K), vocab_size), "float16")
+            # with T.block("root"):
+            compute = T.alloc_buffer((T.int64(K), vocab_size), "float16")
+            for i0, i1 in T.grid(T.int64(K), vocab_size):
+                with T.block("compute"):
+                    v_i0, v_i1 = T.axis.remap("SS", [i0, i1])
+                    T.reads(lm_head_q_weight1[v_i0 // T.int64(8), v_i1])
+                    T.writes(compute[v_i0, v_i1])
+                    compute[v_i0, v_i1] = T.Cast(
+                        "float16",
+                        T.bitwise_and(
+                            T.shift_right(
+                                lm_head_q_weight1[v_i0 // T.int64(8), v_i1],
+                                T.Cast("uint32", v_i0 % T.int64(8) * T.int64(4)),
+                            ),
+                            T.uint32(15),
+                        ),
+                    )
+            for i0, i1 in T.grid(T.int64(K), vocab_size):
+                with T.block("dequantize"):
+                    v_i0, v_i1 = T.axis.remap("SS", [i0, i1])
+                    T.reads(compute[v_i0, v_i1], lm_head_q_scale1[v_i0 // T.int64(32), v_i1])
+                    T.writes(dequantize[v_i0, v_i1])
+                    dequantize[v_i0, v_i1] = (
+                        compute[v_i0, v_i1] - T.float16(7.0)
+                    ) * lm_head_q_scale1[v_i0 // T.int64(32), v_i1]
+
+    return DequantVecMatmul
