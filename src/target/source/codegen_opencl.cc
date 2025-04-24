@@ -70,9 +70,10 @@ class InferTextureAccess : public StmtExprVisitor {
   std::unordered_map<const VarNode*, uint8_t> var_access_map_;
 };
 
-CodeGenOpenCL::CodeGenOpenCL() {
+CodeGenOpenCL::CodeGenOpenCL(Target target) {
   // Set OpenCL specific restrict keyword
-  restrict_keyword_ = "restrict";
+  this->restrict_keyword_ = "restrict";
+  this->target = target;
 }
 
 void CodeGenOpenCL::InitFuncState(const PrimFunc& f) {
@@ -125,6 +126,14 @@ std::string CodeGenOpenCL::Finish() {
                    "#error \"Double precision floating point not supported"
                    " by OpenCL implementation on your device.\" \n"
                    "#endif\n\n";
+  }
+
+  if (enable_integer_dot_prod_) {
+    if (TargetContainsKey("adreno")) {
+      decl_stream << "#ifdef cl_qcom_dot_product8\n"
+                     "#pragma OPENCL EXTENSION cl_qcom_dot_product8 : enable\n"
+                     "#endif\n";
+    }
   }
 
   // Enable atomic_add used by get_valid_counts. Only needed for OpenCL < 1.1.
@@ -525,6 +534,20 @@ void CodeGenOpenCL::VisitExpr_(const CallNode* op, std::ostream& os) {
       }
       CodeGenC::VisitExpr_(op, os);
     }
+  } else if (op->op.same_as(builtin::dp4a())) {
+    enable_integer_dot_prod_ = true;
+    if (TargetContainsKey("adreno")) {
+      os << "qcom_dot8_acc(";
+      os << "as_uint(";
+      this->PrintExpr(op->args[0], os);
+      os << "), as_uint(";
+      this->PrintExpr(op->args[1], os);
+      os << "), ";
+      this->PrintExpr(op->args[2], os);
+      os << ")";
+    } else {
+      CodeGenC::VisitExpr_(op, os);
+    }
   } else {
     CodeGenC::VisitExpr_(op, os);
   }
@@ -673,6 +696,11 @@ void CodeGenOpenCL::SetTextureScope(
   }
 }
 
+bool CodeGenOpenCL::TargetContainsKey(std::string key) {
+  return std::find(target->GetKeys().begin(), target->GetKeys().end(), key) !=
+         target->GetKeys().end();
+}
+
 ffi::Module BuildOpenCL(IRModule mod, Target target) {
 #if TVM_ENABLE_SPIRV
   ffi::Optional<ffi::String> device = target->GetAttr<ffi::String>("device");
@@ -699,7 +727,7 @@ ffi::Module BuildOpenCL(IRModule mod, Target target) {
   const auto fpostproc = tvm::ffi::Function::GetGlobal("tvm_callback_opencl_postproc");
   for (auto [gvar, prim_func] : functions) {
     code << "// Function: " << gvar->name_hint << std::endl;
-    CodeGenOpenCL cg;
+    CodeGenOpenCL cg(target);
     cg.Init(output_ssa);
     for (auto [other_gvar, other_prim_func] : functions) {
       cg.DeclareFunction(other_gvar, other_prim_func);

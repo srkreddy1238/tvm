@@ -36,7 +36,7 @@ namespace codegen {
 
 class CodeGenOpenCL final : public CodeGenC {
  public:
-  CodeGenOpenCL();
+  CodeGenOpenCL(Target target);
   std::string Finish();
 
   // override print thread tag.
@@ -60,6 +60,7 @@ class CodeGenOpenCL final : public CodeGenC {
   std::string CastFromTo(std::string value, DataType from, DataType target);     // NOLINT(*)
   std::string CastTo(std::string value, DataType target);                        // NOLINT(*)
   void SetTextureScope(const std::unordered_map<const VarNode*, std::string>&);  // NOLINT(*)
+  bool TargetContainsKey(std::string key);
 
   // overload visitor
   void VisitStmt_(const AllocateNode* op) final;                     // NOLINT(*)
@@ -77,6 +78,9 @@ class CodeGenOpenCL final : public CodeGenC {
   void VisitExpr_(const ModNode* op, std::ostream& os) final;
 
  private:
+  // To Enable Target Specific Codegen
+  Target target;
+
   // whether enable fp16 and fp64 extension
   bool enable_fp16_{false};
   bool enable_fp64_{false};
@@ -85,6 +89,8 @@ class CodeGenOpenCL final : public CodeGenC {
   // Whether to enable sampler or sampler-less texture reads,
   // where the choice depends on the OpenCL version used.
   bool enable_compliant_texture_reads_{false};
+  // Whether to Enable Integer Dot Product Based Extensions
+  bool enable_integer_dot_prod_{false};
   // Mapping from buffer to allocation size.
   // Useful to track when a scalar store of a vectorized texture load is required.
   std::unordered_map<const Object*, size_t> allocation_size_;
