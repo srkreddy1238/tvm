@@ -350,7 +350,7 @@ def test_global_max_pool(dtype, trials):
         (8960, 1536, 1024),
     ],
 )
-def test_dequant_matmul(K, N, M, rpc):
+def test_dequant_matmul(K, N, M):
     x_data = np.random.uniform(-0.1, 0.1, size=(1, M, K)).astype("float16")
     weight = np.random.randint(0, 100, size=(K // 8, N)).astype("uint32")
     scale = np.random.uniform(-0.1, 0.1, size=(K // 32, N)).astype("float16")
@@ -360,7 +360,7 @@ def test_dequant_matmul(K, N, M, rpc):
 
     mod = get_dequant_matmul_module(K, N)
 
-    run_compare(mod, inputs, params_np, rpc)
+    run_compare(mod, inputs, params_np)
 
 
 @pytest.mark.skipif(
@@ -387,7 +387,7 @@ def test_dequant_matmul(K, N, M, rpc):
         (8960, 1536),
     ],
 )
-def test_dequant_vec_matmul(K, N, rpc):
+def test_dequant_vec_matmul(K, N):
     x_data = np.random.uniform(-0.1, 0.1, size=(1, 1, K)).astype("float16")
     weight = np.random.randint(0, 100, size=(K // 8, N)).astype("uint32")
     scale = np.random.uniform(-0.1, 0.1, size=(K // 32, N)).astype("float16")
@@ -397,7 +397,7 @@ def test_dequant_vec_matmul(K, N, rpc):
 
     mod = get_dequant_vec_matmul_module(K, N)
 
-    run_compare(mod, inputs, params_np, rpc)
+    run_compare(mod, inputs, params_np)
 
 
 if __name__ == "__main__":

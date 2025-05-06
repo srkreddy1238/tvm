@@ -710,7 +710,5 @@ class OpenCLMLOffLoadForLLM:
                     transform.RunCodegen(),
                 ]
             )(mod)
-        elif "adreno" in str(self.target.attrs) and (clml_sdk_version() < 5):
-            print("CLML partition for LLM supported for clml_sdk_version >=5")
 
         return mod

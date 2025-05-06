@@ -520,7 +520,7 @@ def test_global_max_pool(dtype, trials):
         (8960, 1536, 1024),
     ],
 )
-def test_dequant_matmul(K, N, M, rpc):
+def test_dequant_matmul(K, N, M):
 
     mod = get_dequant_matmul_module(K, N)
     params_np = {}
@@ -569,7 +569,7 @@ def test_dequant_matmul(K, N, M, rpc):
         (8960, 1536),
     ],
 )
-def test_dequant_vec_matmul(K, N, rpc):
+def test_dequant_vec_matmul(K, N):
 
     mod = get_dequant_vec_matmul_module(K, N)
     params_np = {}
