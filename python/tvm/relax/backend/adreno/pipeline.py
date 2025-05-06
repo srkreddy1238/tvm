@@ -87,7 +87,6 @@ def legalize_passes(target: tvm.target.Target):  # pylint: disable=unused-argume
             ]
         )
     from tvm.s_tir import dlight as dl  # pylint: disable=import-outside-toplevel
-
     pass_list.extend([relax.transform.Normalize()])
     pass_list.extend(
         [

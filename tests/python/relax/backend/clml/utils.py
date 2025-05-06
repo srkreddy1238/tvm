@@ -60,20 +60,17 @@ def build_and_run(
     tgt = tvm.target.Target(target, host={"kind": "llvm", "mtriple": "aarch64-linux-gnu"})
     relax_pipeline = relax.pipeline.get_default_pipeline(tgt)
     tir_pipeline = tvm.tir.get_default_tir_pipeline(tgt)
-    if rpc:
-        ex = tvm.compile(mod, tgt, relax_pipeline=relax_pipeline, tir_pipeline=tir_pipeline)
-        temp = utils.tempdir()
-        path = temp.relpath(load_path)
-        path = "./" + load_path
-        ex.export_library(path, fcompile=ndk.create_shared, options=["-shared", "-fPIC", "-lm"])
-        rpc.upload(path)
-        rexec = rpc.load_module(load_path)
-        dev = rpc.cl(0)
-        vm = relax.VirtualMachine(rexec, dev)
-    else:
-        ex = tvm.compile(mod, target, relax_pipeline=relax_pipeline, tir_pipeline=tir_pipeline)
-        dev = tvm.device(target, 0)
-        vm = relax.VirtualMachine(ex, dev)
+
+    ex = tvm.compile(mod, tgt, relax_pipeline=relax_pipeline, tir_pipeline=tir_pipeline)
+    temp = utils.tempdir()
+    path = temp.relpath(load_path)
+    path = "./" + load_path
+    ex.export_library(path, fcompile=ndk.create_shared, options=["-shared", "-fPIC", "-lm"])
+
+    rpc.upload(path)
+    rexec = rpc.load_module(load_path)
+    dev = rpc.cl(0)
+    vm = relax.VirtualMachine(rexec, dev)
 
     f = vm["main"]
     inputs = [tvm.runtime.tensor(inp, dev) for inp in inputs_np]
