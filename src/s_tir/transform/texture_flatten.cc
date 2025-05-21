@@ -105,10 +105,11 @@ class TextureFlattener : public TextureLoweringBase {
     if (IsTextureStorage(storage_scope)) {
       Stmt body = this->VisitStmt(op->body);
       ICHECK(op->bounds.size() >= 3) << "Only 2d RGBA texture is currently supported";
-      int vec_length = static_cast<int>(op->bounds.back()->extent.as<IntImmNode>()->value);
-      ICHECK(vec_length == 4 || vec_length == 1)
-          << "Inner dimension of texture must be vector of length 1 or 4 (RGBA), was: "
-          << vec_length;
+      const int bits = op->buffer->dtype.bits(),
+                lanes = static_cast<int>(op->bounds.back()->extent.as<IntImmNode>()->value);
+      const int channel_size = bits * lanes;
+      ICHECK(channel_size == 128 || channel_size == 64)
+          << "Invalid Channel Size: " << channel_size << " bits";
 
       struct ShapeFromRange {
         const Array<Range>& bounds;
@@ -119,9 +120,11 @@ class TextureFlattener : public TextureLoweringBase {
           ApplyTexture2DFlattening<PrimExpr>(ShapeFromRange{op->bounds}, op->bounds.size(), axis);
       Array<PrimExpr> args;
       args.push_back(StringImm(storage_scope));
-      args.push_back(IntImm(DataType::Int(64), 3));  // 2d
+      args.push_back(IntImm(DataType::Int(64), 3));  // 2D-Array
       args.push_back(Call(DataType::Handle(), builtin::tvm_stack_make_shape(),
                           {texture.width, texture.height, texture.depth}));
+      args.push_back(IntImm(DataType::Int(64), channel_size));
+
       stmt = LetStmt(buffer_var, Call(buffer_var.dtype(), builtin::nd_mem_alloc_with_scope(), args),
                      body);
     }
@@ -183,9 +186,12 @@ class TextureFlattener : public TextureLoweringBase {
     PrimExpr row_offset = SimplifyOffset(row_dims, row_indices);
     PrimExpr col_offset = SimplifyOffset(col_dims, col_indices);
     PrimExpr depth_offset = SimplifyOffset(depth_dims, depth_indices);
+    PrimExpr channel_size = IntImm(DataType::Int(32, 1),
+                                   *tir::as_const_int(buffer->shape.back()) * buffer->dtype.bits());
     args.push_back(row_offset);
     args.push_back(col_offset);
     args.push_back(depth_offset);
+    args.push_back(channel_size);
     return args;
   }
 

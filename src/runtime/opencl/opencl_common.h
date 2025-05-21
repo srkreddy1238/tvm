@@ -361,6 +361,7 @@ class OpenCLWorkspace : public DeviceAPI {
   void SetNativePtr(const tvm::runtime::Tensor& narr, void* host_ptr, size_t buf_size);
   void SetPerfHint(Device dev, cl_uint perf_hint);
   void FreeDataSpace(Device dev, void* ptr) final;
+  void FreeDataSpaceView(Device dev, void* ptr);
   void StreamSync(Device dev, TVMStreamHandle stream) final;
   void* AllocWorkspace(Device dev, size_t size, DLDataType type_hint) final;
   void FreeWorkspace(Device dev, void* data) final;
