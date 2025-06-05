@@ -1840,7 +1840,12 @@ class CLMLRuntime : public JSONRuntimeBase {
       output = MakeCLMLTensorFromJSONEntry(nid, {1, 1, in_dims.c * in_dims.h, in_dims.w},
                                            CL_TENSOR_LAYOUT_OPTIMAL_QCOM, cl_dtype,
                                            CL_TENSOR_USAGE_TNN_QCOM);
-      layer->out_shapes.insert({nid, { 1, 1, in_dims.c * in_dims.h, in_dims.w }});
+      std::vector<size_t> clml_out_shape;
+      clml_out_shape.push_back(1);
+      clml_out_shape.push_back(1);
+      clml_out_shape.push_back(in_dims.c * in_dims.h);
+      clml_out_shape.push_back(in_dims.w);
+      layer->out_shapes.insert({nid, clml_out_shape});
     } else if (shape.size() == 3) {
       input = MakeCLMLTensorFromJSONEntry(node.GetInputs()[0].id_, {1, 1, in_dims.c, in_dims.h},
                                           CL_TENSOR_LAYOUT_OPTIMAL_QCOM, cl_dtype,
@@ -1848,7 +1853,12 @@ class CLMLRuntime : public JSONRuntimeBase {
       output = MakeCLMLTensorFromJSONEntry(nid, {1, 1, in_dims.c, in_dims.h},
                                            CL_TENSOR_LAYOUT_OPTIMAL_QCOM, cl_dtype,
                                            CL_TENSOR_USAGE_TNN_QCOM);
-      layer->out_shapes.insert({nid, { 1, 1, in_dims.c, in_dims.h }});
+      std::vector<size_t> clml_out_shape;
+      clml_out_shape.push_back(1);
+      clml_out_shape.push_back(1);
+      clml_out_shape.push_back(in_dims.c);
+      clml_out_shape.push_back(in_dims.h);
+      layer->out_shapes.insert({nid, clml_out_shape});
     }
 
     auto ln_scale = std::make_shared<cl_ml_tensor_memory_desc_qcom>();
@@ -2023,7 +2033,12 @@ class CLMLRuntime : public JSONRuntimeBase {
     auto output =
         MakeCLMLTensorFromJSONEntry(nid, {1, 1, query_dims.n, query_dims.c},
                                     CL_TENSOR_LAYOUT_NCHW_QCOM, cl_dtype, CL_TENSOR_USAGE_TNN_QCOM);
-    layer->out_shapes.insert({nid, { 1, 1, query_dims.n, query_dims.c }});
+    std::vector<size_t> clml_out_shape;
+    clml_out_shape.push_back(1);
+    clml_out_shape.push_back(1);
+    clml_out_shape.push_back(query_dims.n);
+    clml_out_shape.push_back(query_dims.c);
+    layer->out_shapes.insert({nid, clml_out_shape});
 
     cl_uint key_dim = key_wt_dims.n / num_heads;
     cl_uint value_dim = value_wt_dims.n / num_heads;

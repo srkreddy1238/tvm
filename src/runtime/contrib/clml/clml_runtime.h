@@ -55,8 +55,19 @@
 #define CAT_I(a, b) a##b
 #define CAT(a, b) CAT_I(a, b)
 
-#define CLML_CHECK_ERROR(e, API) \
-  { ICHECK(e == CL_SUCCESS) << "CLML Error:" #API " code=" << e; }
+#define CLML_CHECK_ERROR(e, API)                                 \
+  {                                                              \
+    ICHECK(e == CL_SUCCESS) << "CLML Error:" #API " code=" << e; \
+  }
+
+#if CL_QCOM_ML_OPS_H_MAJOR_VERSION > 4
+#define V5_API(API, ...)                                                            \
+  e = (reinterpret_cast<CLMLInterfaceV5QCOM*>(CLMLWorkspace::Global()->h_ClmlIntf)) \
+          ->API(__VA_ARGS__);                                                       \
+  CLML_CHECK_ERROR(e, API);
+#else
+#define V5_API(API, ...) LOG(FATAL) << "CLML Error:" #API " - Incompatible V5 API call\n";
+#endif
 
 #if CL_QCOM_ML_OPS_H_MAJOR_VERSION > 3
 #define V4_API(API, ...)                                                            \
@@ -106,6 +117,9 @@
       case 4:                                                                \
         V4_API(API, __VA_ARGS__);                                            \
         break;                                                               \
+      case 5:                                                                \
+        V5_API(API, __VA_ARGS__);                                            \
+        break;                                                               \
       default:                                                               \
         LOG(FATAL) << "CLML Error:" #API " - Unsupported target version \n"; \
     }                                                                        \
@@ -125,6 +139,7 @@
     CALL_CASE(2, clCreateMLOpClipQCOM, __VA_ARGS__)                \
     CALL_CASE(3, clCreateMLOpClipQCOM, __VA_ARGS__)                \
     CALL_CASE(4, clCreateMLOpClipQCOM, __VA_ARGS__)                \
+    CALL_CASE(5, clCreateMLOpClipQCOM, __VA_ARGS__)                \
     default:                                                       \
       LOG(FATAL) << "CLML Error: - Unsupported target version \n"; \
   }
@@ -134,6 +149,7 @@
   cl_int e;                                                        \
   switch (CLMLWorkspace::Global()->target_major) {                 \
     CALL_CASE(4, clCreateMLOpGroupNormForwardQCOM, __VA_ARGS__)    \
+    CALL_CASE(5, clCreateMLOpGroupNormForwardQCOM, __VA_ARGS__)    \
     default:                                                       \
       LOG(FATAL) << "CLML Error: - Unsupported target version \n"; \
   }
@@ -143,6 +159,7 @@
   cl_int e;                                                        \
   switch (CLMLWorkspace::Global()->target_major) {                 \
     CALL_CASE(4, clCreateMLOpLayerNormForwardQCOM, __VA_ARGS__)    \
+    CALL_CASE(5, clCreateMLOpLayerNormForwardQCOM, __VA_ARGS__)    \
     default:                                                       \
       LOG(FATAL) << "CLML Error: - Unsupported target version \n"; \
   }
@@ -152,6 +169,7 @@
   cl_int e;                                                              \
   switch (CLMLWorkspace::Global()->target_major) {                       \
     CALL_CASE(4, clCreateMLOpMultiHeadAttentionForwardQCOM, __VA_ARGS__) \
+    CALL_CASE(5, clCreateMLOpMultiHeadAttentionForwardQCOM, __VA_ARGS__) \
     default:                                                             \
       LOG(FATAL) << "CLML Error: - Unsupported target version \n";       \
   }
@@ -164,15 +182,16 @@
                                            TENSOR)                                           \
   CALL_CASE(VERSION, clCreateMLTensorWithUsageQCOM, CONTEXT, TENSORPROPS, TENSORDESC, USAGE, TENSOR)
 
-#define CLML_CALL_clCreateMLTensorQCOM(...)                        \
-  cl_int e;                                                        \
-  switch (CLMLWorkspace::Global()->target_major) {                 \
-    CALL_clCreateMLTensorQCOM(1, __VA_ARGS__);                     \
-    CALL_clCreateMLTensorQCOM(2, __VA_ARGS__);                     \
-    CALL_clCreateMLTensorQCOM(3, __VA_ARGS__);                     \
-    CALL_clCreateMLTensorWithUsageQCOM(4, __VA_ARGS__);            \
-    default:                                                       \
-      LOG(FATAL) << "CLML Error: - Unsupported target version \n"; \
+#define CLML_CALL_clCreateMLTensorQCOM(CONTEXT, TENSORPROPS, TENSORDESC, USAGE, TENSOR)     \
+  cl_int e;                                                                                 \
+  switch (CLMLWorkspace::Global()->target_major) {                                          \
+    CALL_clCreateMLTensorQCOM(1, CONTEXT, TENSORPROPS, TENSORDESC, USAGE, TENSOR);          \
+    CALL_clCreateMLTensorQCOM(2, CONTEXT, TENSORPROPS, TENSORDESC, USAGE, TENSOR);          \
+    CALL_clCreateMLTensorQCOM(3, CONTEXT, TENSORPROPS, TENSORDESC, USAGE, TENSOR);          \
+    CALL_clCreateMLTensorWithUsageQCOM(4, CONTEXT, TENSORPROPS, TENSORDESC, USAGE, TENSOR); \
+    CALL_clCreateMLTensorWithUsageQCOM(5, CONTEXT, TENSORPROPS, TENSORDESC, USAGE, TENSOR); \
+    default:                                                                                \
+      LOG(FATAL) << "CLML Error: - Unsupported target version \n";                          \
   }
 
 /* Version compatibility for CLML Tensor creation */

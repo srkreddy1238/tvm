@@ -16,7 +16,7 @@
 # under the License.
 
 # Checkout mainline commit on local repo and run tests.
-name: Adreno Package Generation
+name: Adreno Release Generation
 
 on:
   schedule:
@@ -41,10 +41,9 @@ jobs:
         shell: bash -l {0}
         run: |
            set -e
+           RELEASE_TAG=`cat adreno_version.txt`
            docker run --rm --pid=host -w /workspace \
                -v ${PWD}:/workspace \
-               -v ${ADRENOACCL_SDK}:/adrenoaccl_sdk \
-               -e ADRENOACCL_SDK=/adrenoaccl_sdk \
                -v ${ADRENO_OPENCL}:/adreno_opencl \
                -e ADRENO_OPENCL=/adreno_opencl \
                -e ENV_USER_ID=`id -u` \
@@ -53,22 +52,18 @@ jobs:
                conda run -n py38 ./ci/adreno/build_lib.sh
            docker run --rm --pid=host -w /workspace \
                -v ${PWD}:/workspace \
-               -v ${ADRENOACCL_SDK}:/adrenoaccl_sdk \
-               -e ADRENOACCL_SDK=/adrenoaccl_sdk \
                -v ${ADRENO_OPENCL}:/adreno_opencl \
                -e ADRENO_OPENCL=/adreno_opencl \
                -e ENV_USER_ID=`id -u` \
                -e ENV_GROUP_ID=`id -g` \
-               -e WHEEL_EXT_NAME="_adreno_cpu" \
+               -e WHEEL_EXT_NAME="_adreno_cpu_"${RELEASE_TAG} \
                mlcaidev/package-cu121 \
                conda run -n py38 ./ci/adreno/build_wheel.sh
-           mkdir -p nightly
-           cp wheels/*.whl ./nightly/ -rfa
-           mv wheels/*.whl ${CI_PACKAGE_REPO_NIGHTLY}/
+           mkdir -p release
+           cp wheels/*.whl release/
+           mv wheels/*.whl ${CI_PACKAGE_REPO_RELEASE}/
            docker run --rm --pid=host -w /workspace \
                -v ${PWD}:/workspace \
-               -v ${ADRENOACCL_SDK}:/adrenoaccl_sdk \
-               -e ADRENOACCL_SDK=/adrenoaccl_sdk \
                -v ${ADRENO_OPENCL}:/adreno_opencl \
                -e ADRENO_OPENCL=/adreno_opencl \
                -e ENV_USER_ID=`id -u` \
@@ -79,10 +74,9 @@ jobs:
         shell: bash -l {0}
         run: |
            set -e
+           RELEASE_TAG=`cat adreno_version.txt`
            docker run --rm --pid=host -w /workspace \
                -v ${PWD}:/workspace \
-               -v ${ADRENOACCL_SDK}:/adrenoaccl_sdk \
-               -e ADRENOACCL_SDK=/adrenoaccl_sdk \
                -v ${ADRENO_OPENCL}:/adreno_opencl \
                -e ADRENO_OPENCL=/adreno_opencl \
                -e ENV_USER_ID=`id -u` \
@@ -92,22 +86,18 @@ jobs:
                conda run -n py38 ./ci/adreno/build_lib.sh
            docker run --rm --pid=host -w /workspace \
                -v ${PWD}:/workspace \
-               -v ${ADRENOACCL_SDK}:/adrenoaccl_sdk \
-               -e ADRENOACCL_SDK=/adrenoaccl_sdk \
                -v ${ADRENO_OPENCL}:/adreno_opencl \
                -e ADRENO_OPENCL=/adreno_opencl \
                -e ENV_USER_ID=`id -u` \
                -e ENV_GROUP_ID=`id -g` \
-               -e WHEEL_EXT_NAME="_adreno_cuda" \
+               -e WHEEL_EXT_NAME="_adreno_cuda_"${RELEASE_TAG} \
                -e GPU=cuda \
                mlcaidev/package-cu121 \
                conda run -n py38 ./ci/adreno/build_wheel.sh
-           cp wheels/*.whl ./nightly/ -rfa
-           mv wheels/*.whl ${CI_PACKAGE_REPO_NIGHTLY}/
+           cp wheels/*.whl ./release/ -rfa
+           mv wheels/*.whl ${CI_PACKAGE_REPO_RELEASE}/
            docker run --rm --pid=host -w /workspace \
                -v ${PWD}:/workspace \
-               -v ${ADRENOACCL_SDK}:/adrenoaccl_sdk \
-               -e ADRENOACCL_SDK=/adrenoaccl_sdk \
                -v ${ADRENO_OPENCL}:/adreno_opencl \
                -e ADRENO_OPENCL=/adreno_opencl \
                -e ENV_USER_ID=`id -u` \
@@ -149,16 +139,17 @@ jobs:
         shell: bash -l {0}
         run: |
            set -e
+           RELEASE_TAG=`cat adreno_version.txt`
            cp build-adreno-target/tvm_rpc adreno-utils/ -rfa
            cp build-adreno-target/rtvm adreno-utils/ -rfa
            cp build-adreno-target/libtvm_runtime.so adreno-utils/ -rfa
            tar jcvfp adreno-utils-linux-arm64.tar.bz2 adreno-utils
-           cp adreno-utils-linux-arm64.tar.bz2 ./nightly/ -rfa
-           gh release delete tvm-nightly --cleanup-tag --yes --repo "$RELEASE_REPO" || true
-           gh release create tvm-nightly --latest --title tvm-nightly --repo "$RELEASE_REPO" --notes "TVM Nightly builds"
-           gh release upload tvm-nightly ./nightly/* --clobber --repo "$RELEASE_REPO"
-           rm -rf nightly
-           mv adreno-utils-linux-arm64.tar.bz2 ${CI_PACKAGE_REPO_NIGHTLY}/
+           cp adreno-utils-linux-arm64.tar.bz2 ./release/ -rfa
+           gh release delete tvm-release-${RELEASE_TAG} --cleanup-tag --yes --repo "$RELEASE_REPO" || true
+           gh release create tvm-release-${RELEASE_TAG} --latest --title tvm-release-${RELEASE_TAG} --repo "$RELEASE_REPO" --notes "TVM Release builds"
+           gh release upload tvm-release-${RELEASE_TAG} ./release/* --clobber --repo "$RELEASE_REPO"
+           rm -rf release
+           mv adreno-utils-linux-arm64.tar.bz2 ${CI_PACKAGE_REPO_RELEASE}/
   BuildPackageWindows:
     needs: [BuildPackageLinux]
     if: ${{ github.repository == 'gpgpu/apache-tvm' }}
@@ -177,8 +168,6 @@ jobs:
            cp ../cmake/config.cmake .
            Add-Content config.cmake "set(USE_OPENCL $ENV:OPENCL_SDK_ADRENO_X86)"
            Add-Content config.cmake "set(USE_LLVM $ENV:LLVM_CONFIG)"
-           Add-Content config.cmake "set(USE_ADRENO_ACCL $ENV:ADRENOACCL_SDK_X86)"
-           Add-Content config.cmake "set(USE_ADRENO_ACCL_GRAPH_EXECUTOR $ENV:ADRENOACCL_SDK_X86)"
            Add-Content config.cmake "set(USE_CLML $ENV:OPENCL_SDK_ADRENO_X86)"
            Add-Content config.cmake "set(USE_CLML_GRAPH_EXECUTOR $ENV:OPENCL_SDK_ADRENO_X86)"
            Add-Content config.cmake "set(USE_CPP_RTVM ON)"
@@ -203,8 +192,6 @@ jobs:
            cd build-arm64
            cp ../cmake/config.cmake .
            Add-Content config.cmake "set(USE_OPENCL $ENV:OPENCL_SDK_ADRENO_ARM64)"
-           Add-Content config.cmake "set(USE_ADRENO_ACCL $ENV:ADRENOACCL_SDK_ARM64)"
-           Add-Content config.cmake "set(USE_ADRENO_ACCL_GRAPH_EXECUTOR $ENV:ADRENOACCL_SDK_ARM64)"
            Add-Content config.cmake "set(USE_CLML $ENV:OPENCL_SDK_ADRENO_ARM64)"
            Add-Content config.cmake "set(USE_CLML_GRAPH_EXECUTOR $ENV:OPENCL_SDK_ADRENO_ARM64)"
            Add-Content config.cmake "set(USE_CPP_RTVM ON)"
@@ -213,22 +200,23 @@ jobs:
            Add-Content config.cmake "set(USE_GRAPH_EXECUTOR ON)"
            Add-Content config.cmake "set(USE_KALLOC_ALIGNMENT 16)"
            Add-Content config.cmake "set(USE_OPENCL_EXTN_QCOM ON)"
-           cmake .. -G "Visual Studio 17 2022" -A ARM64
-           cmake --build . --config Release --parallel $env:NUMBER_OF_PROCESSORS --target rtvm tvm_rpc
+           cmake .. -G "Visual Studio 17 2022" -A ARM64 -DCMAKE_OSX_ARCHITECTURES=arm64
+           cmake --build . --config Release --parallel $env:NUMBER_OF_PROCESSORS
            Pop-Location
       - name: Build Package and Publish
         shell: powershell
         run: |
            Push-Location
+           $Env:RELEASE_TAG=Get-Content -path adreno_version.txt
            cd python
-           $Env:WHEEL_EXT_NAME="_adreno_cpu_x86"
+           $Env:WHEEL_EXT_NAME="_adreno_cpu_x86_$Env:RELEASE_TAG"
            python.exe .\setup.py bdist_wheel --plat-name win_amd64
            Pop-Location
-           Compress-Archive -Path ".\\build-arm64\Release\*" -CompressionLevel Optimal -DestinationPath adreno-utils-win-arm64.zip -Force
-           #try { gh release delete tvm-nightly --cleanup-tag --yes --repo $Env:RELEASE_REPO } catch { }
-           #gh release create tvm-nightly --latest --title tvm-nightly --repo $Env:RELEASE_REPO --notes "Nightly builds"
-           foreach ($i in Get-ChildItem -Path python\dist) {gh release upload tvm-nightly .\python\dist\$i --clobber --repo $Env:RELEASE_REPO}
-           gh release upload tvm-nightly adreno-utils-win-arm64.zip --clobber --repo $Env:RELEASE_REPO
+           Compress-Archive -Path ".\\build-arm64\Release\*" -CompressionLevel Optimal -DestinationPath adreno-utils-win-arm64-$Env:RELEASE_TAG.zip -Force
+           Compress-Archive -Path ".\\build\Release\*" -CompressionLevel Optimal -DestinationPath adreno-utils-win-x86-$Env:RELEASE_TAG.zip -Force
+           foreach ($i in Get-ChildItem -Path python\dist) {gh release upload tvm-release-$Env:RELEASE_TAG .\python\dist\$i --clobber --repo $Env:RELEASE_REPO}
+           gh release upload tvm-release-$Env:RELEASE_TAG adreno-utils-win-arm64-$Env:RELEASE_TAG.zip --clobber --repo $Env:RELEASE_REPO
+           gh release upload tvm-release-$Env:RELEASE_TAG adreno-utils-win-x86-$Env:RELEASE_TAG.zip --clobber --repo $Env:RELEASE_REPO
            rm .\python\build -r -Force -ErrorAction Ignore
            rm .\python\dist -r -Force -ErrorAction Ignore
            rm .\python\*.egg-info -r -Force -ErrorAction Ignore
