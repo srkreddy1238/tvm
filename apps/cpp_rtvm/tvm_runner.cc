@@ -336,6 +336,8 @@ TVMMetaInfo TVMRunner::GetMetaInfo(void) {
   mInfo.n_inputs = r_graph_handle.GetFunction("get_num_inputs")();
   mInfo.n_outputs = r_graph_handle.GetFunction("get_num_outputs")();
 
+  int actual_input_count = 0;
+
   Map<String, ObjectRef> tvm_input_info = r_graph_handle.GetFunction("get_input_info")();
   auto shape_info = GetRef<Map<String, ObjectRef>>(tvm_input_info["shape"].as<MapNode>());
   auto dtype_info = GetRef<Map<String, ObjectRef>>(tvm_input_info["dtype"].as<MapNode>());
@@ -346,7 +348,13 @@ TVMMetaInfo TVMRunner::GetMetaInfo(void) {
     auto dtype = GetRef<String>(dtype_info[kv.first].as<StringObj>());
     std::pair<std::vector<int64_t>, std::string> value = std::make_pair(vshape, dtype);
     mInfo.input_info.insert({kv.first, value});
+    actual_input_count++;
   }
+
+  // Update counts
+
+  mInfo.n_params = mInfo.n_inputs - actual_input_count;
+  mInfo.n_actual_inputs = actual_input_count;
 
   tvm_input_info = r_graph_handle.GetFunction("get_output_info")();
   shape_info = GetRef<Map<String, ObjectRef>>(tvm_input_info["shape"].as<MapNode>());
@@ -369,7 +377,9 @@ TVMMetaInfo TVMRunner::GetMetaInfo(void) {
  */
 void TVMRunner::PrintMetaInfo(void) {
   LOG(INFO) << "Meta Information:" << r_model_path;
-  LOG(INFO) << "    Number of Inputs:" << mInfo.n_inputs;
+  LOG(INFO) << "    Total Inputs (including params):" << mInfo.n_inputs;
+  LOG(INFO) << "    Number of Actual Inputs:" << mInfo.n_actual_inputs;
+  LOG(INFO) << "    Number of Parameters:" << mInfo.n_params;
   LOG(INFO) << "    Number of Outputs:" << mInfo.n_outputs;
   LOG(INFO) << "    Input MetaInfo:";
   for (auto& elem : mInfo.input_info) {
@@ -382,16 +392,54 @@ void TVMRunner::PrintMetaInfo(void) {
     LOG(INFO) << "            DType:" << elem.second.second;
     LOG(INFO) << "            Shape:" << stream.str();
   }
+
   LOG(INFO) << "    Output MetaInfo:";
+
+  // First, get all direct output shapes indexed by output position
+  std::vector<std::string> direct_output_shapes;
+  for (int i = 0; i < mInfo.n_outputs; ++i) {
+    try {
+      NDArray out_arr = r_graph_handle.GetFunction("get_output")(i);
+      std::ostringstream shape_stream;
+      shape_stream << "[";
+      for (int j = 0; j < out_arr->ndim; ++j) {
+        if (j > 0) shape_stream << ", ";
+        shape_stream << out_arr->shape[j];
+      }
+      shape_stream << "]";
+      direct_output_shapes.push_back(shape_stream.str());
+    } catch (const std::exception& e) {
+      LOG(WARNING) << "        Failed to query output[" << i
+                   << "] for shape verification: " << e.what();
+      direct_output_shapes.push_back("[unknown]");
+    }
+  }
+
+  // Now iterate through named outputs and match with correct direct shapes
+  int output_index = 0;
   for (auto& elem : mInfo.output_info) {
-    std::ostringstream stream;
-    stream << "[";
-    copy(elem.second.first.begin(), elem.second.first.end() - 1,
-         std::ostream_iterator<int>(stream, ", "));
-    stream << elem.second.first.back() << "]";
+    std::string shape_str;
+    if (output_index < direct_output_shapes.size()) {
+      // Use the correct direct shape for this output index
+      shape_str = direct_output_shapes[output_index];
+    } else {
+      // Fallback to metadata shape if direct verification failed
+      std::ostringstream shape_stream;
+      shape_stream << "[";
+      if (!elem.second.first.empty()) {
+        copy(elem.second.first.begin(), elem.second.first.end() - 1,
+             std::ostream_iterator<int>(shape_stream, ", "));
+        shape_stream << elem.second.first.back();
+      }
+      shape_stream << "]";
+      shape_str = shape_stream.str();
+    }
+
+    // Print output info
     LOG(INFO) << "        Output:" << elem.first;
-    LOG(INFO) << "            DType:" << elem.second.second;
-    LOG(INFO) << "            Shape:" << stream.str();
+    LOG(INFO) << "        DType:" << elem.second.second;
+    LOG(INFO) << "        Shape:" << shape_str;
+    output_index++;
   }
 }
 

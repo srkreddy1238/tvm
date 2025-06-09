@@ -41,6 +41,8 @@ namespace runtime {
 typedef struct _TVMMetaInfo {
   int n_inputs;
   int n_outputs;
+  int n_params;
+  int n_actual_inputs;
   std::map<std::string, std::pair<std::vector<int64_t>, std::string>> input_info;
   std::map<std::string, std::pair<std::vector<int64_t>, std::string>> output_info;
 } TVMMetaInfo;
