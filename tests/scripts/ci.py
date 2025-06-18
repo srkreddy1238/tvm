@@ -605,6 +605,9 @@ generated = [
             ),
             "frontend": ("run frontend tests", ["./tests/scripts/task_python_frontend.sh"]),
         },
+        env={
+            "LD_LIBRARY_PATH": "/usr/local/cuda/lib64/",
+        },
     ),
     generate_command(
         name="cpu",
