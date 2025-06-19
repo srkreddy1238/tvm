@@ -311,6 +311,8 @@ struct CachedLayer {
   std::map<int, struct NodeDescriptor> storage_map;
   /* Tensor memory descriptors list to set after backing memory allocation */
   std::vector<cl_ml_tensor_memory_desc_qcom> tensorMemDescs;
+  /* Index map of tensor memory descriptors list */
+  std::map<int, int> tensorMemDescs_indexmap;  // nid, index
   cl_ml_tensor_mem_desc_set_qcom descriptorSet;
   /* List of layer names in subgraph */
   std::vector<std::string> layer_names;

@@ -223,9 +223,6 @@ class CLMLRuntime : public JSONRuntimeBase {
       this->layer_.recordable_queue =
           clCreateCommandQueue(CLML_CTX, cws->device_id, CL_QUEUE_RECORDABLE_QCOM, &result);
       ICHECK(result == CL_SUCCESS) << "clCreateCommandQueue - Recordable:" << result;
-
-      this->layer_.recording = clNewRecordingQCOM(this->layer_.recordable_queue, &result);
-      ICHECK(result == CL_SUCCESS) << "clNewRecordingQCOM:" << result;
     }
 
     // A Tuning run, so create the cache from scratch
@@ -333,36 +330,67 @@ class CLMLRuntime : public JSONRuntimeBase {
     std::vector<profiling::MetricCollector> cs;
     std::vector<Device> devices;
     devices.push_back(cws->tentry->device);
-
+    bool update_desc = false;
     for (size_t i = 0; i < input_nodes_.size(); ++i) {
       auto nid = input_nodes_[i];
       uint32_t eid = EntryID(nid, 0);
       if (nodes_[nid].GetOpType() == "input") {
         // Assuming all inputs are from OpenCL
         if (kDLOpenCL == data_entry_[eid]->device.device_type) {
-          layer_.in_placeholder[nid]->memory = static_cast<cl_mem>(
-              ((cl::BufferDescriptor*)const_cast<DLTensor*>(data_entry_[eid])->data)->buffer);
-          cl_event cpy_evt = nullptr;
-          cl_event* evt = &cpy_evt;
-          if (cws->workspace->IsProfiling(cws->tentry->device)) {
-            evts.resize(evts.size() + 1);
-            evt = &(evts.back());
-          }
-          std::unordered_map<std::string, ObjectRef> metrics;
-          std::string shape_str;
-          std::vector<int64_t> shape = nodes_[nid].GetOpShape()[0];
-          DLDataType tvm_dtype = nodes_[nid].GetOpDataType()[0];
-          shape_str.append(profiling::ShapeString(shape, tvm_dtype));
-          metrics["Argument Shapes"] = String(shape_str);
+          if (this->layer_.storage_map[nid].layout == CL_TENSOR_LAYOUT_NCHW_QCOM) {
+            int index = layer_.tensorMemDescs_indexmap[nid];
+            auto placeholder_memory = static_cast<cl_mem>(
+                ((cl::BufferDescriptor*)const_cast<DLTensor*>(data_entry_[eid])->data)->buffer);
+            if (placeholder_memory != layer_.tensorMemDescs[index].memory) {
+              layer_.tensorMemDescs[index].memory = static_cast<cl_mem>(
+                  ((cl::BufferDescriptor*)const_cast<DLTensor*>(data_entry_[eid])->data)->buffer);
+              update_desc = true;
+            }
+          } else {
+            layer_.in_placeholder[nid]->memory = static_cast<cl_mem>(
+                ((cl::BufferDescriptor*)const_cast<DLTensor*>(data_entry_[eid])->data)->buffer);
+            cl_event cpy_evt = nullptr;
+            cl_event* evt = &cpy_evt;
+            if (cws->workspace->IsProfiling(cws->tentry->device)) {
+              evts.resize(evts.size() + 1);
+              evt = &(evts.back());
+            }
+            std::unordered_map<std::string, ObjectRef> metrics;
+            std::string shape_str;
+            std::vector<int64_t> shape = nodes_[nid].GetOpShape()[0];
+            DLDataType tvm_dtype = nodes_[nid].GetOpDataType()[0];
+            shape_str.append(profiling::ShapeString(shape, tvm_dtype));
+            metrics["Argument Shapes"] = String(shape_str);
 
-          std::string call_name = "CopyIn:" + clml_symbol + ":" + std::to_string(i);
-          prof->StartCall(call_name, cws->tentry->device, metrics);
-          CLML_CALL(clEnqueueCopyMLTensorDataQCOM, queue, layer_.in_placeholder[nid]->tensor,
-                    layer_.in_placeholder[nid]->memory, layer_.inputs[nid]->tensor,
-                    layer_.inputs[nid]->memory, 0, nullptr, evt);
-          prof->StopCall();
+            std::string call_name = "CopyIn:" + clml_symbol + ":" + std::to_string(i);
+            prof->StartCall(call_name, cws->tentry->device, metrics);
+            CLML_CALL(clEnqueueCopyMLTensorDataQCOM, queue, layer_.in_placeholder[nid]->tensor,
+                      layer_.in_placeholder[nid]->memory, layer_.inputs[nid]->tensor,
+                      layer_.inputs[nid]->memory, 0, nullptr, evt);
+            prof->StopCall();
+          }
         }
       }
+    }
+
+    for (size_t i = 0; i < outputs_.size(); ++i) {
+      auto nid = outputs_[i].id_;
+      uint32_t eid = EntryID(outputs_[i]);
+      if (this->layer_.storage_map[nid].layout == CL_TENSOR_LAYOUT_NCHW_QCOM) {
+        int index = layer_.tensorMemDescs_indexmap[nid];
+        auto placeholder_memory = static_cast<cl_mem>(
+            ((cl::BufferDescriptor*)const_cast<DLTensor*>(data_entry_[eid])->data)->buffer);
+        if (placeholder_memory != layer_.tensorMemDescs[index].memory) {
+          layer_.tensorMemDescs[index].memory = static_cast<cl_mem>(
+              ((cl::BufferDescriptor*)const_cast<DLTensor*>(data_entry_[eid])->data)->buffer);
+          update_desc = true;
+        }
+      }
+    }
+    if (update_desc) {
+      CLML_CALL(clUpdateMLTensorMemoryDescriptorSetQCOM, this->layer_.descriptorSet,
+                static_cast<uint32_t>(this->layer_.tensorMemDescs.size()),
+                this->layer_.tensorMemDescs.data());
     }
 
     for (size_t i = 0; i < this->layer_.function.size(); ++i) {
@@ -395,31 +423,33 @@ class CLMLRuntime : public JSONRuntimeBase {
 
     for (size_t i = 0; i < outputs_.size(); ++i) {
       uint32_t eid = EntryID(outputs_[i]);
-
+      auto nid = outputs_[i].id_;
       // Assuming all outputs are to OpenCL
       if (kDLOpenCL == data_entry_[eid]->device.device_type) {
-        layer_.out_placeholder[i]->memory = static_cast<cl_mem>(
-            ((cl::BufferDescriptor*)const_cast<DLTensor*>(data_entry_[eid])->data)->buffer);
-        cl_event cpy_evt = nullptr;
-        cl_event* evt = &cpy_evt;
-        if (cws->workspace->IsProfiling(cws->tentry->device)) {
-          evts.resize(evts.size() + 1);
-          evt = &(evts.back());
+        if (this->layer_.storage_map[nid].layout != CL_TENSOR_LAYOUT_NCHW_QCOM) {
+          layer_.out_placeholder[i]->memory = static_cast<cl_mem>(
+              ((cl::BufferDescriptor*)const_cast<DLTensor*>(data_entry_[eid])->data)->buffer);
+          cl_event cpy_evt = nullptr;
+          cl_event* evt = &cpy_evt;
+          if (cws->workspace->IsProfiling(cws->tentry->device)) {
+            evts.resize(evts.size() + 1);
+            evt = &(evts.back());
+          }
+
+          std::unordered_map<std::string, ObjectRef> metrics;
+          std::string shape_str;
+          std::vector<int64_t> shape = nodes_[eid].GetOpShape()[0];
+          DLDataType tvm_dtype = nodes_[eid].GetOpDataType()[0];
+          shape_str.append(profiling::ShapeString(shape, tvm_dtype));
+          metrics["Argument Shapes"] = String(shape_str);
+
+          std::string call_name = "CopyOut:" + clml_symbol + ":" + std::to_string(i);
+          prof->StartCall(call_name, cws->tentry->device, metrics);
+          CLML_CALL(clEnqueueCopyMLTensorDataQCOM, queue, layer_.outputs[i]->tensor,
+                    layer_.outputs[i]->memory, layer_.out_placeholder[i]->tensor,
+                    layer_.out_placeholder[i]->memory, 0, nullptr, evt);
+          prof->StopCall();
         }
-
-        std::unordered_map<std::string, ObjectRef> metrics;
-        std::string shape_str;
-        std::vector<int64_t> shape = nodes_[eid].GetOpShape()[0];
-        DLDataType tvm_dtype = nodes_[eid].GetOpDataType()[0];
-        shape_str.append(profiling::ShapeString(shape, tvm_dtype));
-        metrics["Argument Shapes"] = String(shape_str);
-
-        std::string call_name = "CopyOut:" + clml_symbol + ":" + std::to_string(i);
-        prof->StartCall(call_name, cws->tentry->device, metrics);
-        CLML_CALL(clEnqueueCopyMLTensorDataQCOM, queue, layer_.outputs[i]->tensor,
-                  layer_.outputs[i]->memory, layer_.out_placeholder[i]->tensor,
-                  layer_.out_placeholder[i]->memory, 0, nullptr, evt);
-        prof->StopCall();
       }
     }
 
@@ -437,32 +467,28 @@ class CLMLRuntime : public JSONRuntimeBase {
     LOG_CLML << "Run Start";
     cl_command_queue queue = CLML_QUEUE;
     std::vector<cl_event>& evts = cws->workspace->GetEventQueue(cws->tentry->device);
+    bool update_desc = false;
     for (size_t i = 0; i < input_nodes_.size(); ++i) {
       auto nid = input_nodes_[i];
       uint32_t eid = EntryID(nid, 0);
       if (nodes_[nid].GetOpType() == "input") {
         void* data = data_entry_[eid]->data;
-        size_t isize = 1;
-        for (size_t j = 0; j < data_entry_[eid]->ndim; ++j) {
-          isize *= data_entry_[eid]->shape[j];
-        }
         if (kDLCPU == data_entry_[eid]->device.device_type) {
           CopyDataToCLMLTensor(layer_.inputs[nid], data);
         } else if (kDLOpenCL == data_entry_[eid]->device.device_type) {
-          layer_.in_placeholder[nid]->memory = static_cast<cl_mem>(
+          int index = layer_.tensorMemDescs_indexmap[nid];
+          auto placeholder_memory = static_cast<cl_mem>(
               ((cl::BufferDescriptor*)const_cast<DLTensor*>(data_entry_[eid])->data)->buffer);
-          cl_event cpy_evt = nullptr;
-          cl_event* evt = &cpy_evt;
-          if (cws->workspace->IsProfiling(cws->tentry->device)) {
-            evts.resize(evts.size() + 1);
-            evt = &(evts.back());
+          if (placeholder_memory != layer_.tensorMemDescs[index].memory) {
+            layer_.tensorMemDescs[index].memory = static_cast<cl_mem>(
+                ((cl::BufferDescriptor*)const_cast<DLTensor*>(data_entry_[eid])->data)->buffer);
+            update_desc = true;
           }
-          LOG_CLML << "Enqueue CLML Copy";
-          CLML_CALL(clEnqueueCopyMLTensorDataQCOM, queue, layer_.in_placeholder[nid]->tensor,
-                    layer_.in_placeholder[nid]->memory, layer_.inputs[nid]->tensor,
-                    layer_.inputs[nid]->memory, 0, nullptr, evt);
-          LOG_CLML << "Enqueue CLML Copy Completed";
         } else {
+          size_t isize = 1;
+          for (size_t j = 0; j < data_entry_[eid]->ndim; ++j) {
+            isize *= data_entry_[eid]->shape[j];
+          }
           DLDataType tvm_dtype = const_cast<DLTensor*>(data_entry_[eid])->dtype;
           cl_channel_type cl_dtype = MakeCLDataType(tvm_dtype);
           int dtype_size = cl_dtype == CL_FLOAT ? 4 : 2;
@@ -475,6 +501,38 @@ class CLMLRuntime : public JSONRuntimeBase {
       }
     }
     LOG_CLML << "Inputs Set";
+
+    for (size_t i = 0; i < outputs_.size(); ++i) {
+      auto nid = outputs_[i].id_;
+      uint32_t eid = EntryID(outputs_[i]);
+      int index = layer_.tensorMemDescs_indexmap[nid];
+      auto placeholder_memory = static_cast<cl_mem>(
+          ((cl::BufferDescriptor*)const_cast<DLTensor*>(data_entry_[eid])->data)->buffer);
+      if (placeholder_memory != layer_.tensorMemDescs[index].memory) {
+        layer_.tensorMemDescs[index].memory = static_cast<cl_mem>(
+            ((cl::BufferDescriptor*)const_cast<DLTensor*>(data_entry_[eid])->data)->buffer);
+        update_desc = true;
+      }
+    }
+    if (update_desc) {
+      cl_int result = 0;
+      CLML_CALL(clUpdateMLTensorMemoryDescriptorSetQCOM, this->layer_.descriptorSet,
+                static_cast<uint32_t>(this->layer_.tensorMemDescs.size()),
+                this->layer_.tensorMemDescs.data());
+      if (cws->is_recordable_queue) {
+        if (this->layer_.recording) {
+          result = clReleaseRecordingQCOM(this->layer_.recording);
+          ICHECK(result == CL_SUCCESS) << "clReleaseRecordingQCOM:" << result;
+        }
+        this->layer_.recording = clNewRecordingQCOM(this->layer_.recordable_queue, &result);
+        ICHECK(result == CL_SUCCESS) << "clNewRecordingQCOM:" << result;
+        for (size_t i = 0; i < this->layer_.function.size(); ++i) {
+          CLML_CALL(clEnqueueMLOpQCOM, this->layer_.recordable_queue, this->layer_.function[i],
+                    this->layer_.descriptorSet, 0, nullptr, nullptr);
+        }
+        result = clEndRecordingQCOM(this->layer_.recording);
+      }
+    }
 
     int64_t duration = 0;
     if (cws->is_recordable_queue) {
@@ -528,26 +586,14 @@ class CLMLRuntime : public JSONRuntimeBase {
     for (size_t i = 0; i < outputs_.size(); ++i) {
       uint32_t eid = EntryID(outputs_[i]);
       void* data = data_entry_[eid]->data;
-
+      auto nid = outputs_[i].id_;
       size_t osize = 1;
       for (size_t j = 0; j < data_entry_[eid]->ndim; ++j) {
         osize *= data_entry_[eid]->shape[j];
       }
       if (kDLCPU == data_entry_[eid]->device.device_type) {
         CopyDataFromCLMLTensor(layer_.outputs[0], data);
-      } else if (kDLOpenCL == data_entry_[eid]->device.device_type) {
-        layer_.out_placeholder[i]->memory = static_cast<cl_mem>(
-            ((cl::BufferDescriptor*)const_cast<DLTensor*>(data_entry_[eid])->data)->buffer);
-        cl_event cpy_evt = nullptr;
-        cl_event* evt = &cpy_evt;
-        if (cws->workspace->IsProfiling(cws->tentry->device)) {
-          evts.resize(evts.size() + 1);
-          evt = &(evts.back());
-        }
-        CLML_CALL(clEnqueueCopyMLTensorDataQCOM, queue, layer_.outputs[i]->tensor,
-                  layer_.outputs[i]->memory, layer_.out_placeholder[i]->tensor,
-                  layer_.out_placeholder[i]->memory, 0, nullptr, evt);
-      } else {
+      } else if (kDLOpenCL != data_entry_[eid]->device.device_type) {
         DLDataType tvm_dtype = const_cast<DLTensor*>(data_entry_[eid])->dtype;
         cl_channel_type cl_dtype = MakeCLDataType(tvm_dtype);
         int dtype_size = cl_dtype == CL_FLOAT ? 4 : 2;
@@ -719,6 +765,17 @@ class CLMLRuntime : public JSONRuntimeBase {
       ICHECK(CL_TENSOR_USAGE_INVALID_QCOM == this->layer_.storage_map[nid].usage)
           << "Parameter have usage reservation !!!";
     }
+    if ("input" == node.GetOpType()) {
+      this->layer_.storage_map[nid].custom_layout = true;
+      this->layer_.storage_map[nid].layout = CL_TENSOR_LAYOUT_NCHW_QCOM;
+    } else {
+      for (size_t i = 0; i < outputs_.size(); ++i) {
+        if (nid == outputs_[i].id_) {
+          this->layer_.storage_map[nid].custom_layout = true;
+          this->layer_.storage_map[nid].layout = CL_TENSOR_LAYOUT_NCHW_QCOM;
+        }
+      }
+    }
     if (CL_TENSOR_USAGE_INVALID_QCOM != this->layer_.storage_map[nid].usage) {
       // Respect special reservation on usage.
       usage = this->layer_.storage_map[nid].usage;
@@ -870,9 +927,11 @@ class CLMLRuntime : public JSONRuntimeBase {
     size_t alloc_on_chip = 0;
     size_t alloc_ddr = 0;
     size_t alloc_ddr_reuse = 0;
+    int tmem_index = -1;
     for (auto it = this->layer_.storage_map.begin(); it != this->layer_.storage_map.end(); it++) {
       auto tensor_desc = it->second.tensor_desc;
       uint32_t mem_size = 0;
+      int nid = it->first;
       result = CL_OUT_OF_HOST_MEMORY;
       CLML_CALL(clGetMLTensorMemorySizeQCOM, CLML_CTX, tensor_desc->tensor, &mem_size);
 
@@ -907,7 +966,9 @@ class CLMLRuntime : public JSONRuntimeBase {
           CopyDataToCLMLTensor(tensor_desc, node_data);
         }
       }
+      tmem_index++;
       this->layer_.tensorMemDescs.push_back(*tensor_desc);
+      this->layer_.tensorMemDescs_indexmap.insert({nid, tmem_index});
     }
     LOG_STATS << "Total On-Chip Allocation  :" << alloc_on_chip;
     LOG_STATS << "Total DDR Reuse Allocation:" << alloc_ddr_reuse;
@@ -968,15 +1029,6 @@ class CLMLRuntime : public JSONRuntimeBase {
       fs.write(&tune_str[0], tune_str.length());
       LOG_CLML << "CLML: Tuning cache dumped to:" << cws->tuning_file << " size"
                << tune_str.length() << " with tuning blob len " << saved_cache.size();
-    }
-    if (cws->is_recordable_queue) {
-      for (size_t i = 0; i < this->layer_.function.size(); ++i) {
-        CLML_CALL(clEnqueueMLOpQCOM, this->layer_.recordable_queue, this->layer_.function[i],
-                  this->layer_.descriptorSet, 0, nullptr, nullptr);
-      }
-
-      result = clEndRecordingQCOM(this->layer_.recording);
-      ICHECK(result == CL_SUCCESS) << "clEndRecordingQCOM:" << result;
     }
   }
 
