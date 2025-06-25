@@ -78,9 +78,6 @@ def _main(argv):
         json_param_dict = read_and_convert_json_into_dict(config_arg)
         json_config_values = convert_config_json_to_cli(json_param_dict)
 
-    json_param_dict = read_and_convert_json_into_dict(config_arg)
-    json_config_values = convert_config_json_to_cli(json_param_dict)
-
     parser.add_argument("-v", "--verbose", action="count", default=0, help="increase verbosity")
     parser.add_argument("--version", action="store_true", help="print the version and exit")
 
