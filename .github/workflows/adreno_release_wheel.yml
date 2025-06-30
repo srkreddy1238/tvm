@@ -138,8 +138,8 @@ jobs:
            cp build-adreno-target/tvm_rpc adreno-utils/ -rfa
            cp build-adreno-target/rtvm adreno-utils/ -rfa
            cp build-adreno-target/libtvm_runtime.so adreno-utils/ -rfa
-           tar jcvfp adreno-utils-linux-arm64-$Env:RELEASE_TAG.tar.bz2 adreno-utils
-           cp adreno-utils-linux-arm64-$Env:RELEASE_TAG.tar.bz2 ./release/ -rfa
+           tar jcvfp adreno-utils-linux-arm64-${RELEASE_TAG}.tar.bz2 adreno-utils
+           cp adreno-utils-linux-arm64-${RELEASE_TAG}.tar.bz2 ./release/ -rfa
            gh release delete tvm-release-${RELEASE_TAG} --cleanup-tag --yes --repo "$RELEASE_REPO" || true
            gh release create tvm-release-${RELEASE_TAG} --latest --title tvm-release-${RELEASE_TAG} --repo "$RELEASE_REPO" --notes "TVM Release builds"
            gh release upload tvm-release-${RELEASE_TAG} ./release/* --clobber --repo "$RELEASE_REPO"
