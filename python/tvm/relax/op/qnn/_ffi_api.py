@@ -1,4 +1,3 @@
-# isort: skip_file
 # Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
 # distributed with this work for additional information
@@ -15,26 +14,7 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-"""Legalize high-level operator calls in Relax functions to call_tir."""
+"""Constructor APIs"""
+import tvm_ffi
 
-from . import binary
-from . import ccl
-from . import create
-from . import datatype
-from . import distributed
-from . import grad
-from . import image
-from . import index
-from . import inspect_op
-from . import linear_algebra
-from . import manipulate
-from . import nn
-from . import qdq
-from . import qnn
-from . import search
-from . import statistical
-from . import unary
-from . import vision
-
-# Device specific legalizations
-from . import adreno
+tvm_ffi.init_ffi_api("relax.op.qnn", __name__)
