@@ -982,9 +982,29 @@ requires_openclml = Feature(
     target_kind_enabled="opencl",
 )
 
+
+def get_opencl_or_vulkan_targets():
+    targets = []
+    if tvm.testing.utils._cmake_flag_enabled("USE_OPENCL"):
+        targets.append("opencl -device=adreno")
+    if tvm.testing.utils._cmake_flag_enabled("USE_VULKAN"):
+        targets.append("vulkan -device=adreno")
+    return targets
+
+
+def _check_opencl_vulkan():
+    return (
+        (_cmake_flag_enabled("USE_OPENCL") and tvm.opencl(0).exist)
+        or (_cmake_flag_enabled("USE_VULKAN") and tvm.vulkan(0).exist)
+        or "RPC_TARGET" in os.environ
+    )
+
+
 # Mark  a test as requiring both OpenC and Vulkan
 requires_opencl_vulkan = Feature(
-    "opencl_vulkan", "OpenCL or Vulkan", parent_features=["opencl", "vulkan"]
+    "opencl_vulkan",
+    "OpenCL or Vulkan",
+    run_time_check=_check_opencl_vulkan,
 )
 
 # Mark a test as requiring NNAPI support in build.

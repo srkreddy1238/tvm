@@ -30,7 +30,7 @@ dtype = tvm.testing.parameter("float32")
 
 
 @tvm.testing.requires_opencl_vulkan
-@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
+@tvm.testing.parametrize_targets(*tvm.testing.utils.get_opencl_or_vulkan_targets())
 def test_conv2d_transpose_adreno(remote, target, executor_type, dtype):
     # Conv2d transpose test cases lists
     trials = [
@@ -218,7 +218,7 @@ def test_conv2d_transpose_adreno(remote, target, executor_type, dtype):
 
 
 @tvm.testing.requires_opencl_vulkan
-@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
+@tvm.testing.parametrize_targets(*tvm.testing.utils.get_opencl_or_vulkan_targets())
 def test_conv2d_transpose_three_layer_block(remote, target, executor_type, dtype):
     # Conv2d transpose test cases lists
     trials = [

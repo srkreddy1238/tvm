@@ -28,7 +28,7 @@ dtype = tvm.testing.parameter("float32")
 
 
 @tvm.testing.requires_opencl_vulkan
-@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
+@tvm.testing.parametrize_targets(*tvm.testing.utils.get_opencl_or_vulkan_targets())
 def test_layout_transform_to_block_nchw4c(remote, target, executor_type, dtype):
     """Verification of the case NCHW->NCHW4c"""
     input_shape = (1, 32, 360, 1280)
@@ -43,7 +43,7 @@ def test_layout_transform_to_block_nchw4c(remote, target, executor_type, dtype):
 
 
 @tvm.testing.requires_opencl_vulkan
-@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
+@tvm.testing.parametrize_targets(*tvm.testing.utils.get_opencl_or_vulkan_targets())
 def test_layout_transform_to_block_nchw(remote, target, executor_type, dtype):
     """Verification of the case NCHW4c->NCHW"""
     input_shape = (1, 36, 1, 1, 4)
@@ -58,7 +58,7 @@ def test_layout_transform_to_block_nchw(remote, target, executor_type, dtype):
 
 
 @tvm.testing.requires_opencl_vulkan
-@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
+@tvm.testing.parametrize_targets(*tvm.testing.utils.get_opencl_or_vulkan_targets())
 def test_layout_transform_to_block_nhwc4c(remote, target, executor_type, dtype):
     """Verification of the case NHWC->NHWC4c"""
     input_shape = (1, 1, 1, 144)
@@ -76,7 +76,7 @@ def test_layout_transform_to_block_nhwc4c(remote, target, executor_type, dtype):
     tvm.testing.utils.IS_IN_CI, reason="Skip because GPU in CI doesn't support FP16"
 )
 @tvm.testing.requires_opencl_vulkan
-@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
+@tvm.testing.parametrize_targets(*tvm.testing.utils.get_opencl_or_vulkan_targets())
 def test_layout_transform_to_block_nhwc(remote, target, executor_type, dtype):
     """Verification of the case NHWC4c->NHWC"""
     input_shape = (1, 80, 80, 36, 4)

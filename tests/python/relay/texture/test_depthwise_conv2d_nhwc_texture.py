@@ -28,7 +28,7 @@ dtype = tvm.testing.parameter("float32")
 
 
 @tvm.testing.requires_opencl_vulkan
-@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
+@tvm.testing.parametrize_targets(*tvm.testing.utils.get_opencl_or_vulkan_targets())
 def test_depthwise_conv2d_deeplabv3_1_129_129_144x3_3_144_1(remote, target, executor_type, dtype):
     input_shape = (1, 129, 129, 144)
     filter_shape = (3, 3, 144, 1)
@@ -71,7 +71,7 @@ def test_depthwise_conv2d_deeplabv3_1_129_129_144x3_3_144_1(remote, target, exec
 
 
 @tvm.testing.requires_opencl_vulkan
-@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
+@tvm.testing.parametrize_targets(*tvm.testing.utils.get_opencl_or_vulkan_targets())
 def test_depthwise_conv2d_deeplabv3_4_35_35_574x3_3_574_1(remote, target, executor_type, dtype):
     input_shape = (4, 35, 35, 574)
     filter_shape = (3, 3, 574, 1)
@@ -114,7 +114,7 @@ def test_depthwise_conv2d_deeplabv3_4_35_35_574x3_3_574_1(remote, target, execut
 
 
 @tvm.testing.requires_opencl_vulkan
-@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
+@tvm.testing.parametrize_targets(*tvm.testing.utils.get_opencl_or_vulkan_targets())
 def test_depthwise_conv2d_deeplabv3_1_129_129_144x3_3_144_1_with_padding(
     remote, target, executor_type, dtype
 ):
@@ -161,7 +161,7 @@ def test_depthwise_conv2d_deeplabv3_1_129_129_144x3_3_144_1_with_padding(
 
 
 @tvm.testing.requires_opencl_vulkan
-@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
+@tvm.testing.parametrize_targets(*tvm.testing.utils.get_opencl_or_vulkan_targets())
 def test_depthwise_conv2d_1_513_513_7x3_3_7_1(remote, target, executor_type, dtype):
     input_shape = (1, 513, 513, 7)
     filter_shape = (3, 3, 7, 1)
@@ -203,7 +203,7 @@ def test_depthwise_conv2d_1_513_513_7x3_3_7_1(remote, target, executor_type, dty
 
 
 @tvm.testing.requires_opencl_vulkan
-@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
+@tvm.testing.parametrize_targets(*tvm.testing.utils.get_opencl_or_vulkan_targets())
 def test_depthwise_conv2d_1_513_513_3x3_3_3_1(remote, target, executor_type, dtype):
     input_shape = (1, 513, 513, 3)
     filter_shape = (3, 3, 3, 1)
@@ -245,7 +245,7 @@ def test_depthwise_conv2d_1_513_513_3x3_3_3_1(remote, target, executor_type, dty
 
 
 @tvm.testing.requires_opencl_vulkan
-@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
+@tvm.testing.parametrize_targets(*tvm.testing.utils.get_opencl_or_vulkan_targets())
 def test_conv2d_to_3_channels(remote, target, executor_type, dtype):
     input_shape = (1, 200, 200, 3)
     filter_shape = (1, 1, 3, 1)

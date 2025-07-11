@@ -29,7 +29,7 @@ dtype = tvm.testing.parameter("float32")
 
 
 @tvm.testing.requires_opencl_vulkan
-@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
+@tvm.testing.parametrize_targets(*tvm.testing.utils.get_opencl_or_vulkan_targets())
 def test_mod(remote, target, executor_type, dtype):
     # NCHW
     input_shape = (1, 25, 38, 64)
@@ -45,7 +45,7 @@ def test_mod(remote, target, executor_type, dtype):
 
 
 @tvm.testing.requires_opencl_vulkan
-@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
+@tvm.testing.parametrize_targets(*tvm.testing.utils.get_opencl_or_vulkan_targets())
 def test_scatter_nd_add(remote, target, executor_type, dtype):
     # NCHW
     if "vulkan" in target:

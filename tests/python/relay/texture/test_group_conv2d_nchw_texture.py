@@ -28,7 +28,7 @@ dtype = tvm.testing.parameter("float32")
 
 
 @tvm.testing.requires_opencl_vulkan
-@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
+@tvm.testing.parametrize_targets(*tvm.testing.utils.get_opencl_or_vulkan_targets())
 def test_group_conv2d_nchwc_adreno_encoder1(remote, target, executor_type, dtype):
     input_shape = (1, 512, 56, 100)
     filter_shape = (512, 64, 3, 3)
@@ -72,7 +72,7 @@ def test_group_conv2d_nchwc_adreno_encoder1(remote, target, executor_type, dtype
 
 
 @tvm.testing.requires_opencl_vulkan
-@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
+@tvm.testing.parametrize_targets(*tvm.testing.utils.get_opencl_or_vulkan_targets())
 def test_group_conv2d_nchwc_adreno_encoder2(remote, target, executor_type, dtype):
     input_shape = (1, 1024, 56, 100)
     filter_shape = (512, 128, 3, 3)
@@ -116,7 +116,7 @@ def test_group_conv2d_nchwc_adreno_encoder2(remote, target, executor_type, dtype
 
 
 @tvm.testing.requires_opencl_vulkan
-@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
+@tvm.testing.parametrize_targets(*tvm.testing.utils.get_opencl_or_vulkan_targets())
 def test_group_conv2d_nchwc_adreno_nontrivial(remote, target, executor_type, dtype):
     input_shape = (1, 56, 56, 100)
     filter_shape = (112, 8, 7, 3)
@@ -160,7 +160,7 @@ def test_group_conv2d_nchwc_adreno_nontrivial(remote, target, executor_type, dty
 
 
 @tvm.testing.requires_opencl_vulkan
-@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
+@tvm.testing.parametrize_targets(*tvm.testing.utils.get_opencl_or_vulkan_targets())
 def test_group_conv2d_nchwc_default(remote, target, executor_type, dtype):
     input_shape = (1, 49, 56, 100)
     filter_shape = (343, 7, 3, 3)

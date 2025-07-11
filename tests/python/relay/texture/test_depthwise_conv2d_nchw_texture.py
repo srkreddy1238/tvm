@@ -27,7 +27,7 @@ dtype = tvm.testing.parameter("float32")
 
 
 @tvm.testing.requires_opencl_vulkan
-@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
+@tvm.testing.parametrize_targets(*tvm.testing.utils.get_opencl_or_vulkan_targets())
 def test_depthwise_conv2d_bias_nchwc(remote, target, executor_type, dtype):
     input_shape = (1, 64, 112, 112)
     filter_shape = (64, 1, 3, 3)
@@ -76,7 +76,7 @@ def test_depthwise_conv2d_bias_nchwc(remote, target, executor_type, dtype):
 
 
 @tvm.testing.requires_opencl_vulkan
-@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
+@tvm.testing.parametrize_targets(*tvm.testing.utils.get_opencl_or_vulkan_targets())
 def test_depthwise_conv2d_nchwc(remote, target, executor_type, dtype):
     input_shape = (1, 64, 112, 112)
     filter_shape = (64, 1, 3, 3)
@@ -120,7 +120,7 @@ def test_depthwise_conv2d_nchwc(remote, target, executor_type, dtype):
 
 
 @tvm.testing.requires_opencl_vulkan
-@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
+@tvm.testing.parametrize_targets(*tvm.testing.utils.get_opencl_or_vulkan_targets())
 def test_depthwise_conv2d_bias_nchw(remote, target, executor_type, dtype):
     input_shape = (1, 64, 112, 112)
     filter_shape = (64, 1, 3, 3)
@@ -165,7 +165,7 @@ def test_depthwise_conv2d_bias_nchw(remote, target, executor_type, dtype):
 
 
 @tvm.testing.requires_opencl_vulkan
-@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
+@tvm.testing.parametrize_targets(*tvm.testing.utils.get_opencl_or_vulkan_targets())
 def test_depthwise_conv2d_repack_bias_nchw(remote, target, executor_type, dtype):
     input_shape = (1, 63, 112, 112)
     filter_shape = (63, 1, 3, 3)
@@ -210,7 +210,7 @@ def test_depthwise_conv2d_repack_bias_nchw(remote, target, executor_type, dtype)
 
 
 @tvm.testing.requires_opencl_vulkan
-@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
+@tvm.testing.parametrize_targets(*tvm.testing.utils.get_opencl_or_vulkan_targets())
 def test_conv2d_to_3_channels(remote, target, executor_type, dtype):
     input_shape = (1, 3, 200, 200)
     filter_shape = (3, 1, 1, 1)

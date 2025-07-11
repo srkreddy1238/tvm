@@ -30,7 +30,7 @@ dtype = tvm.testing.parameter("float32")
 
 
 @tvm.testing.requires_opencl_vulkan
-@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
+@tvm.testing.parametrize_targets(*tvm.testing.utils.get_opencl_or_vulkan_targets())
 def test_conv2d_inceptionv3_64x35x35_96x64x3x3_nopad(remote, target, executor_type, dtype):
     input_shape = (1, 32, 42, 42)
     filter_shape = (96, 32, 3, 3)
@@ -77,7 +77,7 @@ def test_conv2d_inceptionv3_64x35x35_96x64x3x3_nopad(remote, target, executor_ty
 
 
 @tvm.testing.requires_opencl_vulkan
-@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
+@tvm.testing.parametrize_targets(*tvm.testing.utils.get_opencl_or_vulkan_targets())
 def test_conv2d_inceptionv3_64x35x35_96x64x3x3_nopad_pass(remote, target, executor_type, dtype):
     input_shape = (1, 32, 40, 40)
     filter_shape = (96, 32, 2, 2)
@@ -124,7 +124,7 @@ def test_conv2d_inceptionv3_64x35x35_96x64x3x3_nopad_pass(remote, target, execut
 
 
 @tvm.testing.requires_opencl_vulkan
-@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
+@tvm.testing.parametrize_targets(*tvm.testing.utils.get_opencl_or_vulkan_targets())
 def test_conv2d_inceptionv3_35_35_strides(remote, target, executor_type, dtype):
     input_shape = (1, 48, 35, 35)
     filter_shape = (64, 48, 5, 5)
@@ -171,7 +171,7 @@ def test_conv2d_inceptionv3_35_35_strides(remote, target, executor_type, dtype):
 
 
 @tvm.testing.requires_opencl_vulkan
-@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
+@tvm.testing.parametrize_targets(*tvm.testing.utils.get_opencl_or_vulkan_targets())
 def test_conv2d_resnet50_v2_nchw_3c(remote, target, executor_type, dtype):
     input_shape = (1, 3, 224, 224)
     filter_shape = (64, 3, 7, 7)
@@ -215,7 +215,7 @@ def test_conv2d_resnet50_v2_nchw_3c(remote, target, executor_type, dtype):
 
 
 @tvm.testing.requires_opencl_vulkan
-@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
+@tvm.testing.parametrize_targets(*tvm.testing.utils.get_opencl_or_vulkan_targets())
 def test_conv2d_inceptionv3_nchw_3c(remote, target, executor_type, dtype):
     input_shape = (1, 3, 299, 299)
     filter_shape = (64, 3, 3, 3)
@@ -258,7 +258,7 @@ def test_conv2d_inceptionv3_nchw_3c(remote, target, executor_type, dtype):
 
 
 @tvm.testing.requires_opencl_vulkan
-@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
+@tvm.testing.parametrize_targets(*tvm.testing.utils.get_opencl_or_vulkan_targets())
 def test_conv2d_1x1_16c16spatial(remote, target, executor_type, dtype):
     input_shape = (1, 16, 256, 256)
     filter_shape = (32, 16, 4, 4)
@@ -301,7 +301,7 @@ def test_conv2d_1x1_16c16spatial(remote, target, executor_type, dtype):
 
 
 @tvm.testing.requires_opencl_vulkan
-@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
+@tvm.testing.parametrize_targets(*tvm.testing.utils.get_opencl_or_vulkan_targets())
 def test_conv2d_4x4_16c16pad(remote, target, executor_type, dtype):
     input_shape = (1, 32, 256, 256)
     filter_shape = (32, 32, 4, 4)
@@ -344,7 +344,7 @@ def test_conv2d_4x4_16c16pad(remote, target, executor_type, dtype):
 
 
 @tvm.testing.requires_opencl_vulkan
-@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
+@tvm.testing.parametrize_targets(*tvm.testing.utils.get_opencl_or_vulkan_targets())
 def test_conv2d_4x4x4_16c16pad(remote, target, executor_type, dtype):
     input_shape = (1, 32, 256, 256)
     filter_shape = (4, 32, 4, 4)
@@ -387,7 +387,7 @@ def test_conv2d_4x4x4_16c16pad(remote, target, executor_type, dtype):
 
 
 @tvm.testing.requires_opencl_vulkan
-@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
+@tvm.testing.parametrize_targets(*tvm.testing.utils.get_opencl_or_vulkan_targets())
 def test_conv2d_yolov3_v2_nchw_3c(remote, target, executor_type, dtype):
     input_shape = (1, 1024, 13, 13)
     filter_shape = (255, 1024, 1, 1)
@@ -423,7 +423,7 @@ def test_conv2d_yolov3_v2_nchw_3c(remote, target, executor_type, dtype):
 
 
 @tvm.testing.requires_opencl_vulkan
-@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
+@tvm.testing.parametrize_targets(*tvm.testing.utils.get_opencl_or_vulkan_targets())
 def test_conv2d_vgg16_winograd_4d(remote, target, executor_type, dtype):
     input_shape = (1, 512, 28, 28)
     filter_shape = (512, 512, 3, 3)
@@ -490,7 +490,7 @@ def test_conv2d_vgg16_winograd_4d(remote, target, executor_type, dtype):
 
 
 @tvm.testing.requires_opencl_vulkan
-@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
+@tvm.testing.parametrize_targets(*tvm.testing.utils.get_opencl_or_vulkan_targets())
 def test_conv2d_winograd_conv(remote, target, executor_type, dtype):
     input_shape = (1, 4, 3, 3)
     A = relay.var("data", shape=input_shape, dtype=dtype)
@@ -556,7 +556,7 @@ def test_conv2d_winograd_conv(remote, target, executor_type, dtype):
 
 
 @tvm.testing.requires_opencl_vulkan
-@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
+@tvm.testing.parametrize_targets(*tvm.testing.utils.get_opencl_or_vulkan_targets())
 def test_residual_block(remote, target, executor_type, dtype):
     """
     - some kind of residual block followed by convolution to have texture after residual block
@@ -696,7 +696,7 @@ def test_residual_block(remote, target, executor_type, dtype):
 
 
 @tvm.testing.requires_opencl_vulkan
-@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
+@tvm.testing.parametrize_targets(*tvm.testing.utils.get_opencl_or_vulkan_targets())
 def test_concat(remote, target, executor_type, dtype):
     """
         layout_transform (NCHW->NCHW4c)
@@ -825,7 +825,7 @@ def test_concat(remote, target, executor_type, dtype):
 
 
 @tvm.testing.requires_opencl_vulkan
-@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
+@tvm.testing.parametrize_targets(*tvm.testing.utils.get_opencl_or_vulkan_targets())
 def test_pooling_branching_texture_params(remote, target, executor_type, dtype):
     """
     Verification of the pooling and many branches having textures
@@ -988,7 +988,7 @@ def test_pooling_branching_texture_params(remote, target, executor_type, dtype):
 
 
 @tvm.testing.requires_opencl_vulkan
-@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
+@tvm.testing.parametrize_targets(*tvm.testing.utils.get_opencl_or_vulkan_targets())
 def test_branching_texture_params(remote, target, executor_type, dtype):
     """
     Verification of passing texture to several consumers markup of relay variables in
@@ -1149,7 +1149,7 @@ def test_branching_texture_params(remote, target, executor_type, dtype):
 
 # function repeat, params scope are different in reused functions
 @tvm.testing.requires_opencl_vulkan
-@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
+@tvm.testing.parametrize_targets(*tvm.testing.utils.get_opencl_or_vulkan_targets())
 def test_conv2d_different_lowering_same_op(remote, target, executor_type, dtype):
     """
     Use case for verification of caching compiled functions
@@ -1248,7 +1248,7 @@ def test_conv2d_different_lowering_same_op(remote, target, executor_type, dtype)
 
 
 @tvm.testing.requires_opencl_vulkan
-@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
+@tvm.testing.parametrize_targets(*tvm.testing.utils.get_opencl_or_vulkan_targets())
 def test_conv2d_winograd_non_rect(remote, target, executor_type, dtype):
     input_shape = (1, 771, 36, 64)
     A = relay.var("data", shape=input_shape, dtype=dtype)
@@ -1301,7 +1301,7 @@ def test_conv2d_winograd_non_rect(remote, target, executor_type, dtype):
 
 # function repeat, params scope are different in reused functions
 @tvm.testing.requires_opencl_vulkan
-@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
+@tvm.testing.parametrize_targets(*tvm.testing.utils.get_opencl_or_vulkan_targets())
 def test_injective_nwo_inputs1(remote, target, executor_type, dtype):
     """
     Use case for verification of stability of annotation primary functions
@@ -1416,7 +1416,7 @@ def test_injective_nwo_inputs1(remote, target, executor_type, dtype):
 
 # function repeat, params scope are different in reused functions
 @tvm.testing.requires_opencl_vulkan
-@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
+@tvm.testing.parametrize_targets(*tvm.testing.utils.get_opencl_or_vulkan_targets())
 def test_injective_nwo_inputs2(remote, target, executor_type, dtype):
     """
     Use case for verification of stability of annotation primary functions
@@ -1529,7 +1529,7 @@ def test_injective_nwo_inputs2(remote, target, executor_type, dtype):
 
 
 @tvm.testing.requires_opencl_vulkan
-@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
+@tvm.testing.parametrize_targets(*tvm.testing.utils.get_opencl_or_vulkan_targets())
 def test_conv2d_to_3_channels(remote, target, executor_type, dtype):
     input_shape = (1, 256, 200, 200)
     filter_shape = (3, 256, 1, 1)
@@ -1564,7 +1564,7 @@ def test_conv2d_to_3_channels(remote, target, executor_type, dtype):
 
 
 @tvm.testing.requires_opencl_vulkan
-@tvm.testing.parametrize_targets("opencl -device=adreno", "vulkan -device=adreno")
+@tvm.testing.parametrize_targets(*tvm.testing.utils.get_opencl_or_vulkan_targets())
 def test_conv2d_weight_on_buffers(remote, target, executor_type, dtype):
     target = "opencl -device=adreno"
     input_shape = (1, 64, 75, 75)
