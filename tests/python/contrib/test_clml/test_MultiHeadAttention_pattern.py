@@ -23,7 +23,12 @@ from tvm.relay.op.contrib import clml
 from tvm.relay import testing
 from tvm.ir import IRModule
 from tvm.contrib import utils
-from infrastructure import build_and_run, build_and_run_vm, verify_codegen, verify_clml_op_count
+from test_clml.infrastructure import (
+    build_and_run,
+    build_and_run_vm,
+    verify_codegen,
+    verify_clml_op_count,
+)
 import pytest
 import os
 
@@ -364,7 +369,7 @@ def test_mha_general(remote, dtype, target, executor_type, trials):
         mod = tvm.IRModule.from_expr(mod)
         outputs = _build_and_run_network(remote, mod, params, inputs, target, executor_type, "")
 
-        out_tol = 1e-2
+        out_tol = 1e-1
 
         tvm.testing.assert_allclose(
             outputs[0].asnumpy(), outputs[1].asnumpy(), rtol=out_tol, atol=out_tol

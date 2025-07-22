@@ -47,8 +47,16 @@ from tvm.relay.transform import recast
 from tvm.contrib import graph_runtime
 from tvm.runtime.vm import VirtualMachine
 import json
+import copy
 
 from tvm.relay.collage.collage import *
+
+
+def _is_not_windows():
+    return not (os.name == "nt")
+
+
+disable_nt = tvm.testing.Feature("disable_on_windows", run_time_check=_is_not_windows)
 
 
 def get_unique_dso_lib():
@@ -115,7 +123,7 @@ def build_and_run(
         target_host = "llvm -mtriple=arm64-linux-android"
 
     if isinstance(mod, tvm.relay.expr.Call):
-        mod = tvm.IRModule.from_expr(mod)
+        mod = tvm.IRModule.from_expr(copy.deepcopy(mod))
 
     with autotvm.apply_history_best(stat_file):
         with tvm.transform.PassContext(
@@ -164,7 +172,7 @@ def build_and_run_vm(
     target = tvm.target.Target(target, target_host)
     if isinstance(mod, relay.Function):
         module = tvm.IRModule({})
-        module["main"] = mod
+        module["main"] = copy.deepcopy(mod)
         mod = module
     elif isinstance(mod, tvm.relay.expr.Call):
         mod = tvm.IRModule.from_expr(mod)
@@ -202,9 +210,9 @@ def build_and_run_vm(
     return out
 
 
-def extract_clml_modules(module):
+def extract_clml_modules(lib):
     """Get the CLML module(s) from llvm module."""
-    return list(filter(lambda mod: mod.type_key == "clml", module.get_lib().imported_modules))
+    return list(filter(lambda mod: mod.type_key == "clml", lib.imported_modules))
 
 
 def verify_codegen(
@@ -216,13 +224,17 @@ def verify_codegen(
     num_clml_modules=1,
     tvm_ops=0,
 ):
+    # Some OS garbage commection crash with this.
+    # TODO: Disabling as these run on Linux / Android anyway.
+    if os.name == "nt":
+        return
     if remote is None:
         target_host = "llvm"
     else:
         target_host = "llvm -mtriple=arm64-linux-android"
     """Check clml codegen against a known good output."""
     if isinstance(mod, tvm.relay.expr.Call):
-        mod = tvm.IRModule.from_expr(mod)
+        mod = tvm.IRModule.from_expr(copy.deepcopy(mod))
     with tvm.transform.PassContext(
         opt_level=3, config={"relay.ext.clml.target_version": get_clml_target_version()}
     ):
@@ -241,15 +253,16 @@ def verify_codegen(
         ), "Got {} Open CLML partitions, expected {}".format(partition_count, num_clml_modules)
     relay.backend.te_compiler.get().clear()
 
-    module = relay.build(mod, target=target, target_host=target_host, params=params)
-    clml_modules = extract_clml_modules(module)
+    graph, lib, params = relay.build(mod, target=target, target_host=target_host, params=params)
+
+    clml_modules = extract_clml_modules(lib)
     assert len(clml_modules) == num_clml_modules, (
         f"The number of CLML modules produced ({len(clml_modules)}) does not "
         f"match the expected value ({num_clml_modules})."
     )
 
-    for mod in clml_modules:
-        source = mod.get_source("json")
+    for sub_mod in clml_modules:
+        source = sub_mod.get_source("json")
         codegen = json.loads(source)["nodes"]
         # remove input and const names as these cannot be predetermined
         for node in range(len(codegen)):
@@ -272,17 +285,21 @@ def compile_and_run(remote, label, model, targets, inputs):
     logging.info(f"Compiling {model['name']} using {label} with {targets}...")
     mod = model["mod"]
     exe = tvm.relay.vm.compile(mod, target=targets, params=model["params"])
-    lib = exe.mod
-    temp = utils.tempdir()
-    dso_binary = get_unique_dso_lib()
-    dso_binary_path = temp.relpath(dso_binary)
-    logging.info(f"Exporting library to {dso_binary_path}...")
-    ndk_cc = os.getenv("TVM_NDK_CC", "aarch64-linux-android-g++")
-    lib.export_library(dso_binary_path, cc=ndk_cc)
-    ctx = remote.cl(0)
-    remote.upload(dso_binary_path)
-    rlib = remote.load_module(dso_binary)
-    vm_factory = tvm.runtime.vm.VirtualMachine(rlib, ctx, "naive")
+    if remote is None:
+        ctx = tvm.opencl()
+        vm_factory = VirtualMachine(exe, ctx, "naive")
+    else:
+        lib = exe.mod
+        temp = utils.tempdir()
+        dso_binary = get_unique_dso_lib()
+        dso_binary_path = temp.relpath(dso_binary)
+        logging.info(f"Exporting library to {dso_binary_path}...")
+        ndk_cc = os.getenv("TVM_NDK_CC", "aarch64-linux-android-g++")
+        lib.export_library(dso_binary_path, cc=ndk_cc)
+        ctx = remote.cl(0)
+        remote.upload(dso_binary_path)
+        rlib = remote.load_module(dso_binary)
+        vm_factory = tvm.runtime.vm.VirtualMachine(rlib, ctx, "naive")
     inputs_data = {}
     for key in inputs.keys():
         inputs_data[key] = tvm.nd.array(inputs[key], ctx)

@@ -23,10 +23,18 @@ from tvm.relay import testing
 from tvm.contrib import utils
 from utils.adreno_utils import gpu_preprocess, build_run_compare, build_run_compare_vm
 import pytest
+import os
 
 
 executor_type = tvm.testing.parameter("ge", "vm")
 dtype = tvm.testing.parameter("float32")
+
+
+def _is_not_windows():
+    return not (os.name == "nt")
+
+
+disable_nt = tvm.testing.Feature("disable_on_windows", run_time_check=_is_not_windows)
 
 
 @tvm.testing.requires_opencl_vulkan
@@ -824,6 +832,7 @@ def test_concat(remote, target, executor_type, dtype):
         )
 
 
+@disable_nt
 @tvm.testing.requires_opencl_vulkan
 @tvm.testing.parametrize_targets(*tvm.testing.utils.get_opencl_or_vulkan_targets())
 def test_pooling_branching_texture_params(remote, target, executor_type, dtype):
@@ -987,6 +996,7 @@ def test_pooling_branching_texture_params(remote, target, executor_type, dtype):
         )
 
 
+@disable_nt
 @tvm.testing.requires_opencl_vulkan
 @tvm.testing.parametrize_targets(*tvm.testing.utils.get_opencl_or_vulkan_targets())
 def test_branching_texture_params(remote, target, executor_type, dtype):

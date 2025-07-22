@@ -42,7 +42,14 @@ TUNING_LOG = ""
 ##
 ## Default Target definition
 ##
-HOST = tvm.target.Target("llvm -mtriple=arm64-linux-android")
+if (
+    "TVM_TRACKER_HOST" in os.environ
+    and "TVM_TRACKER_PORT" in os.environ
+    and "RPC_DEVICE_KEY" in os.environ
+):
+    HOST = tvm.target.Target("llvm -mtriple=arm64-linux-android")
+else:
+    HOST = tvm.target.Target("llvm")
 OPENCL = tvm.target.Target("opencl -device=adreno", HOST)
 RPC_TRACKER_HOST = os.getenv("TVM_TRACKER_HOST", "localhost")
 RPC_TRACKER_PORT = int(os.getenv("TVM_TRACKER_PORT", 9090))
@@ -50,11 +57,25 @@ RPC_KEY = os.getenv("RPC_DEVICE_KEY", "android")
 NDK_CC = os.getenv("TVM_NDK_CC", "aarch64-linux-android-g++")
 
 
+def _is_not_windows():
+    return not (os.name == "nt")
+
+
+disable_nt = tvm.testing.Feature("disable_on_windows", run_time_check=_is_not_windows)
+
+
 def get_rpc_remote():
     """Create remote rpc tracker and connect to available remote device"""
-    tracker = rpc.connect_tracker(RPC_TRACKER_HOST, RPC_TRACKER_PORT)
-    remote = tracker.request(RPC_KEY, priority=0, session_timeout=600)
-    return remote
+    if (
+        "TVM_TRACKER_HOST" in os.environ
+        and "TVM_TRACKER_PORT" in os.environ
+        and "RPC_DEVICE_KEY" in os.environ
+    ):
+        tracker = rpc.connect_tracker(RPC_TRACKER_HOST, RPC_TRACKER_PORT)
+        remote = tracker.request(RPC_KEY, priority=0, session_timeout=600)
+        return remote
+    else:
+        return None
 
 
 def collage(model, input_data):
@@ -136,6 +157,7 @@ def get_model(model_name, dtype):
 
 
 ########### Runners ###########
+@disable_nt
 @pytest.mark.parametrize("dtype", ["float32", "float16"])
 @pytest.mark.parametrize("model_name", ["mobilenet"])
 @tvm.testing.requires_openclml

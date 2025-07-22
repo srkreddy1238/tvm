@@ -22,18 +22,21 @@ from tvm import relay
 from tvm.relay import testing
 from tvm.relay.op.contrib import clml
 import pytest
+from tvm.contrib import graph_runtime
+from test_clml.infrastructure import disable_nt
 
 
+@disable_nt
 @tvm.testing.requires_openclml
 def test_device_annotation():
     mod, params = relay.testing.mobilenet.get_workload(batch_size=1)
     mod = clml.partition_for_clml(mod, params)
     with tvm.transform.PassContext(opt_level=3):
         relay.backend.te_compiler.get().clear()
-        lib = relay.build(
+        graph, lib, param = relay.build(
             mod,
             target="opencl -device=adreno",
-            target_host="llvm -mtriple=aarch64-linux-gnu",
+            target_host="llvm",
             params=params,
         )
 
