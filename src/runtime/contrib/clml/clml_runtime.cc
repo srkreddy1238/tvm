@@ -180,7 +180,9 @@ class CLMLRuntime : public JSONRuntimeBase {
          it++) {
       CLML_CALL(clReleaseMLTensorQCOM, (*it)->tensor)
     }
-    CLML_CALL(clReleaseMLTensorMemoryDescriptorSetQCOM, layer_.descriptorSet)
+    if (layer_.descriptorSet) {
+      CLML_CALL(clReleaseMLTensorMemoryDescriptorSetQCOM, layer_.descriptorSet)
+    }
 
     if (this->layer_.recordable_queue) {
       clReleaseCommandQueue(this->layer_.recordable_queue);
@@ -837,6 +839,7 @@ class CLMLRuntime : public JSONRuntimeBase {
         // Layers may request for different layout. Differ the input allocation.
       } else if (node.GetOpType() == "kernel") {
         auto op_name = node.GetOpName();
+        LOG_CLML << "Op:" << op_name;
         if (PatternMatch(op_name, "nn.conv2d") || PatternMatch(op_name, "nn.pad_conv2d"))
           CreateConvolution2DLayer(&layer_, node, CL_CONVOLUTION_MODE_CONVOLUTION_QCOM, nid);
         else if (PatternMatch(op_name, "nn.depthwise_conv2d"))

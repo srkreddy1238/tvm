@@ -197,6 +197,9 @@ class ConstantFolder : public MixedModeMutator {
       // At least one non-constant argument.
       return std::move(post_call);
     }
+    if ((op == Op::Get("broadcast_to_like")) || (op == Op::Get("broadcast_to"))) {
+      return std::move(post_call);
+    }
     // During evaluation we have obviously lost all on_device annotations. However any
     // on_device wrapping this call will be left in place.
     return ConstEvaluate(post_call);

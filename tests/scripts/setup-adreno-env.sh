@@ -125,7 +125,7 @@ case ${ENVIRONMENT} in
     if [ $TRACE_ENABLE -eq 1 ]; then
       adb shell "cd ${TARGET_FOLDER}; echo \"export PROFILE_SHADER_DUMP_PATH=${TARGET_FOLDER}/trace \" >> exec.sh"
     fi
-    adb shell "cd ${TARGET_FOLDER}; echo \"export CLML_DISABLE_RECORDABLE_QUEUE=0\" >> exec.sh"
+    #adb shell "cd ${TARGET_FOLDER}; echo \"export CLML_DISABLE_RECORDABLE_QUEUE=0\" >> exec.sh"
     adb shell "cd ${TARGET_FOLDER}; echo \"export CLML_IS_TUNING_RUN=1\" >> exec.sh"
     adb shell "cd ${TARGET_FOLDER}; echo \"export CLML_TUNING_CACHE=clml.bin\" >> exec.sh"
     adb shell "cd ${TARGET_FOLDER}; echo LD_LIBRARY_PATH=${TARGET_FOLDER} ./tvm_rpc-${USER} server --host=0.0.0.0 --port=${LISTEN_PORT} --port-end=$((LISTEN_PORT + 10)) --tracker=127.0.0.1:${TVM_TRACKER_PORT} --key=${RPC_DEVICE_KEY} >> exec.sh"

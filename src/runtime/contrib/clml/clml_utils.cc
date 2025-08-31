@@ -97,7 +97,7 @@ cl_mem AllocateDDRTensorMemory(size_t size) {
   cl_mem buffer = nullptr;
 
   buffer = clCreateBuffer(CLML_CTX, CL_MEM_READ_WRITE, size, nullptr, &result);
-  ICHECK(result == CL_SUCCESS) << "clCreateBuffer:" << result;
+  ICHECK(result == CL_SUCCESS) << "clCreateBuffer:" << result << " Size:" << size;
 
   return buffer;
 }

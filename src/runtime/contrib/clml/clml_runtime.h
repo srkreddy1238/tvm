@@ -311,7 +311,7 @@ struct CachedLayer {
   std::vector<cl_ml_tensor_memory_desc_qcom> tensorMemDescs;
   /* Index map of tensor memory descriptors list */
   std::map<int, int> tensorMemDescs_indexmap;  // nid, index
-  cl_ml_tensor_mem_desc_set_qcom descriptorSet;
+  cl_ml_tensor_mem_desc_set_qcom descriptorSet = nullptr;
   /* List of layer names in subgraph */
   std::vector<std::string> layer_names;
   /* A dummy CLML tensor used across various ops */
