@@ -997,3 +997,8 @@ if (USE_FLASHINFER STREQUAL "ON")
   target_link_libraries(tvm PRIVATE flashinfer_tvm)
   target_link_libraries(tvm_runtime PRIVATE flashinfer_tvm)
 endif ()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "QNX")
+  target_link_libraries(tvm_runtime PRIVATE socket)
+  target_link_libraries(tvm PRIVATE socket)
+endif()

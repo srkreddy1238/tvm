@@ -66,6 +66,8 @@ static const std::vector<const char*> default_so_paths = {"libOpenCL.so",
                                                           "/usr/local/lib/libpocl.so",
                                                           "/usr/lib64/libOpenCL.so",
                                                           "/usr/lib32/libOpenCL.so"};
+#elif defined(__QNX__)
+static const std::vector<const char*> default_so_paths = {"libOpenCL.so", "/usr/lib/libOpenCL.so"};
 #endif
 
 typedef void (*enableOpenCL_t)();

@@ -794,12 +794,26 @@ void OpenCLWorkspace::Init(const std::string& type_key, const std::string& devic
   ICHECK_EQ(this->queues.size(), 0U);
   cl_int err_code;
   for (auto& [platform, devices] : device_map) {
+    LOG(INFO) << "PLATFORM:" << GetPlatformInfo(platform, CL_PLATFORM_NAME) << " ( "
+              << GetPlatformInfo(platform, CL_PLATFORM_PROFILE) << " : "
+              << GetPlatformInfo(platform, CL_PLATFORM_VERSION) << ")";
+
     this->platform_ids.push_back(platform);
     this->contexts[platform] =
         clCreateContext(ctx_props, devices.size(), &(devices[0]), nullptr, nullptr, &err_code);
     this->devices.insert(this->devices.end(), devices.begin(), devices.end());
     for (size_t i = 0; i < devices.size(); ++i) {
       cl_device_id did = devices[i];
+      LOG(INFO) << "DEVICE:" << GetDeviceInfo(did, CL_DEVICE_NAME) << " ( "
+                << GetDeviceInfo(did, CL_DEVICE_VERSION) << " )";
+
+      size_t reqd_size = 0;
+      OPENCL_CALL(clGetDeviceInfo(did, CL_DEVICE_EXTENSIONS, 0, nullptr, &reqd_size));
+      std::vector<char> extn_buf(reqd_size);
+      OPENCL_CALL(clGetDeviceInfo(did, CL_DEVICE_EXTENSIONS, reqd_size, extn_buf.data(), nullptr));
+      std::string extensions(extn_buf.data());
+      LOG(INFO) << "EXTENSIONS:" << extensions;
+
       CLDeviceInfo dev_info;
       dev_info.platform_id = platform;
       this->queues.push_back(clCreateCommandQueue(this->contexts[platform], did, 0, &err_code));
