@@ -337,7 +337,30 @@ def _linux_compile(
     output, objects, options, compile_cmd, cwd=None, ccache_env=None, compile_shared=False
 ):
     cmd = [compile_cmd]
-    if compile_cmd != "nvcc":
+    if os.path.basename(compile_cmd) == "qcc":  # QNX
+        if "QNX_BASE" not in os.environ:
+            raise RuntimeError("QNX compiler is choosen but QNX_BASE environment is not set")
+        # Query QNX env
+        qnx_base = os.environ["QNX_BASE"]
+        command = (
+            "DOTNET_ROOT="
+            " CRM_BUILDID="
+            " source setenv_qos222.sh -np 8 -qp -ex " + qnx_base + "/qnx_bins/prebuilt_QOS222 ; env"
+        )
+        process = subprocess.Popen(
+            command, stdout=subprocess.PIPE, shell=True, cwd=qnx_base, executable="/bin/bash"
+        )
+        env_output, _ = process.communicate()
+
+        # Setup QNX env
+        env_vars = {}
+        for line in env_output.decode().splitlines():
+            if "=" in line:
+                key, value = line.split("=", 1)
+                env_vars[key] = value
+        os.environ.update(env_vars)
+        cmd += ["-Vgcc_ntoaarch64le", "-shared"]
+    elif compile_cmd != "nvcc":
         if compile_shared or output.endswith(".so") or output.endswith(".dylib"):
             cmd += ["-shared", "-fPIC"]
             if sys.platform == "darwin":

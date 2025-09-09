@@ -37,6 +37,7 @@ cp ../cmake/config.cmake .
 #else
 #echo set\(USE_OPENCL ON\) >> config.cmake
 #fi
+echo set\(USE_OPENCL ON\) >> config.cmake
 echo set\(USE_RPC ON\) >> config.cmake
 echo set\(USE_CPP_RPC ON\) >> config.cmake
 echo set\(USE_CPP_RTVM ON\) >> config.cmake
@@ -49,17 +50,14 @@ echo set\(USE_KALLOC_ALIGNMENT 16\) >> config.cmake
 #echo set\(PROFILE_SHADER_DUMP ON\) >> config.cmake
 
 
-echo add_definitions\(-D_XOPEN_SOURCE=700\) >> config.cmake
-echo add_definitions\(-D__USE_GNU\) >> config.cmake
-
 export DOTNET_ROOT=""
 export CRM_BUILDID=""
-cd $QNX_BASE/qnx_ap
+cd $QNX_BASE
 source setenv_qos222.sh -np 8 -qp -ex $QNX_BASE/qnx_bins/prebuilt_QOS222 || true
 cd -
 
 $CONDA_PREFIX/bin/cmake -DCMAKE_INSTALL_PREFIX=install \
-                        -DCMAKE_TOOLCHAIN_FILE="$QNX_BASE/qnx_ap/compute/qml/cmake/QNXToolchain.cmake" \
+                        -DCMAKE_TOOLCHAIN_FILE=../cmake/modules/QNXToolchain.cmake \
                         -DBUILD_SHARED_LIBS=1 \
                         -DCMAKE_BUILD_TYPE=RELWITHDEBINF ..
 
