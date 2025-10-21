@@ -288,7 +288,7 @@ class RelaxConvCodeGen : public RelaxOpCode {
       const auto& out_layout = tir::Layout(out_layout_str);
       ffi::Array<Integer> expand_shape;
       for (size_t i = 0; i < node()->OutputAt(0)->Ndim(); i++) {
-        if (out_layout[i].name() == "C") {
+        if (out_layout[i]->var->name_hint == "C") {
           expand_shape.push_back(node()->OutputAt(0)->DimAt(i));
         } else {
           expand_shape.push_back(Integer(1));

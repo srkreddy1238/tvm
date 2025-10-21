@@ -158,7 +158,7 @@ const LayoutDecision LayoutUtils::ExpandLayout(const LayoutDecision& src_layout,
       << "Only support normal layout, get " << src_layout->layout;
   std::set<std::string> used_axes;
   for (size_t i = 0; i < src_layout->layout.ndim(); i++) {
-    used_axes.insert(src_layout->layout[i].name());
+    used_axes.insert(src_layout->layout[i]->var->name_hint);
   }
   std::vector<std::string> prefer_axes{"N", "C", "H", "W", "D"};
   for (const auto& a : axes) {
@@ -198,7 +198,7 @@ const LayoutDecision LayoutUtils::ReduceLayout(const LayoutDecision& src_layout,
     if (reduce_axes_set.count(i)) {
       continue;
     }
-    new_layout += src_layout->layout[i].name();
+    new_layout += src_layout->layout[i]->var->name_hint;
   }
   return LayoutDecision(new_layout);
 }
@@ -207,7 +207,7 @@ const LayoutDecision LayoutUtils::PermuteLayout(const LayoutDecision& src_layout
                                                 const ffi::Array<Integer>& axes) {
   ffi::String layout_str;
   for (const auto& a : axes) {
-    layout_str = layout_str + src_layout->layout[a->value].name();
+    layout_str = layout_str + src_layout->layout[a->value]->var->name_hint;
   }
   return LayoutDecision(layout_str);
 }
@@ -216,7 +216,7 @@ const LayoutDecision LayoutUtils::PermuteLayout(const LayoutDecision& src_layout
                                                 const std::vector<size_t>& axes) {
   ffi::String layout_str;
   for (const auto& a : axes) {
-    layout_str = layout_str + src_layout->layout[a].name();
+    layout_str = layout_str + src_layout->layout[a]->var->name_hint;
   }
   return LayoutDecision(layout_str);
 }
@@ -226,7 +226,7 @@ int LayoutUtils::InferBatchDim(const LayoutDecision& layout) {
     return -1;
   }
   for (size_t i = 0; i < layout->layout.ndim(); i++) {
-    if (layout->layout[i].name() == "N") {
+    if (layout->layout[i]->var->name_hint == "N") {
       return static_cast<int>(i);
     }
   }

@@ -460,7 +460,8 @@ const MSCJoint GraphBuilder::AddNode(const Expr& expr, const ffi::Optional<Expr>
           } else if (input_types[i] == "weight" &&
                      (optype == "msc.linear" || optype == "msc.linear_bias")) {
             if (ref->layout.name() == "IO") {
-              ffi::String valid_layout = ref->layout[1].name() + ref->layout[0].name();
+              ffi::String valid_layout =
+                  ref->layout[1]->var->name_hint + ref->layout[0]->var->name_hint;
               const auto& valid_shape = ffi::Array<Integer>({ref->shape[1], ref->shape[0]});
               weight = MSCTensor(weight_name, ref->dtype, valid_layout, valid_shape);
             } else {

@@ -329,7 +329,7 @@ class TensorRTConvCodeGen : public TensorRTOpCode {
     const auto& weight = node()->WeightAt("weight");
     std::vector<int64_t> kernel_size;
     for (size_t i = 0; i < weight->Ndim(); i++) {
-      if (weight->layout[i].name() == "I" || weight->layout[i].name() == "O") {
+      if (weight->layout[i]->var->name_hint == "I" || weight->layout[i]->var->name_hint == "O") {
         continue;
       }
       kernel_size.push_back(weight->DimAt(i)->value);
@@ -443,10 +443,10 @@ class TensorRTPadCodeGen : public TensorRTOpCode {
     std::vector<int> pre_padding{2, 0}, post_padding{2, 0};
     const auto& input = node()->InputAt(0);
     for (size_t i = 0; i < input->Ndim(); i++) {
-      if (input->layout[i].name() == "H") {
+      if (input->layout[i]->var->name_hint == "H") {
         pre_padding[0] = pad_width[i * 2];
         post_padding[0] = pad_width[i * 2 + 1];
-      } else if (input->layout[i].name() == "W") {
+      } else if (input->layout[i]->var->name_hint == "W") {
         pre_padding[1] = pad_width[i * 2];
         post_padding[1] = pad_width[i * 2 + 1];
       }

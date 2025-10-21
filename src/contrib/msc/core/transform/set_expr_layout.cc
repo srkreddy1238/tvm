@@ -246,7 +246,7 @@ InferLayoutOutput ForwardInferLayoutBinary(
         input_layouts.push_back(LayoutDecision(""));
       } else if (t_info->ndim == 1) {
         const auto& ref_layout = output->output_layouts[0].LeafValue()->layout;
-        input_layouts.push_back(LayoutDecision(ref_layout[ref_layout.ndim() - 1].name()));
+        input_layouts.push_back(LayoutDecision(ref_layout[ref_layout.ndim() - 1]->var->name_hint));
       } else {
         input_layouts.push_back(output->input_layouts[i]);
       }
@@ -361,7 +361,7 @@ InferLayoutOutput ForwardInferLayoutMatmul(
   size_t start = a_layout->layout.ndim() - b_shape.size();
   ffi::String pre_layout;
   for (size_t i = start; i < a_layout->layout.ndim() - 2; i++) {
-    pre_layout = pre_layout + a_layout->layout[i].name();
+    pre_layout = pre_layout + a_layout->layout[i]->var->name_hint;
   }
   LayoutDecision b_layout = LayoutDecision(pre_layout + "IO");
   return InferLayoutOutput({a_layout, b_layout}, {a_layout}, Attrs());
@@ -671,7 +671,7 @@ InferLayoutOutput BackwardInferLayoutBinary(
         input_layouts.push_back(LayoutDecision(""));
       } else if (t_info->ndim == 1) {
         const auto& ref_layout = output->output_layouts[0].LeafValue()->layout;
-        input_layouts.push_back(LayoutDecision(ref_layout[ref_layout.ndim() - 1].name()));
+        input_layouts.push_back(LayoutDecision(ref_layout[ref_layout.ndim() - 1]->var->name_hint));
       } else {
         input_layouts.push_back(output->input_layouts[i]);
       }
@@ -766,7 +766,7 @@ InferLayoutOutput BackwardInferLayoutMatmul(
   size_t start = output_layout->layout.ndim() - b_shape.size();
   ffi::String pre_layout;
   for (size_t i = start; i < output_layout->layout.ndim() - 2; i++) {
-    pre_layout = pre_layout + output_layout->layout[i].name();
+    pre_layout = pre_layout + output_layout->layout[i]->var->name_hint;
   }
   LayoutDecision b_layout = LayoutDecision(pre_layout + "IO");
   return InferLayoutOutput({output_layout, b_layout}, {output_layout}, Attrs());

@@ -277,7 +277,7 @@ class TorchConvCodeGen : public TorchOpCode {
     const auto& weight = node()->WeightAt("weight");
     std::vector<int64_t> kernel_size;
     for (size_t i = 0; i < weight->Ndim(); i++) {
-      if (weight->layout[i].name() == "I" || weight->layout[i].name() == "O") {
+      if (weight->layout[i]->var->name_hint == "I" || weight->layout[i]->var->name_hint == "O") {
         continue;
       }
       kernel_size.push_back(weight->DimAt(i)->value);
