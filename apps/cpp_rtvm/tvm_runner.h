@@ -47,6 +47,8 @@ typedef struct _TVMMetaInfo {
   std::map<std::string, std::pair<std::vector<int64_t>, std::string>> output_info;
 } TVMMetaInfo;
 
+
+
 /*!
  * \brief encapsulates TVM graph runtime functionality with simplified API interface.
  */
@@ -67,6 +69,8 @@ class TVMRunner {
   int SetInput(std::string, char*);
   /*! \brief To set the input from NDArray */
   int SetInput(std::string, NDArray& ndarr);
+  void RefreshOutputMetaFromRuntime();
+
   /*! \brief Save the model output into given npz file */
   int GetOutput(std::string);
   /*! \brief Get the model output in binary format */

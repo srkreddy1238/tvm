@@ -36,6 +36,31 @@
 namespace tvm {
 namespace runtime {
 
+//  Convert a DLDATAType into a readable string, hanfles common cases like fp16,fp32 etc
+static std::string DLDataTypeToString(const DLDataType& dt) {
+ if (dt.code == kDLFloat) {
+   if (dt.bits == 32) return "float32";
+   if (dt.bits == 16) return "float16";
+   if (dt.bits == 64) return "float64";
+ }
+ if (dt.code == kDLInt) {
+   return "int" + std::to_string(dt.bits);
+ }
+ if (dt.code == kDLUInt) {
+   return "uint" + std::to_string(dt.bits);
+ }
+ return "unknown";
+}
+
+// Extracts shape from MDArray into a std c++ vec
+static std::vector<int64_t> ShapeFromNDArray(const NDArray& arr) {
+ std::vector<int64_t> shape;
+ for (int i = 0; i < arr->ndim; ++i) {
+   shape.push_back(arr->shape[i]);
+ }
+ return shape;
+}
+
 /*!
  * \brief Get the TVM device id corresponding to device string.
  * \param device the target device in string format.
@@ -63,6 +88,28 @@ DLDeviceType GetTVMDevice(std::string device) {
   } else {
     LOG(FATAL) << "TVMRunner : Unsupported device :" << device;
   }
+}
+
+// Replace stored output metadata with the actual runtime values
+// This ensures both dtype and shape in mInfo match the true NDaray outputs.
+// Useful because some backends (e.g. CLML) misreport dtype in JSON (float16)
+// even though the runtime tensor is really float32.
+void TVMRunner::RefreshOutputMetaFromRuntime() {
+ int idx = 0;
+ for (auto& kv : mInfo.output_info) {
+   try {
+     // Query the actual NDArray for this output index
+     NDArray out_arr = r_graph_handle.GetFunction("get_output")(idx);
+     // Overwrite BOTH shape and dtype in the stored meta
+     kv.second.first  = ShapeFromNDArray(out_arr);           //shape vector<int64_t>
+     kv.second.second = DLDataTypeToString(out_arr->dtype);  //dtype strimg
+   } catch (const std::exception &e) {
+     // If backend not allocate or throws, keep JSON metadata unchanged
+     LOG(WARNING) << "Failed to refresh output[" << idx << "]: " << e.what();
+     // Leave metadata as for this output get_output throws anything
+   }
+   ++idx;
+    }
 }
 
 /*!
@@ -135,7 +182,6 @@ int TVMRunner::Load(void) {
   r_graph_handle.GetFunction("load_params")(params_arr);
   tend = std::chrono::high_resolution_clock::now();
   r_param_load_ms = static_cast<double>((tend - tstart).count()) / 1e6;
-
   return 0;
 }
 
@@ -337,7 +383,6 @@ TVMMetaInfo TVMRunner::GetMetaInfo(void) {
   mInfo.n_outputs = r_graph_handle.GetFunction("get_num_outputs")();
 
   int actual_input_count = 0;
-
   Map<String, ObjectRef> tvm_input_info = r_graph_handle.GetFunction("get_input_info")();
   auto shape_info = GetRef<Map<String, ObjectRef>>(tvm_input_info["shape"].as<MapNode>());
   auto dtype_info = GetRef<Map<String, ObjectRef>>(tvm_input_info["dtype"].as<MapNode>());
@@ -355,7 +400,6 @@ TVMMetaInfo TVMRunner::GetMetaInfo(void) {
 
   mInfo.n_params = mInfo.n_inputs - actual_input_count;
   mInfo.n_actual_inputs = actual_input_count;
-
   tvm_input_info = r_graph_handle.GetFunction("get_output_info")();
   shape_info = GetRef<Map<String, ObjectRef>>(tvm_input_info["shape"].as<MapNode>());
   dtype_info = GetRef<Map<String, ObjectRef>>(tvm_input_info["dtype"].as<MapNode>());
@@ -367,7 +411,7 @@ TVMMetaInfo TVMRunner::GetMetaInfo(void) {
     std::pair<std::vector<int64_t>, std::string> value = std::make_pair(vshape, dtype);
     mInfo.output_info.insert({kv.first, value});
   }
-
+  RefreshOutputMetaFromRuntime(); // overwrite with reak shapes/dtypes from runtime NDArrays so metadata matches
   return mInfo;
 }
 
@@ -395,51 +439,15 @@ void TVMRunner::PrintMetaInfo(void) {
 
   LOG(INFO) << "    Output MetaInfo:";
 
-  // First, get all direct output shapes indexed by output position
-  std::vector<std::string> direct_output_shapes;
-  for (int i = 0; i < mInfo.n_outputs; ++i) {
-    try {
-      NDArray out_arr = r_graph_handle.GetFunction("get_output")(i);
-      std::ostringstream shape_stream;
-      shape_stream << "[";
-      for (int j = 0; j < out_arr->ndim; ++j) {
-        if (j > 0) shape_stream << ", ";
-        shape_stream << out_arr->shape[j];
-      }
-      shape_stream << "]";
-      direct_output_shapes.push_back(shape_stream.str());
-    } catch (const std::exception& e) {
-      LOG(WARNING) << "        Failed to query output[" << i
-                   << "] for shape verification: " << e.what();
-      direct_output_shapes.push_back("[unknown]");
-    }
-  }
-
-  // Now iterate through named outputs and match with correct direct shapes
-  int output_index = 0;
   for (auto& elem : mInfo.output_info) {
-    std::string shape_str;
-    if (output_index < direct_output_shapes.size()) {
-      // Use the correct direct shape for this output index
-      shape_str = direct_output_shapes[output_index];
-    } else {
-      // Fallback to metadata shape if direct verification failed
-      std::ostringstream shape_stream;
-      shape_stream << "[";
-      if (!elem.second.first.empty()) {
-        copy(elem.second.first.begin(), elem.second.first.end() - 1,
-             std::ostream_iterator<int>(shape_stream, ", "));
-        shape_stream << elem.second.first.back();
-      }
-      shape_stream << "]";
-      shape_str = shape_stream.str();
-    }
-
-    // Print output info
+    std::ostringstream stream;
+    stream << "[";
+    copy(elem.second.first.begin(), elem.second.first.end() - 1,
+         std::ostream_iterator<int>(stream, ", "));
+    stream << elem.second.first.back() << "]";
     LOG(INFO) << "        Output:" << elem.first;
     LOG(INFO) << "        DType:" << elem.second.second;
-    LOG(INFO) << "        Shape:" << shape_str;
-    output_index++;
+    LOG(INFO) << "        Shape:" << stream.str();
   }
 }
 
