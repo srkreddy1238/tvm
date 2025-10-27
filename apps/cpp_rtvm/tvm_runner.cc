@@ -38,27 +38,27 @@ namespace runtime {
 
 //  Convert a DLDATAType into a readable string, hanfles common cases like fp16,fp32 etc
 static std::string DLDataTypeToString(const DLDataType& dt) {
- if (dt.code == kDLFloat) {
-   if (dt.bits == 32) return "float32";
-   if (dt.bits == 16) return "float16";
-   if (dt.bits == 64) return "float64";
- }
- if (dt.code == kDLInt) {
-   return "int" + std::to_string(dt.bits);
- }
- if (dt.code == kDLUInt) {
-   return "uint" + std::to_string(dt.bits);
- }
- return "unknown";
+  if (dt.code == kDLFloat) {
+    if (dt.bits == 32) return "float32";
+    if (dt.bits == 16) return "float16";
+    if (dt.bits == 64) return "float64";
+  }
+  if (dt.code == kDLInt) {
+    return "int" + std::to_string(dt.bits);
+  }
+  if (dt.code == kDLUInt) {
+    return "uint" + std::to_string(dt.bits);
+  }
+  return "unknown";
 }
 
 // Extracts shape from MDArray into a std c++ vec
 static std::vector<int64_t> ShapeFromNDArray(const NDArray& arr) {
- std::vector<int64_t> shape;
- for (int i = 0; i < arr->ndim; ++i) {
-   shape.push_back(arr->shape[i]);
- }
- return shape;
+  std::vector<int64_t> shape;
+  for (int i = 0; i < arr->ndim; ++i) {
+    shape.push_back(arr->shape[i]);
+  }
+  return shape;
 }
 
 /*!
@@ -95,21 +95,21 @@ DLDeviceType GetTVMDevice(std::string device) {
 // Useful because some backends (e.g. CLML) misreport dtype in JSON (float16)
 // even though the runtime tensor is really float32.
 void TVMRunner::RefreshOutputMetaFromRuntime() {
- int idx = 0;
- for (auto& kv : mInfo.output_info) {
-   try {
-     // Query the actual NDArray for this output index
-     NDArray out_arr = r_graph_handle.GetFunction("get_output")(idx);
-     // Overwrite BOTH shape and dtype in the stored meta
-     kv.second.first  = ShapeFromNDArray(out_arr);           //shape vector<int64_t>
-     kv.second.second = DLDataTypeToString(out_arr->dtype);  //dtype strimg
-   } catch (const std::exception &e) {
-     // If backend not allocate or throws, keep JSON metadata unchanged
-     LOG(WARNING) << "Failed to refresh output[" << idx << "]: " << e.what();
-     // Leave metadata as for this output get_output throws anything
-   }
-   ++idx;
+  int idx = 0;
+  for (auto& kv : mInfo.output_info) {
+    try {
+      // Query the actual NDArray for this output index
+      NDArray out_arr = r_graph_handle.GetFunction("get_output")(idx);
+      // Overwrite BOTH shape and dtype in the stored meta
+      kv.second.first = ShapeFromNDArray(out_arr);            // shape vector<int64_t>
+      kv.second.second = DLDataTypeToString(out_arr->dtype);  // dtype strimg
+    } catch (const std::exception& e) {
+      // If backend not allocate or throws, keep JSON metadata unchanged
+      LOG(WARNING) << "Failed to refresh output[" << idx << "]: " << e.what();
+      // Leave metadata as for this output get_output throws anything
     }
+    ++idx;
+  }
 }
 
 /*!
@@ -126,7 +126,7 @@ TVMRunner::TVMRunner(std::string path, std::string device)
  * \brief Load Setup TVM graph runtime for given model.
  * \param 0 on success else error code.
  */
-int TVMRunner::Load(void) {
+int TVMRunner::Load(bool is_debug) {
   LOG(INFO) << "TVMRunner Load:" << r_model_path;
   // Load the lib file
   auto tstart = std::chrono::high_resolution_clock::now();
@@ -149,6 +149,11 @@ int TVMRunner::Load(void) {
 
   // Get ref to graph exeutor
   auto f_handle = tvm::runtime::Registry::Get("tvm.graph_executor.create");
+
+  if (is_debug) {
+    LOG(INFO) << "Initialize Graph Runtime in Debug mode";
+    f_handle = tvm::runtime::Registry::Get("tvm.graph_executor_debug.create");
+  }
 
   // Greate graph runtime
   r_graph_handle =
@@ -411,33 +416,42 @@ TVMMetaInfo TVMRunner::GetMetaInfo(void) {
     std::pair<std::vector<int64_t>, std::string> value = std::make_pair(vshape, dtype);
     mInfo.output_info.insert({kv.first, value});
   }
-  RefreshOutputMetaFromRuntime(); // overwrite with reak shapes/dtypes from runtime NDArrays so metadata matches
+  RefreshOutputMetaFromRuntime();  // overwrite with reak shapes/dtypes from runtime NDArrays so
+                                   // metadata matches
   return mInfo;
 }
 
 /*!
  * \brief Print the meta information.
- * \param 0 on success else error code.
  */
 void TVMRunner::PrintMetaInfo(void) {
-  LOG(INFO) << "Meta Information:" << r_model_path;
-  LOG(INFO) << "    Total Inputs (including params):" << mInfo.n_inputs;
-  LOG(INFO) << "    Number of Actual Inputs:" << mInfo.n_actual_inputs;
-  LOG(INFO) << "    Number of Parameters:" << mInfo.n_params;
-  LOG(INFO) << "    Number of Outputs:" << mInfo.n_outputs;
-  LOG(INFO) << "    Input MetaInfo:";
+  std::ostringstream oss;
+  PrintToMetaInfo(oss);
+  LOG(INFO) << oss.str();
+}
+
+/*!
+ * \brief Print the meta information.
+ */
+void TVMRunner::PrintToMetaInfo(std::ostringstream& oss) {
+  oss << std::endl << "Meta Information:" << r_model_path << std::endl;
+  oss << "    Total Inputs (including params):" << mInfo.n_inputs << std::endl;
+  oss << "    Number of Actual Inputs:" << mInfo.n_actual_inputs << std::endl;
+  oss << "    Number of Parameters:" << mInfo.n_params << std::endl;
+  oss << "    Number of Outputs:" << mInfo.n_outputs << std::endl;
+  oss << "    Input MetaInfo:" << std::endl;
   for (auto& elem : mInfo.input_info) {
     std::ostringstream stream;
     stream << "[";
     copy(elem.second.first.begin(), elem.second.first.end() - 1,
          std::ostream_iterator<int>(stream, ", "));
     stream << elem.second.first.back() << "]";
-    LOG(INFO) << "        Input:" << elem.first;
-    LOG(INFO) << "            DType:" << elem.second.second;
-    LOG(INFO) << "            Shape:" << stream.str();
+    oss << "        Input:" << elem.first << std::endl;
+    oss << "            DType:" << elem.second.second << std::endl;
+    oss << "            Shape:" << stream.str() << std::endl;
   }
 
-  LOG(INFO) << "    Output MetaInfo:";
+  oss << "    Output MetaInfo:" << std::endl;
 
   for (auto& elem : mInfo.output_info) {
     std::ostringstream stream;
@@ -445,9 +459,9 @@ void TVMRunner::PrintMetaInfo(void) {
     copy(elem.second.first.begin(), elem.second.first.end() - 1,
          std::ostream_iterator<int>(stream, ", "));
     stream << elem.second.first.back() << "]";
-    LOG(INFO) << "        Output:" << elem.first;
-    LOG(INFO) << "        DType:" << elem.second.second;
-    LOG(INFO) << "        Shape:" << stream.str();
+    oss << "        Output:" << elem.first << std::endl;
+    oss << "            DType:" << elem.second.second << std::endl;
+    oss << "            Shape:" << stream.str() << std::endl;
   }
 }
 
@@ -455,16 +469,35 @@ void TVMRunner::PrintMetaInfo(void) {
  * \brief Print stats information.
  */
 void TVMRunner::PrintStats(void) {
-  LOG(INFO) << "Performance Stats:" << r_model_path;
-  LOG(INFO) << "    Module Load              :" << r_module_load_ms << " ms";
-  LOG(INFO) << "    Graph Runtime Create     :" << r_graph_load_ms << " ms";
-  LOG(INFO) << "    Params Read              :" << r_param_read_ms << " ms";
-  LOG(INFO) << "    Params Set               :" << r_param_load_ms << " ms";
-  LOG(INFO) << "    Pre Compiled Progs Load  :" << r_pre_compiled_load_ms << " ms";
-  LOG(INFO) << "Total Load Time     :"
-            << r_module_load_ms + r_graph_load_ms + r_param_read_ms + r_param_load_ms +
-                   r_pre_compiled_load_ms
-            << " ms";
+  std::ostringstream oss;
+  PrintToStats(oss);
+  LOG(INFO) << oss.str();
+}
+
+/*!
+ * \brief Print stats information.
+ */
+void TVMRunner::PrintToStats(std::ostringstream& oss) {
+  oss << std::endl << "Performance Stats:" << r_model_path << std::endl;
+  oss << "    Module Load              :" << r_module_load_ms << " ms" << std::endl;
+  oss << "    Graph Runtime Create     :" << r_graph_load_ms << " ms" << std::endl;
+  oss << "    Params Read              :" << r_param_read_ms << " ms" << std::endl;
+  oss << "    Params Set               :" << r_param_load_ms << " ms" << std::endl;
+  oss << "    Pre Compiled Progs Load  :" << r_pre_compiled_load_ms << " ms" << std::endl;
+  oss << "Total Load Time     :"
+      << r_module_load_ms + r_graph_load_ms + r_param_read_ms + r_param_load_ms +
+             r_pre_compiled_load_ms
+      << " ms" << std::endl;
+}
+
+/*!
+ * \brief Print profile information.
+ */
+void TVMRunner::Profile(std::ostringstream& oss) {
+  CHECK(r_graph_handle.GetFunction("profile") != nullptr) << "Profiling API not enabled:";
+  profiling::Report report =
+      r_graph_handle.GetFunction("profile")(Array<profiling::MetricCollector>{});
+  oss << report->AsTable();
 }
 
 }  // namespace runtime

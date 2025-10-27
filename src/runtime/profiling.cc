@@ -468,7 +468,7 @@ static String print_metric(ObjectRef metric) {
   return val;
 }
 
-String ReportNode::AsTable(bool sort, bool aggregate, bool compute_col_sums) const {
+TVM_DLL String ReportNode::AsTable(bool sort, bool aggregate, bool compute_col_sums) const {
   // aggregate calls by op hash (or op name if hash is not set) + argument shapes
   std::vector<Map<String, ObjectRef>> aggregated_calls;
   if (aggregate) {

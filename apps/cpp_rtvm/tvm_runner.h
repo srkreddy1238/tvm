@@ -26,6 +26,7 @@
 
 #include <tvm/runtime/module.h>
 #include <tvm/runtime/packed_func.h>
+#include <tvm/runtime/profiling.h>
 #include <tvm/runtime/registry.h>
 
 #include <string>
@@ -47,8 +48,6 @@ typedef struct _TVMMetaInfo {
   std::map<std::string, std::pair<std::vector<int64_t>, std::string>> output_info;
 } TVMMetaInfo;
 
-
-
 /*!
  * \brief encapsulates TVM graph runtime functionality with simplified API interface.
  */
@@ -58,7 +57,7 @@ class TVMRunner {
   TVMRunner(std::string path, std::string device);
 
   /*! \brief Initiates graph runtime and with the compiled model */
-  int Load(void);
+  int Load(bool);
   /*! \brief Specify if the run programs should be dumped to binary and reused in the next runs */
   void UsePreCompiledPrograms(std::string);
   /*! \brief Executes one inference cycle */
@@ -85,9 +84,14 @@ class TVMRunner {
   TVMMetaInfo GetMetaInfo(void);
   /*! \brief Print function to show all meta information */
   void PrintMetaInfo(void);
-
   /*! \brief Print function to show all stats information */
   void PrintStats(void);
+  /*! \brief Function to get all meta information */
+  void PrintToMetaInfo(std::ostringstream&);
+  /*! \brief Function to get all stats information */
+  void PrintToStats(std::ostringstream&);
+  /*! \brief Function to get profile information */
+  void Profile(std::ostringstream&);
 
   // Public profiling information
   /*! Module load time */

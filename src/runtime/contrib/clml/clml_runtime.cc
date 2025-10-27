@@ -72,14 +72,19 @@ CLMLWorkspace::CLMLWorkspace() {
   }
   if (getenv("CLML_DISABLE_RECORDABLE_QUEUE")) {
     is_recordable_queue = 0;
-    is_on_chip_memory = 0;
   } else {
     is_recordable_queue = (extensions.find("cl_qcom_recordable_queues") != std::string::npos);
-    is_on_chip_memory = (extensions.find("cl_qcom_onchip_global_memory") != std::string::npos);
     LOG_CLML << "Recordable Queues Support :" << is_recordable_queue;
+  }
+
+  if (getenv("CLML_DISABLE_GMEM")) {
+    is_on_chip_memory = 0;
+  } else {
+    is_on_chip_memory = (extensions.find("cl_qcom_onchip_global_memory") != std::string::npos);
     LOG_CLML << "On chip Memory Support :" << is_on_chip_memory;
   }
 
+#ifdef CL_DEVICE_ONCHIP_GLOBAL_MEM_SIZE_QCOM
   if (is_on_chip_memory) {
     result = clGetDeviceInfo(device_id, CL_DEVICE_ONCHIP_GLOBAL_MEM_SIZE_QCOM,
                              sizeof(onchip_mem_size), &onchip_mem_size, nullptr);
@@ -87,6 +92,7 @@ CLMLWorkspace::CLMLWorkspace() {
                                  << result;
     LOG_CLML << "On chip memory size:" << onchip_mem_size;
   }
+#endif
 
   // Query and Get CLML Interface
   static const cl_uint MAX_VERSIONS = 256;
@@ -466,7 +472,7 @@ class CLMLRuntime : public JSONRuntimeBase {
    * \return Status of inference.
    */
   void Run() override {
-    LOG_CLML << "Run Start";
+    LOG_CLML << "Run Start:" << clml_symbol;
     cl_command_queue queue = CLML_QUEUE;
     std::vector<cl_event>& evts = cws->workspace->GetEventQueue(cws->tentry->device);
     bool update_desc = false;
@@ -537,6 +543,8 @@ class CLMLRuntime : public JSONRuntimeBase {
     }
 
     int64_t duration = 0;
+    LOG_CLML << "CLML Launch:" << clml_symbol;
+
     if (cws->is_recordable_queue) {
       LOG_CLML << "Execution by Rec Queue";
       if (cws->workspace->IsProfiling(cws->tentry->device)) {
@@ -844,8 +852,10 @@ class CLMLRuntime : public JSONRuntimeBase {
           CreateConvolution2DLayer(&layer_, node, CL_CONVOLUTION_MODE_CONVOLUTION_QCOM, nid);
         else if (PatternMatch(op_name, "nn.depthwise_conv2d"))
           CreateConvolution2DLayer(&layer_, node, CL_CONVOLUTION_MODE_DEPTHWISE_QCOM, nid);
+#if (CL_QCOM_ML_OPS_H_MAJOR_VERSION >= 3)
         else if (PatternMatch(op_name, "nn.conv2d_transpose"))
           CreateConvolution2DLayer(&layer_, node, CL_CONVOLUTION_MODE_TRANSPOSE_QCOM, nid);
+#endif
         else if ("nn.relu6" == op_name || PatternMatch(op_name, "nn.relu6"))
           CreateReLULayer(&layer_, node, nid, CL_ACTIVATION_RELU6);
         else if (PatternMatch(op_name, "nn.relu"))
@@ -1149,8 +1159,10 @@ class CLMLRuntime : public JSONRuntimeBase {
       float epsilon = std::stof(node.GetAttr<std::vector<std::string>>("batchnorm")[1]);
 
       std::vector<cl_ml_op_properties_qcom> opProperties;
+#if (CL_QCOM_ML_OPS_H_MAJOR_VERSION >= 3)
       opProperties.push_back(CL_ML_BATCH_NORM_OP_EPSILON_QCOM);
       opProperties.push_back(*reinterpret_cast<cl_ml_op_properties_qcom*>(&epsilon));
+#endif
       opProperties.push_back(CL_ML_OP_PROPERTY_LIST_END_QCOM);
       std::vector<size_t> bn_shape = {1, 1, 1, 1};
       bn_shape[axis] = bn_dims.n;
@@ -1237,8 +1249,10 @@ class CLMLRuntime : public JSONRuntimeBase {
     float epsilon = std::stof(node.GetAttr<std::vector<std::string>>("epsilon")[0]);
 
     std::vector<cl_ml_op_properties_qcom> opProperties;
+#if (CL_QCOM_ML_OPS_H_MAJOR_VERSION >= 3)
     opProperties.push_back(CL_ML_BATCH_NORM_OP_EPSILON_QCOM);
     opProperties.push_back(*reinterpret_cast<cl_ml_op_properties_qcom*>(&epsilon));
+#endif
     opProperties.push_back(CL_ML_OP_PROPERTY_LIST_END_QCOM);
 
     auto bn_dims = GetTensorDims(nodes_[node.GetInputs()[1].id_]);

@@ -100,8 +100,24 @@ jobs:
            SCCACHE_SERVER_PORT=8767 \
            ANDROID_SERIAL=`cat /etc/tvm-ci-device-v4` \
            python ./tests/scripts/ci.py adreno -d tvm.ci_adreno --test
+  AutoHGYBuild:
+    needs: [Adreno-Tests-V4]
+    if: ${{ github.repository == 'gpgpu/apache-tvm' }}
+    runs-on: adreno-runner
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          submodules: 'recursive'
+      - name: Compile for Android HGY
+        shell: bash -l {0}
+        run: |
+           set -e
+           # CLML 2.2
+           ADRENO_TARGET_CLML_VERSION=2 \
+           ADRENO_OPENCL=${ADRENO_OPENCL_V2_2} \
+           SCCACHE_SERVER_PORT=8766 python ./tests/scripts/ci.py adreno -d tvm.ci_adreno
   GPU-Tests:
-    needs: [Lint, Adreno-Tests-V3, Adreno-Tests-V4]
+    needs: [Lint, Adreno-Tests-V3, Adreno-Tests-V4, AutoHGYBuild]
     if: ${{ github.repository == 'gpgpu/apache-tvm' }}
     runs-on: gpu-runner
     steps:

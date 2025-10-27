@@ -31,6 +31,7 @@
 
 #include <chrono>
 #include <cstring>
+#include <fstream>
 #include <iostream>
 #include <sstream>
 #include <vector>
@@ -53,6 +54,7 @@ static const string kUsage =
     "--dump-meta    - Dump model meta information\n"
     "--pre-compiled - The file name of a file where pre-compiled programs should be stored\n"
     "--profile      - Profile over all execution\n"
+    "--profile-dump - Save complete profiling info to given path (cli to dump on stdout)\n"
     "--dry-run      - Profile after given dry runs, default 10\n"
     "--run-count    - Profile for given runs, default 100\n"
     "--zero-copy    - Profile with zero copy api\n"
@@ -78,6 +80,7 @@ struct ToolArgs {
   string input;
   string output;
   string pre_compiled;
+  string profile_dump;
   bool dump_meta{false};
   bool profile{false};
   int dry_run{10};
@@ -98,6 +101,7 @@ void PrintArgs(const ToolArgs& args) {
   LOG(INFO) << "Pre-compiled  = " << args.pre_compiled;
   LOG(INFO) << "Dump Metadata = " << ((args.dump_meta) ? ("True") : ("False"));
   LOG(INFO) << "Profile       = " << ((args.profile) ? ("True") : ("False"));
+  LOG(INFO) << "Profile Dump  = " << args.profile_dump;
   LOG(INFO) << "Dry Run       = " << args.dry_run;
   LOG(INFO) << "Run Count     = " << args.run_count;
   LOG(INFO) << "Zero Copy     = " << ((args.zero_copy) ? ("True") : ("False"));
@@ -197,6 +201,12 @@ void ParseCmdArgs(int argc, char* argv[], struct ToolArgs& args) {
     args.profile = true;
   }
 
+  const string profile_file = GetCmdOption(argc, argv, "--profile-dump=");
+  if (!profile_file.empty()) {
+    args.profile = true;
+    args.profile_dump = profile_file;
+  }
+
   const string pdry_run = GetCmdOption(argc, argv, "--dry-run=");
   if (!pdry_run.empty()) {
     args.dry_run = stoi(pdry_run);
@@ -233,7 +243,11 @@ int ExecuteModel(ToolArgs& args) {
   auto runner = new TVMRunner(args.model, args.device);
 
   // Load the model
-  runner->Load();
+  if (!args.profile_dump.empty()) {
+    runner->Load(true);
+  } else {
+    runner->Load(false);
+  }
   if (!args.pre_compiled.empty()) {
     runner->UsePreCompiledPrograms(args.pre_compiled);
   }
@@ -400,6 +414,29 @@ int ExecuteModel(ToolArgs& args) {
     // Print Stats
     runner->PrintStats();
   }
+
+  if (!args.profile_dump.empty()) {
+    std::ostringstream oss;
+    runner->Profile(oss);
+    if (args.profile_dump == "cli") {
+      LOG(WARNING) << oss.str();
+    } else {
+      std::ofstream outf(args.profile_dump, std::ios::out | std::ios::trunc);
+      if (outf.is_open()) {
+        std::ostringstream oss1;
+        runner->PrintToMetaInfo(oss1);
+        runner->PrintToStats(oss1);
+        outf << oss1.str();
+        outf << "Average ExecTime :" << total_exec_time / args.run_count << " ms";
+        outf << "\n\n";
+        outf << oss.str();
+        outf.close();
+      } else {
+        LOG(WARNING) << "Can't open file " << args.profile_dump << " for writing";
+      }
+    }
+  }
+
   auto tstart = std::chrono::high_resolution_clock::now();
   delete runner;
   auto tend = std::chrono::high_resolution_clock::now();

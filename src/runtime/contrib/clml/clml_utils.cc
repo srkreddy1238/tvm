@@ -114,13 +114,17 @@ cl_mem AllocateOnChipTensorMemory(size_t size, cl_uint on_chip_mem_offset) {
   cl_int result = CL_OUT_OF_HOST_MEMORY;
   cl_mem buffer = nullptr;
 
+#ifdef CL_MEM_ONCHIP_GLOBAL_QCOM
   cl_mem_properties on_chip_buff_prop[] = {CL_MEM_ONCHIP_GLOBAL_QCOM, 1,
                                            CL_MEM_ONCHIP_GLOBAL_OFFSET_QCOM, on_chip_mem_offset, 0};
   LOG_MEM << "On-Chip Alloc:" << size << " Offset:" << on_chip_mem_offset;
   buffer = clCreateBufferWithProperties(CLML_CTX, on_chip_buff_prop, CL_MEM_READ_WRITE, size,
                                         nullptr, &result);
   ICHECK(result == CL_SUCCESS) << "clCreateBufferWithProperties:" << result;
-
+#else
+  LOG(FATAL) << "Shouldn't be here. runtime compiled with SDK version"
+             << CL_QCOM_ML_OPS_H_MINOR_VERSION << " that doesn't support GMEM extn";
+#endif
   return buffer;
 }
 
