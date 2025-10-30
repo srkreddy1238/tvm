@@ -434,24 +434,26 @@ void TVMRunner::PrintMetaInfo(void) {
  * \brief Print the meta information.
  */
 void TVMRunner::PrintToMetaInfo(std::ostringstream& oss) {
-  oss << std::endl << "Meta Information:" << r_model_path << std::endl;
-  oss << "    Total Inputs (including params):" << mInfo.n_inputs << std::endl;
-  oss << "    Number of Actual Inputs:" << mInfo.n_actual_inputs << std::endl;
-  oss << "    Number of Parameters:" << mInfo.n_params << std::endl;
-  oss << "    Number of Outputs:" << mInfo.n_outputs << std::endl;
-  oss << "    Input MetaInfo:" << std::endl;
+  oss << std::endl << "Meta Information: " << r_model_path << std::endl;
+  oss << "Total Inputs (including params): " << mInfo.n_inputs << std::endl;
+  oss << "Number of Actual Inputs: " << mInfo.n_actual_inputs << std::endl;
+  oss << "Number of Parameters: " << mInfo.n_params << std::endl;
+  oss << "Number of Outputs: " << mInfo.n_outputs << std::endl;
+  oss << "Input MetaInfo:" << std::endl;
   for (auto& elem : mInfo.input_info) {
     std::ostringstream stream;
     stream << "[";
     copy(elem.second.first.begin(), elem.second.first.end() - 1,
          std::ostream_iterator<int>(stream, ", "));
     stream << elem.second.first.back() << "]";
-    oss << "        Input:" << elem.first << std::endl;
-    oss << "            DType:" << elem.second.second << std::endl;
-    oss << "            Shape:" << stream.str() << std::endl;
+    oss << "  - Input:" << std::endl;
+    oss << "      Name:" << elem.first << std::endl;
+
+    oss << "      DType:" << elem.second.second << std::endl;
+    oss << "      Shape:" << stream.str() << std::endl;
   }
 
-  oss << "    Output MetaInfo:" << std::endl;
+  oss << "Output MetaInfo:" << std::endl;
 
   for (auto& elem : mInfo.output_info) {
     std::ostringstream stream;
@@ -459,9 +461,10 @@ void TVMRunner::PrintToMetaInfo(std::ostringstream& oss) {
     copy(elem.second.first.begin(), elem.second.first.end() - 1,
          std::ostream_iterator<int>(stream, ", "));
     stream << elem.second.first.back() << "]";
-    oss << "        Output:" << elem.first << std::endl;
-    oss << "            DType:" << elem.second.second << std::endl;
-    oss << "            Shape:" << stream.str() << std::endl;
+    oss << "  - Output:" << std::endl;
+    oss << "      Name: " << elem.first << std::endl;
+    oss << "      DType: " << elem.second.second << std::endl;
+    oss << "      Shape: " << stream.str() << std::endl;
   }
 }
 

@@ -31,6 +31,7 @@
 
 #include <chrono>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <sstream>
@@ -55,6 +56,7 @@ static const string kUsage =
     "--pre-compiled - The file name of a file where pre-compiled programs should be stored\n"
     "--profile      - Profile over all execution\n"
     "--profile-dump - Save complete profiling info to given path (cli to dump on stdout)\n"
+    "                 Note: If .yml extension is used, only meta info is dumped to yml file\n"
     "--dry-run      - Profile after given dry runs, default 10\n"
     "--run-count    - Profile for given runs, default 100\n"
     "--zero-copy    - Profile with zero copy api\n"
@@ -63,6 +65,7 @@ static const string kUsage =
     "  Example\n"
     "  ./rtvm --model=keras-resnet50 --device=\"opencl\" --dump-meta\n"
     "  ./rtvm --model=keras-resnet50 --device=\"opencl\" --input input.npz --output=output.npz\n"
+    "  ./rtvm --model=keras-resnet50 --device=\"opencl\" --profile-dump=profile.yml\n"
     "\n";
 
 /*!
@@ -423,13 +426,21 @@ int ExecuteModel(ToolArgs& args) {
     } else {
       std::ofstream outf(args.profile_dump, std::ios::out | std::ios::trunc);
       if (outf.is_open()) {
-        std::ostringstream oss1;
-        runner->PrintToMetaInfo(oss1);
-        runner->PrintToStats(oss1);
-        outf << oss1.str();
-        outf << "Average ExecTime :" << total_exec_time / args.run_count << " ms";
-        outf << "\n\n";
-        outf << oss.str();
+        if (std::filesystem::path(args.profile_dump).extension() == ".yml") {
+          // For .yml files, only dump PrintMetaInfo
+          std::ostringstream meta_oss;
+          runner->PrintToMetaInfo(meta_oss);
+          outf << meta_oss.str();
+        } else {
+          // For non yml files
+          std::ostringstream oss1;
+          runner->PrintToMetaInfo(oss1);
+          runner->PrintToStats(oss1);
+          outf << oss1.str();
+          outf << "Average ExecTime :" << total_exec_time / args.run_count << " ms";
+          outf << "\n\n";
+          outf << oss.str();
+        }
         outf.close();
       } else {
         LOG(WARNING) << "Can't open file " << args.profile_dump << " for writing";
