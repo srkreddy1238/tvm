@@ -475,7 +475,7 @@ def compile_model(
                 with autotvm.apply_history_best(tuning_records):
                     logger.debug("building relay graph with tuning records")
                     if heterogeneous_tuning:
-                        partition_args = parse_heterogenous_graph_partition(locals())
+                        partition_args = parse_heterogenous_graph_partition_args(locals())
                         mod = apply_heterogenous_graph_partition(
                             mod, params, targets, cross, partition_args
                         )
@@ -499,7 +499,7 @@ def compile_model(
         else:
             logger.debug("building relay graph (no tuning records provided)")
             if heterogeneous_tuning:
-                partition_args = parse_heterogenous_graph_partition(locals())
+                partition_args = parse_heterogenous_graph_partition_args(locals())
                 mod = apply_heterogenous_graph_partition(
                     mod, params, targets, cross, partition_args
                 )

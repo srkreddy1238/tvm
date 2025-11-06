@@ -219,6 +219,7 @@ class TVMCModel(object):
         data_npz_path = temp.relpath(data_npz_name)
         data_json = {}
         data_json["Input"] = []
+        self.mod = tvm.relay.transform.InferType()(self.mod)
         for p in self.mod["main"].params:
             inp_dict = {
                 "name": p.name_hint,
