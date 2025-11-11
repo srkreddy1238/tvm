@@ -55,6 +55,7 @@ def _alter_conv2d_transpose_layout(attrs, inputs, tinfos, out_type):
     data_tensor, kernel_tensor = tinfos
     data_dtype = data_tensor.dtype
     out_dtype = out_type.dtype
+    out_padding = attrs.get_int_tuple("output_padding")
 
     if isinstance(dispatch_ctx, autotvm.task.ApplyGraphBest):
         cfg = dispatch_ctx.query(target, None)
@@ -109,7 +110,7 @@ def _alter_conv2d_transpose_layout(attrs, inputs, tinfos, out_type):
                 dtype=kernel_tensor.dtype,
             )
             new_workload = autotvm.task.args_to_workload(
-                [new_data, new_kernel, strides, padding, dilation, out_dtype],
+                [new_data, new_kernel, strides, padding, out_dtype, out_padding],
                 topi_tmpl,  # "conv2d_transpose_nchwc.image2d",
             )
             dispatch_ctx.update(target, new_workload, cfg)
