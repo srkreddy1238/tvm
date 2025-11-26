@@ -396,12 +396,12 @@ class CLMLRuntime : public JSONRuntimeBase {
               evts.resize(evts.size() + 1);
               evt = &(evts.back());
             }
-            std::unordered_map<std::string, ObjectRef> metrics;
+            std::unordered_map<std::string, ffi::Any> metrics;
             std::string shape_str;
             std::vector<int64_t> shape = nodes_[nid].GetOpShape()[0];
             DLDataType tvm_dtype = nodes_[nid].GetOpDataType()[0];
             shape_str.append(profiling::ShapeString(shape, tvm_dtype));
-            metrics["Argument Shapes"] = String(shape_str);
+            metrics["Argument Shapes"] = ffi::String(shape_str);
 
             prof->StartCall("CopyIn", cws->tentry->device, metrics);
             CLML_CALL(clEnqueueCopyMLTensorDataQCOM, queue, layer_.in_placeholder[nid]->tensor,
@@ -438,7 +438,7 @@ class CLMLRuntime : public JSONRuntimeBase {
 
     for (size_t i = 0; i < this->layer_.function.size(); ++i) {
       std::unordered_map<std::string, ffi::Any> metrics;
-      auto node = this->layer_.op_node_map[this->layer_.function[i]].second;
+      auto node = this->layer_.op_node_map[this->layer_.function[i].op].second;
       std::string shape_str;
       for (uint32_t j = 0; j < node.GetInputs().size(); ++j) {
         const JSONGraphNode in_node = nodes_[node.GetInputs()[j].id_];
@@ -488,12 +488,12 @@ class CLMLRuntime : public JSONRuntimeBase {
             evt = &(evts.back());
           }
 
-          std::unordered_map<std::string, ObjectRef> metrics;
+          std::unordered_map<std::string, ffi::Any> metrics;
           std::string shape_str;
           std::vector<int64_t> shape = nodes_[eid].GetOpShape()[0];
           DLDataType tvm_dtype = nodes_[eid].GetOpDataType()[0];
           shape_str.append(profiling::ShapeString(shape, tvm_dtype));
-          metrics["Argument Shapes"] = String(shape_str);
+          metrics["Argument Shapes"] = ffi::String(shape_str);
 
           prof->StartCall("CopyOut", cws->tentry->device, metrics);
           CLML_CALL(clEnqueueCopyMLTensorDataQCOM, queue, layer_.outputs[i]->tensor,

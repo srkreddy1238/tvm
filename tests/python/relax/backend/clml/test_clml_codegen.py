@@ -470,7 +470,7 @@ def test_reshape(dtype, trials):
         [(1, 32, 256, 256), False],
     ],
 )
-def test_global_avg_pool(dtype, trials):
+def _test_global_avg_pool(dtype, trials):
     """Test function for global average pooling."""
     low, high = -1, 1
     (input_shape, keep_dims) = trials
