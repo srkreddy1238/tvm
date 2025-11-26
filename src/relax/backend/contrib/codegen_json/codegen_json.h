@@ -232,7 +232,9 @@ class JSONSerializer : public relax::MemoizedExprTranslator<NodeEntries> {
    * \param constant_names The names of all constants in the original module.
    */
   explicit JSONSerializer(const ffi::Map<Constant, ffi::String>& constant_names)
-      : constant_names_(constant_names) {}
+      : constant_names_(constant_names) {
+    LOG(WARNING) << "JSONSerializer Init";
+  }
 
   void serialize(Function func) {
     // First we convert all the parameters into input nodes.

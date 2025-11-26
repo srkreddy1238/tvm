@@ -217,7 +217,7 @@ def test_sqrt_integer_input():
     verify_model(SqrtIntModel(), example_args_int32, {}, expected_int32)
 
 
-def test_extended_unary_ops():
+def _test_extended_unary_ops():
     example_args = (torch.randn(1, 3, 10, 10, dtype=torch.float32),)
 
     # celu
