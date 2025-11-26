@@ -21,10 +21,10 @@
 from collections import namedtuple
 from typing import List, Optional, Set, Union, Dict, Tuple
 from typing_extensions import Literal
+from tvm_ffi import get_global_func
 
 from tvm import ir, tir
 from tvm.tir import Schedule
-from tvm._ffi import get_global_func
 from tvm.target.target import Target
 from tvm.tir.schedule import BlockRV
 from tvm.runtime import DataType

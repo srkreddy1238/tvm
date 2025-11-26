@@ -72,7 +72,7 @@ class TextureAllocInjector : public arith::IRMutatorWithAnalyzer {
 
       size_t axis = DefaultTextureLayoutSeparator(op->extents.size(), storage_scope);
       auto texture = ApplyTexture2DFlattening<PrimExpr>(op->extents, op->extents.size(), axis);
-      Array<PrimExpr> args;
+      ffi::Array<PrimExpr> args;
       args.push_back(StringImm(storage_scope));
       args.push_back(IntImm(DataType::Int(64), 3));  // 2d Array
       args.push_back(Call(DataType::Handle(), builtin::tvm_stack_make_shape(),
@@ -102,7 +102,11 @@ Pass InjectTextureAlloc() {
   return CreatePrimFuncPass(pass_func, 0, "tir.InjectTextureAlloc", {});
 }
 
-TVM_REGISTER_GLOBAL("tir.transform.InjectTextureAlloc").set_body_typed(InjectTextureAlloc);
+TVM_FFI_STATIC_INIT_BLOCK() {
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def("tir.transform.InjectTextureAlloc", InjectTextureAlloc);
+}
+
 }  // namespace transform
 
 }  // namespace tir

@@ -163,7 +163,7 @@ def test_texture_copy(target, dtype, channel_size, read_width):
             dev = remote.cl()
 
             vm = relax.VirtualMachine(rexec, [dev, dev, dev])
-            inps = [tvm.nd.array(inp, dev) for inp in inputs]
+            inps = [tvm.runtime.tensor(inp, dev) for inp in inputs]
             vm["main"](*inps)
 
             np.testing.assert_equal(inps[-1].numpy(), inps[0].numpy())
