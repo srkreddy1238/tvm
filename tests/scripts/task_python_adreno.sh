@@ -68,6 +68,7 @@ TARGET_FOLDER=/data/local/tmp/tvm_ci-${USER}-${TVM_TRACKER_PORT}
 adb shell "mkdir -p ${TARGET_FOLDER}"
 adb push build-adreno-target/tvm_rpc ${TARGET_FOLDER}/tvm_rpc-${USER}-${TVM_TRACKER_PORT}
 adb push build-adreno-target/libtvm_runtime.so ${TARGET_FOLDER}
+adb push build-adreno-target/lib/libtvm_ffi.so ${TARGET_FOLDER}
 CPP_LIB=`find ${ANDROID_NDK_HOME} -name libc++_shared.so | grep aarch64`
 if [ -f ${CPP_LIB} ] ; then
     adb push ${CPP_LIB} ${TARGET_FOLDER}

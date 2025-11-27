@@ -29,7 +29,7 @@ export TVM_BIND_THREADS=0
 export TVM_NUM_THREADS=2
 
 # setup cython
-cd python; python3 setup.py build_ext --inplace; cd ..
+#cd python; python3 setup.py build_ext --inplace; cd ..
 
 # Test for OpenCLML
 pytest tests/python/relax/backend/clml/
