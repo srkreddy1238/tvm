@@ -61,7 +61,7 @@ def test_dp4a_codegen(target):
             sch.tensorize(j, tensor_intrin.adreno.ADRENO_DP4A_i8i8i32_INTRIN)
 
             ex = tvm.tir.build(sch.mod, target)
-            assembly = ex.imported_modules[0].get_source()
+            assembly = ex.imports[0].inspect_source()
 
             pattern = "qcom_dot8_acc"
             assert assembly.count(pattern)
@@ -101,7 +101,7 @@ def test_dp4a_codegen(target):
         sch.tensorize(ki, tensor_intrin.adreno.ADRENO_DP4A_i8i8i32_INTRIN)
 
         ex = tvm.tir.build(sch.mod, target)
-        assembly = ex.imported_modules[0].get_source()
+        assembly = ex.imports[0].inspect_source()
 
         pattern = "qcom_dot8_acc"
         assert assembly.count(pattern)
@@ -158,7 +158,7 @@ def test_dp4a_codegen(target):
         sch.tensorize(icb, tensor_intrin.adreno.ADRENO_DP4A_i8i8i32_INTRIN)
 
         ex = tvm.tir.build(sch.mod, target)
-        assembly = ex.imported_modules[0].get_source()
+        assembly = ex.imports[0].inspect_source()
 
         pattern = "qcom_dot8_acc"
         assert assembly.count(pattern)
