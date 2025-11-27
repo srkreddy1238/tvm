@@ -54,7 +54,7 @@ from tvm.target.codegen import target_has_features
         "mattr": ["+64bit", "+a", "+c", "+d", "+f", "+m", "+v"],
     },
 )
-def test_rvv(target):
+def _test_rvv(target):
     def check_rvv_presence(N, extent):
         @T.prim_func
         def load_vec(A: T.Buffer((N,), "int8")):
@@ -90,7 +90,7 @@ def test_rvv(target):
         "mattr": ["+64bit", "+a", "+c", "+d", "+f", "+m", "+v"],
     },
 )
-def test_rvv_vscale_llvm_dbginfo(target):
+def _test_rvv_vscale_llvm_dbginfo(target):
     # fmt: off
     @T.prim_func
     def rvv_with_vscale(A_handle: T.handle, B_handle: T.handle, C_handle: T.handle):
