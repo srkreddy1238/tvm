@@ -21,8 +21,8 @@ from typing import Optional, Union
 from tvm import tir
 from tvm.target import Target
 
-from .utils import schedule_inline_blocks, schedule_storage_annotate, schedule_default
-from ..base import analysis
+from .utils import schedule_inline_blocks, schedule_default
+from .. import analysis
 from .base import AdrenoScheduleRule
 
 
@@ -68,7 +68,7 @@ class Conv2d(AdrenoScheduleRule):
 
     def apply(  # pylint: disable=too-many-locals,missing-docstring
         self,
-        func: Union[tir.PrimFunc],
+        func: Union[tir.PrimFunc, tir.Schedule],
         target: Target,
         _: bool,
     ) -> Optional[tir.Schedule]:
@@ -102,6 +102,5 @@ class Conv2d(AdrenoScheduleRule):
         Conv2d.schedule_conv2d(sch, conv_blk)
         remaining_blocks = schedule_inline_blocks(sch, remaining_blocks)
         schedule_default(sch, remaining_blocks)
-        schedule_storage_annotate(sch, remaining_blocks)
 
         return sch

@@ -37,7 +37,6 @@
 
 #include <atomic>
 #include <functional>
-#include <string>
 #include <utility>
 #include <vector>
 
@@ -190,23 +189,12 @@ class Tensor : public tvm::ffi::Tensor {
    */
   TVM_DLL static void CopyFromBytes(const DLTensor* to, void* from, size_t nbytes,
                                     TVMStreamHandle stream = nullptr);
-
-  TVM_DLL void SetScope(ffi::String scope);
-  TVM_DLL ffi::String GetScope() const;
-
- protected:
-  /*!
-   * \brief The memory scope
-   * represents the underlaying scope information of device
-   */
-  ffi::String scope = "global";
 };
 
 /*!
  * \brief Save a DLTensor to stream
  * \param strm The output stream
  * \param tensor The tensor to be saved.
- * \param scope The tensor storage scope.
  */
 inline bool SaveDLTensor(support::Stream* strm, const DLTensor* tensor);
 
@@ -233,8 +221,7 @@ inline void Tensor::CopyTo(const Tensor& other) const {
 }
 
 /*! \brief Magic number for Tensor file */
-constexpr uint64_t kTVMNDArrayMagic = 0xDD5E40F096B4A13F;
-constexpr uint64_t kTVMNDArrayScopedMagic = 0xDD5E40F096B4A13E;
+constexpr uint64_t kTVMTensorMagic = 0xDD5E40F096B4A13F;
 
 inline bool SaveDLTensor(support::Stream* strm, const DLTensor* tensor) {
   uint64_t header = kTVMTensorMagic, reserved = 0;
@@ -257,7 +244,6 @@ inline bool SaveDLTensor(support::Stream* strm, const DLTensor* tensor) {
   strm->Write(tensor->dtype);
   int ndim = tensor->ndim;
   strm->WriteArray(tensor->shape, ndim);
-  strm->Write(std::string(scope));
   int type_bytes = (tensor->dtype.bits + 7) / 8;
   int64_t num_elems = 1;
   for (int i = 0; i < ndim; ++i) {
@@ -305,11 +291,6 @@ inline bool Tensor::Load(support::Stream* strm) {
   int elem_bytes = (ret->dtype.bits + 7) / 8;
   for (int i = 0; i < ret->ndim; ++i) {
     num_elems *= ret->shape[i];
-  }
-  if (header == kTVMNDArrayScopedMagic) {
-    std::string scope;
-    strm->Read(&scope);
-    ret.SetScope(scope);
   }
   int64_t data_byte_size;
   TVM_FFI_ICHECK(strm->Read(&data_byte_size)) << "Invalid DLTensor file format";

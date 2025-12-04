@@ -21,7 +21,7 @@ from tvm import tir
 from tvm.target import Target
 
 from .base import AdrenoScheduleRule
-from ..base import analysis
+from .. import analysis
 
 
 # pylint: disable=invalid-name, unused-variable
@@ -87,6 +87,6 @@ class Pool2D(AdrenoScheduleRule):
                         sch.reverse_compute_inline(blk)
                     else:
                         sch.compute_inline(blk)
-                except:  # pylint: disable=bare-except
+                except Exception:  # pylint: disable=broad-exception-caught
                     pass
         return sch

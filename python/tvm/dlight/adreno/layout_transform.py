@@ -22,7 +22,7 @@ from typing import List, Union
 
 from tvm import tir
 from tvm.target import Target
-from ..base import analysis
+from .. import analysis
 
 from .base import AdrenoScheduleRule
 
@@ -61,11 +61,11 @@ class LayoutTransform(AdrenoScheduleRule):
         block_info = analysis.get_block_info(sch, blk)
         if not (
             (self.use_op_name and block_info.name == "te_layout_transform")
-            or (not self.use_op_name and block_info.is_layout_transform())
+            or (not self.use_op_name and block_info.is_layout_transform(sch))
         ):
             return None
 
-        read_buf, write_buf = (block_info.read_bufs[0], block_info.write_bufs[0])
+        read_buf, write_buf = (block_info.read_bufs(sch)[0], block_info.write_bufs(sch)[0])
         lps = block_info.get_loops()
         lpv_read, lpv_write = (
             read_buf.assoc_lps[-1],
@@ -124,9 +124,6 @@ class LayoutTransform(AdrenoScheduleRule):
         b = sch.fuse(*block_loops)
         tx_extent = min(sch.get(b).extent, 256)
         candidates = [1, 2, 4, 8, 16, 32]
-        ux = sch.sample_categorical(
-            candidates, [1 / len(candidates) for _ in range(len(candidates))]
-        )
         bx, tx = sch.split(b, [None, 256], preserve_unit_iters=True)
         sch.bind(bx, "blockIdx.x")
         sch.bind(tx, "threadIdx.x")

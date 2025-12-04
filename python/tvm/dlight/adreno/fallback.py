@@ -21,9 +21,24 @@ from typing import List, Union
 
 from tvm import tir
 from tvm.target import Target
-from ..base import analysis
+from .. import analysis
 from .base import AdrenoScheduleRule
-from .utils import get_texture_storage
+
+
+def _assert_gpu_target(target: Target):
+    if "gpu" not in target.keys:
+        raise ValueError(f"Expect a GPU target, but got {target}")
+
+
+def get_max_threads_per_block(target: Target) -> int:
+    _assert_gpu_target(target)
+    max_threads_per_block = None
+    for name in ["max_threads_per_block", "max_num_threads"]:
+        if max_threads_per_block is None:
+            max_threads_per_block = target.attrs.get(name, None)
+    if max_threads_per_block is None:
+        max_threads_per_block = 64
+    return int(max_threads_per_block)
 
 
 # pylint: disable=invalid-name,missing-function-docstring,unused-variable,unused-import
@@ -45,13 +60,13 @@ class Fallback(AdrenoScheduleRule):
         remaining_blocks = []
         for blk in blocks:
             block_info = analysis.get_block_info(sch, blk)
-            if block_info.is_injective() and not block_info.is_data_pad():
-                if len(block_info.consumers) == 1:
+            if block_info.is_injective() and not block_info.is_data_pad(sch):
+                if len(sch.get_consumers(blk)) == 1:
                     try:
                         sch.compute_inline(blk)
                     except Exception:  # pylint: disable=broad-exception-caught
                         remaining_blocks.append(blk)
-                elif len(block_info.producers) == 1:
+                elif len(sch.get_producers(blk)) == 1:
                     inlined_once = False
                     try:
                         # Would cause an issue inlining to producer with multiple consumers
@@ -72,25 +87,11 @@ class Fallback(AdrenoScheduleRule):
         return remaining_blocks
 
     @staticmethod
-    def schedule_annotate_storage(sch: tir.Schedule, func=get_texture_storage):
-        """Annotates intermediate buffers to textures whenever it's possible to do so"""
-        return
-        # pylint: disable=unreachable
-        root_blk = analysis.get_root_block(sch)
-        blocks = sch.get_child_blocks(root_blk)
-
-        for blk in blocks:
-            block_info = analysis.get_block_info(sch, blk)
-            scope = func(block_info)
-            if scope is not None and len(sch.get_consumers(blk)) > 0:
-                sch.set_scope(blk, 0, scope)
-
-    @staticmethod
     def schedule_default(sch: tir.Schedule, blk: tir.schedule.BlockRV):
         block_info = analysis.get_block_info(sch, blk)
 
         s_loops, r_loops, o_loops = [], [], []
-        v_loop = block_info.write_bufs[0].assoc_lps[-1]
+        v_loop = block_info.write_bufs(sch)[0].assoc_lps[-1]
 
         for iter_info in block_info.iters:
             if sch.get(iter_info.loop_rv) == sch.get(v_loop):
@@ -98,7 +99,7 @@ class Fallback(AdrenoScheduleRule):
             {"S": s_loops, "R": r_loops, "O": o_loops}.get(iter_info.kind).append(iter_info.loop_rv)
 
         iter_vars = analysis.collect_block_iter_vars_used_in_access_region(
-            block_info.block_stmt, block_info.write_bufs[0].buf_region.region
+            sch.get(blk), block_info.write_bufs(sch)[0].buf_region.region
         )
         o_outer = [lp for lp in o_loops if sch.get(lp).var in iter_vars]
         o_inner = [lp for lp in o_loops if sch.get(lp).var not in iter_vars]
@@ -114,7 +115,7 @@ class Fallback(AdrenoScheduleRule):
         tgt = Target.current(allow_none=True)
 
         b = sch.fuse(*s_loops)
-        tx_extent = analysis.get_max_threads_per_block(tgt) if tgt is not None else 256
+        tx_extent = get_max_threads_per_block(tgt) if tgt is not None else 256
         bx, tx = sch.split(b, [None, tx_extent])
         sch.bind(bx, "blockIdx.x")
         sch.bind(tx, "threadIdx.x")
@@ -139,7 +140,7 @@ class Fallback(AdrenoScheduleRule):
             blk
             for blk in blocks
             if analysis.get_block_info(sch, blk).is_reduction()
-            or analysis.get_block_info(sch, blk).is_data_pad()
+            or analysis.get_block_info(sch, blk).is_data_pad(sch)
         ]
         remaining_blocks = [blk for blk in blocks if blk not in schedule_blocks]
 
@@ -149,7 +150,6 @@ class Fallback(AdrenoScheduleRule):
         # TODO: Analyze unscheduled blocks to schedule instead of relying on remaining
         for blk in remaining_blocks:
             Fallback.schedule_default(sch, blk)
-        Fallback.schedule_annotate_storage(sch, schedule_blocks + remaining_blocks)
 
     def apply(  # pylint: disable=too-many-locals
         self,
@@ -170,7 +170,7 @@ class Fallback(AdrenoScheduleRule):
             return None
 
         block_infos = [analysis.get_block_info(sch, block) for block in blocks]
-        if not any("texture" in block.write_bufs[0].get_scope() for block in block_infos):
+        if not any("texture" in block.write_bufs(sch)[0].get_scope() for block in block_infos):
             return None
 
         Fallback.schedule_fallback(sch)

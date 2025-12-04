@@ -132,12 +132,7 @@ Tensor Tensor::Empty(ffi::Shape shape, DLDataType dtype, Device dev,
       DeviceAPI::Get(tensor->device)->FreeDataSpace(tensor->device, tensor->data);
     }
   };
-  Tensor ret = ffi::Tensor::FromNDAlloc(DeviceAPIAlloc(), shape, dtype, dev, mem_scope);
-  if (mem_scope.has_value()) {
-    ret.SetScope(mem_scope.value());
-  }
-
-  return ret;
+  return ffi::Tensor::FromNDAlloc(DeviceAPIAlloc(), shape, dtype, dev, mem_scope);
 }
 
 Tensor Tensor::CreateView(ffi::Shape shape, DLDataType dtype, uint64_t relative_byte_offset) const {
@@ -146,8 +141,7 @@ Tensor Tensor::CreateView(ffi::Shape shape, DLDataType dtype, uint64_t relative_
   const DLTensor& orig = *get_mutable();
   TVM_FFI_ICHECK(IsContiguous()) << [&orig]() {
     std::stringstream ss;
-    ss << "Can only create view for compact tensor, but found strides or its a memory scoped "
-          "object";
+    ss << "Can only create view for compact tensor, but found strides ";
 
     ss << "[";
     for (int i = 0; i < orig.ndim; i++) {
@@ -239,10 +233,6 @@ void Tensor::CopyFromTo(const DLTensor* from, DLTensor* to, TVMStreamHandle stre
 
   DeviceAPI::Get(dev)->CopyDataFromTo(const_cast<DLTensor*>(from), to, stream);
 }
-
-void Tensor::SetScope(ffi::String scope) { this->scope = scope; }
-
-ffi::String Tensor::GetScope() const { return this->scope; }
 
 }  // namespace runtime
 }  // namespace tvm

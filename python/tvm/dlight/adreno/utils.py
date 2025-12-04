@@ -22,7 +22,7 @@ from typing import List
 from tvm.target import Target
 from tvm import tir
 
-from ..base.analysis import BlockInfo
+from ..analysis import BlockInfo
 
 
 def get_texture_storage(block_info: BlockInfo):
@@ -81,13 +81,6 @@ def schedule_default(sch, blocks: List[tir.schedule.BlockRV] = None):
         ret.append(Fallback.schedule_default(sch, blk))
 
     return ret
-
-
-def schedule_storage_annotate(sch: tir.Schedule, func=get_texture_storage):
-    # Check the Write Buffer isn't one of input Params and is Texturizable...
-    from .fallback import Fallback
-
-    return Fallback.schedule_annotate_storage(sch)
 
 
 def schedule_fallback(sch, blk):
