@@ -601,6 +601,7 @@ generated = [
                 [
                     "./tests/scripts/task_opencl_cpp_unittest.sh {build_dir}",
                     "./tests/scripts/task_python_unittest.sh",
+                    "./tests/scripts/task_python_unittest_gpuonly.sh",
                 ],
             ),
             "frontend": ("run frontend tests", ["./tests/scripts/task_python_frontend.sh"]),
