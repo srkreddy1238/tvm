@@ -415,7 +415,7 @@ def tree_attn(h_kv, h_q, d, dtype, rope_scaling: dict[str, Any], target: Target)
                             batch_tiles[0] = T.ceildiv(batch_rows[0], tile_x)
                             while T.tvm_thread_invariant(batch_idx[0] < batch_size_plus_1 - 1):
                                 # advance to next tile
-                                while tile_id[0] >= batch_tiles[0] and batch_idx[0] < batch_size_plus_1 - 1:
+                                while tir.all(tile_id[0] >= batch_tiles[0], batch_idx[0] < batch_size_plus_1 - 1):
                                     tile_id[0] -= batch_tiles[0]
                                     batch_idx[0] += 1
                                     if batch_idx[0] < batch_size_plus_1 - 1:
@@ -1038,7 +1038,7 @@ def tree_attn_with_paged_kv_cache(
                             batch_tiles[0] = T.ceildiv(batch_rows[0], tile_x)
                             while T.tvm_thread_invariant(batch_idx[0] < batch_size):
                                 # advance to next tile
-                                while tile_id[0] >= batch_tiles[0] and batch_idx[0] < batch_size:
+                                while tir.all(tile_id[0] >= batch_tiles[0], batch_idx[0] < batch_size):
                                     tile_id[0] -= batch_tiles[0]
                                     batch_idx[0] += 1
                                     if batch_idx[0] < batch_size:

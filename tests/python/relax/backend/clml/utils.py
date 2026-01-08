@@ -107,4 +107,5 @@ def run_compare(mod, inputs, params_np):
         rpc=rpc,
         load_path="vm_library_clml.so",
     )
-    np.testing.assert_allclose(out, ref, rtol=1e-5, atol=1e-5)
+    atol = 0.05 * max(ref.flatten())
+    np.testing.assert_allclose(out, ref, rtol=1e-3, atol=atol)

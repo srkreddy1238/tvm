@@ -26,9 +26,9 @@
 #include <adrenoaccl.h>
 #endif
 #include <stdlib.h>
-#include <tvm/runtime/ndarray.h>
+#include <tvm/ffi/reflection/registry.h>
 #include <tvm/runtime/profiling.h>
-#include <tvm/runtime/registry.h>
+#include <tvm/runtime/tensor.h>
 
 #include <fstream>
 #include <map>
@@ -81,7 +81,7 @@ class AdrenoACCLRuntime : public JSONRuntimeBase {
    * \param const_names The names of each constant in the sub-graph.
    */
   explicit AdrenoACCLRuntime(const std::string& symbol_name, const std::string& graph_json,
-                             const Array<String>& const_names)
+                             const ffi::Array<ffi::String>& const_names)
       : JSONRuntimeBase(symbol_name, graph_json, const_names), adreno_accl_symbol(symbol_name) {}
 
   ~AdrenoACCLRuntime() {
@@ -96,7 +96,7 @@ class AdrenoACCLRuntime : public JSONRuntimeBase {
    *
    * \return module type key.
    */
-  const char* type_key() const override { return "adreno_accl"; }
+  const char* kind() const override { return "adreno_accl"; }
 
   /*!
    * \brief Initialize runtime. Create ADRENO_ACCL layer from JSON
@@ -104,7 +104,7 @@ class AdrenoACCLRuntime : public JSONRuntimeBase {
    *
    * \param consts The constant params from compiled model.
    */
-  void Init(const Array<NDArray>& consts) override {
+  void Init(const ffi::Array<Tensor>& consts) override {
     ICHECK_EQ(consts.size(), const_idx_.size())
         << "The number of input constants must match the number of required.";
     SetupConstants(consts);
@@ -267,15 +267,19 @@ class AdrenoACCLRuntime : public JSONRuntimeBase {
   std::string adreno_accl_symbol;
 };
 
-runtime::Module AdrenoACCLRuntimeCreate(const String& symbol_name, const String& graph_json,
-                                        const Array<String>& const_names) {
-  auto n = make_object<AdrenoACCLRuntime>(symbol_name, graph_json, const_names);
-  return runtime::Module(n);
+ffi::Module AdrenoACCLRuntimeCreate(const ffi::String& symbol_name, const ffi::String& graph_json,
+                                    const ffi::Array<ffi::String>& const_names) {
+  auto n = ffi::make_object<AdrenoACCLRuntime>(symbol_name, graph_json, const_names);
+  return ffi::Module(n);
 }
 
-TVM_REGISTER_GLOBAL("runtime.adreno_accl_runtime_create").set_body_typed(AdrenoACCLRuntimeCreate);
-TVM_REGISTER_GLOBAL("runtime.module.loadbinary_adreno_accl")
-    .set_body_typed(JSONRuntimeBase::LoadFromBinary<AdrenoACCLRuntime>);
+TVM_FFI_STATIC_INIT_BLOCK() {
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef()
+      .def("runtime.adreno_accl_runtime_create", AdrenoACCLRuntimeCreate)
+      .def("ffi.Module.load_from_bytes.adreno_accl",
+           JSONRuntimeBase::LoadFromBytes<AdrenoACCLRuntime>);
+}
 }  //  namespace contrib
 }  //  namespace runtime
 }  //  namespace tvm

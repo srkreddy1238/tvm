@@ -1342,7 +1342,7 @@ def _attention_prefill(
                             batch_tiles[0] = T.ceildiv(batch_rows[0], tile_x)
                             while T.tvm_thread_invariant(batch_idx[0] < batch_size):
                                 # advance to next tile
-                                while tile_id[0] >= batch_tiles[0] and batch_idx[0] < batch_size:
+                                while tir.all(tile_id[0] >= batch_tiles[0], batch_idx[0] < batch_size):
                                     tile_id[0] -= batch_tiles[0]
                                     batch_idx[0] += 1
                                     if batch_idx[0] < batch_size:
@@ -2532,7 +2532,7 @@ def _attention_prefill_ragged(
                             batch_tiles[0] = T.ceildiv(batch_rows[0], tile_x)
                             while T.tvm_thread_invariant(batch_idx[0] < batch_size):
                                 # advance to next tile
-                                while tile_id[0] >= batch_tiles[0] and batch_idx[0] < batch_size:
+                                while tir.all(tile_id[0] >= batch_tiles[0], batch_idx[0] < batch_size):
                                     tile_id[0] -= batch_tiles[0]
                                     batch_idx[0] += 1
                                     if batch_idx[0] < batch_size:

@@ -79,7 +79,8 @@ class CollectFromCompositeFunctionBody : public ExprVisitor {
  */
 class AdrenoACCLJSONSerializer : public JSONSerializer {
  public:
-  explicit AdrenoACCLJSONSerializer(Map<Constant, String> constant_names, Map<Var, Expr> bindings)
+  explicit AdrenoACCLJSONSerializer(ffi::Map<Constant, ffi::String> constant_names,
+                                    ffi::Map<Var, Expr> bindings)
       : JSONSerializer(constant_names), bindings_(bindings) {}
 
   using JSONSerializer::VisitExpr_;
@@ -88,10 +89,10 @@ class AdrenoACCLJSONSerializer : public JSONSerializer {
     // The call must be to an inline "Composite" function
     const auto* fn_var = call_node->op.as<VarNode>();
     ICHECK(fn_var);
-    const auto fn = Downcast<Function>(bindings_[GetRef<Var>(fn_var)]);
+    const auto fn = Downcast<Function>(bindings_[ffi::GetRef<Var>(fn_var)]);
 
-    auto opt_composite = fn->GetAttr<String>(attr::kComposite);
-    ICHECK(opt_composite.defined());
+    auto opt_composite = fn->GetAttr<ffi::String>(attr::kComposite);
+    ICHECK(opt_composite.has_value());
     std::string name = opt_composite.value();
 
     std::shared_ptr<JSONGraphNode> node;
@@ -122,16 +123,16 @@ class AdrenoACCLJSONSerializer : public JSONSerializer {
 
     VLOG(1) << name << " has " << node->GetInputs().size() << " inputs";
 
-    return AddNode(node, GetRef<Expr>(call_node));
+    return AddNode(node, ffi::GetRef<Expr>(call_node));
   }
 
  private:
   /*! \brief The bindings to look up composite functions. */
-  Map<Var, Expr> bindings_;
+  ffi::Map<Var, Expr> bindings_;
 };
 
 void CollectFromCompositeFunctionBody::VisitExpr_(const ConstantNode* constant_node) {
-  for (const auto& entry : serializer_->VisitExpr(GetRef<Constant>(constant_node))) {
+  for (const auto& entry : serializer_->VisitExpr(ffi::GetRef<Constant>(constant_node))) {
     args_.emplace_back(entry);
   }
 }
@@ -146,10 +147,10 @@ void CollectFromCompositeFunctionBody::VisitExpr_(const CallNode* call_node) {
  * \param functions The extern functions to be compiled via AdrenoACCL
  * \return Runtime modules.
  */
-Array<runtime::Module> AdrenoACCLCompiler(Array<Function> functions,
-                                          Map<String, ObjectRef> /*unused*/,
-                                          Map<Constant, String> constant_names) {
-  Array<runtime::Module> compiled_functions;
+ffi::Array<ffi::Module> AdrenoACCLCompiler(ffi::Array<Function> functions,
+                                           ffi::Map<ffi::String, Any> /*unused*/,
+                                           ffi::Map<Constant, ffi::String> constant_names) {
+  ffi::Array<ffi::Module> compiled_functions;
   for (const auto& func : functions) {
     VLOG(1) << "AdrenoACCLCompiler partition:" << std::endl << func;
     AdrenoACCLJSONSerializer serializer(constant_names, AnalyzeVar2Value(func));
@@ -157,16 +158,19 @@ Array<runtime::Module> AdrenoACCLCompiler(Array<Function> functions,
     std::string graph_json = serializer.GetJSON();
     VLOG(1) << "AdrenoACCLCompiler JSON:" << std::endl << graph_json;
     auto constant_names = serializer.GetConstantNames();
-    const auto* pf = runtime::Registry::Get("runtime.adreno_accl_runtime_create");
+    const auto pf = tvm::ffi::Function::GetGlobalRequired("runtime.adreno_accl_runtime_create");
     ICHECK(pf != nullptr) << "Cannot find AdrenoACCLCompiler runtime module create function.";
     std::string func_name = GetExtSymbol(func);
     VLOG(1) << "Creating AdrenoACCL runtime::Module for '" << func_name << "'";
-    compiled_functions.push_back((*pf)(func_name, graph_json, constant_names));
+    compiled_functions.push_back(pf(func_name, graph_json, constant_names).cast<ffi::Module>());
   }
   return compiled_functions;
 }
 
-TVM_REGISTER_GLOBAL("relax.ext.adreno_accl").set_body_typed(AdrenoACCLCompiler);
+TVM_FFI_STATIC_INIT_BLOCK() {
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def("relax.ext.adreno_accl", AdrenoACCLCompiler);
+}
 
 /*!
  * \brief Check whether AdrenoACCL graph executor is enabled.
@@ -180,8 +184,10 @@ inline constexpr bool IsAdrenoACCLRuntimeEnabled() {
 #endif  // TVM_GRAPH_EXECUTOR_ADRENO_ACCL
 }
 
-TVM_REGISTER_GLOBAL("relax.is_adreno_accl_runtime_enabled")
-    .set_body_typed(IsAdrenoACCLRuntimeEnabled);
+TVM_FFI_STATIC_INIT_BLOCK() {
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def("relax.is_adreno_accl_runtime_enabled", IsAdrenoACCLRuntimeEnabled);
+}
 
 }  // namespace contrib
 }  // namespace relax
