@@ -68,7 +68,7 @@ jobs:
            # OpenCL GPU Texture Tests
            SCCACHE_SERVER_PORT=7969 \
            python ./tests/scripts/ci.py gpu -d ci_adreno_gpu_v2 --adreno
-      - name: Adreno Device Tests Over RPC
+      - name: Adreno Device Tests Over RPC - V3
         shell: bash -l {0}
         run: |
            set -e
@@ -78,6 +78,28 @@ jobs:
            SCCACHE_SERVER_PORT=9769 \
            ANDROID_SERIAL=`cat /etc/tvm-ci-device` \
            python ./tests/scripts/ci.py adreno -d ci_adreno_gpu_v2 -a
+      - name: Adreno Device Tests Over RPC - V4
+        shell: bash -l {0}
+        run: |
+           set -e
+           # Adreno RPC Tests
+           ADRENO_TARGET_CLML_VERSION=4 \
+           ADRENO_OPENCL=${ADRENO_OPENCL_V4} \
+           SCCACHE_SERVER_PORT=9769 \
+           ANDROID_SERIAL=`cat /etc/tvm-ci-device-v4` \
+           python ./tests/scripts/ci.py adreno -d ci_adreno_gpu_v2 -a
+      - name: Adreno Device Tests Over RPC - CoOp
+        shell: bash -l {0}
+        run: |
+           set -e
+           # Adreno RPC Tests
+           ADRENO_TARGET_CLML_VERSION=4 \
+           ADRENO_TARGET_COOP=YES \
+           ADRENO_OPENCL=${ADRENO_OPENCL_V4} \
+           SCCACHE_SERVER_PORT=9769 \
+           ANDROID_SERIAL=`cat /etc/tvm-ci-device-coop` \
+           python ./tests/scripts/ci.py adreno -d ci_adreno_gpu_v2 -a
+
   Windows-Build:
     if: ${{ github.repository == 'gpgpu/apache-tvm' }}
     runs-on: tvm-windows

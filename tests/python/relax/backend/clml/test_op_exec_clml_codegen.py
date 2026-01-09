@@ -23,16 +23,18 @@ import os
 import numpy as np
 import pytest
 from mod_utils import (
+    get_relax_conv2d_mod,
     get_batchnorm_mod,
     get_binary_op_mod,
+    get_unary_op_mod,
+    get_relax_maxpool_mod,
     get_relax_avgpool_mod,
-    get_relax_conv2d_mod,
+    get_relax_reshape_mod,
+    get_relax_reshape_codegen,
     get_relax_global_avgpool_mod,
     get_relax_global_maxpool_mod,
-    get_relax_maxpool_mod,
-    get_relax_reshape_codegen,
-    get_relax_reshape_mod,
-    get_unary_op_mod,
+    get_dequant_matmul_module,
+    get_dequant_vec_matmul_module,
 )
 from utils import run_compare
 
@@ -45,6 +47,7 @@ from tvm.script import relax as R
 from tvm.script import tir as T
 from tvm.script.ir_builder import IRBuilder
 from tvm.script.ir_builder import relax as relax_builder
+from utils import run_compare
 
 
 @tvm.testing.requires_openclml
@@ -77,7 +80,11 @@ def test_conv2d_offload(
     is_depthwise,
     dtype,
 ):
-    low, high = 0, 1
+    low, high = -0.01, 0.01
+    rtol, atol = 1e-3, 1e-3
+    if int(os.getenv("ADRENO_TARGET_CLML_VERSION", 3)) > 3:
+        rtol, atol = 1e-2, 1e-2  # @clml precision
+
     data_shape = (1, *shape)
     if is_depthwise:
         groups = data_shape[1] // out_channels
@@ -119,7 +126,7 @@ def test_conv2d_offload(
         has_pad=has_pad,
         is_depthwise=is_depthwise,
     )
-    run_compare(mod, inputs, params_np)
+    run_compare(mod, inputs, params_np, rtol, atol)
 
 
 @tvm.testing.requires_openclml

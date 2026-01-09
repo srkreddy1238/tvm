@@ -21,6 +21,18 @@ import json
 
 import numpy as np
 import pytest
+
+import tvm
+from tvm import relax
+from tvm.script import relax as R
+from tvm.script import ir as I
+from tvm.script import tir as T
+from tvm.script.ir_builder import IRBuilder
+from tvm.script.ir_builder import relax as relax_builder
+from tvm.relax.backend.adreno import clml
+from tvm.relax.backend.adreno.clml import OpenCLMLOffLoad, OpenCLMLOffLoadForLLM
+import tvm.testing
+
 from mod_utils import (
     get_relax_conv2d_mod,
     get_clml_conv2d_codegen,
@@ -43,18 +55,6 @@ from mod_utils import (
     get_dequant_vec_matmul_module,
 )
 
-import tvm
-import tvm.testing
-from tvm import relax
-from tvm.relax.backend.adreno import clml
-from tvm.relax.backend.adreno.clml import OpenCLMLOffLoad
-from tvm.script import ir as I
-from tvm.script import relax as R
-from tvm.script import tir as T
-from tvm.script.ir_builder import IRBuilder
-from tvm.script.ir_builder import relax as relax_builder
-
-
 def compare_codegen(clml_mod, clml_codegen):
     source = clml_mod.attrs["external_mods"][0].inspect_source()
     codegen = json.loads(source)["nodes"]
@@ -76,7 +76,7 @@ def verify(mod, params_np, clml_codegen, enable_llm_partition=False):
     tgt = tvm.target.Target(tvm.target.adreno(), host="llvm -mtriple=aarch64-linux-gnu")
     mod = tvm.relax.transform.BindParams("main", params_np)(mod)
     if enable_llm_partition:
-        clml_mod = CLMLPartitionForLLM(tgt)(mod)
+        clml_mod = OpenCLMLOffLoadForLLM(tgt)(mod)
     else:
         clml_mod = OpenCLMLOffLoad()(mod)
     compare_codegen(clml_mod, clml_codegen)

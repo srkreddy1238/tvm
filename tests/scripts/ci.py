@@ -207,9 +207,10 @@ def docker(
         command.append(f"{key}={value}")
 
     if additional_flags is not None:
-        for key, value in additional_flags.items():
-            command.append(key)
-            command.append(value)
+        for flag in additional_flags:
+            for key, value in flag.items():
+                command.append(key)
+                command.append(value)
 
     SCRIPT_DIR.mkdir(exist_ok=True)
 
@@ -220,6 +221,7 @@ def docker(
         f.write("\n")
 
     command += [image, "bash", str(script_file.relative_to(REPO_ROOT))]
+    print(cmd)
 
     try:
         cmd(command)
@@ -681,13 +683,16 @@ generated = [
         name="adreno",
         help="Run Adreno build and test(s)",
         post_build=["./tests/scripts/task_build_adreno_bins.sh"],
-        additional_flags={
-            "--volume": os.environ.get("ADRENO_OPENCL", "/tmp/") + ":/adreno-opencl",
-            "--net": "host",
-        },
+        additional_flags=[
+            {"--volume": os.environ.get("ADRENO_OPENCL", "/tmp/") + ":/adreno-opencl"},
+            {"--volume": os.environ.get("CI_TEST_INVENTORY", "/Inventory") + ":/Inventory"},
+            {"--net": "host"},
+        ],
         env={
             "ADRENO_OPENCL": "/adreno-opencl",
             "ADRENO_TARGET_CLML_VERSION": os.environ.get("ADRENO_TARGET_CLML_VERSION", "3"),
+            "ADRENO_TARGET_COOP": os.environ.get("ADRENO_TARGET_COOP", "NO"),
+            "CI_TEST_INVENTORY": "/Inventory",
         },
         options={
             "adreno": (
