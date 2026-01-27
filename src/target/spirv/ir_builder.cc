@@ -60,9 +60,12 @@ void IRBuilder::InitHeader() {
   }
 #endif
 
-  if (spirv_support_.supports_cooperative_matrix) {
+  if (spirv_support_.supports_nv_cooperative_matrix) {
     capabilities_used_.insert(spv::CapabilityCooperativeMatrixNV);
     extensions_used_.insert("SPV_NV_cooperative_matrix");
+  } else if (spirv_support_.supports_khr_cooperative_matrix) {
+    capabilities_used_.insert(spv::CapabilityCooperativeMatrixKHR);
+    extensions_used_.insert("SPV_KHR_cooperative_matrix");
   }
 
   // memory model
@@ -112,7 +115,8 @@ std::vector<uint32_t> IRBuilder::Finalize() {
   return data;
 }
 
-SType IRBuilder::GetSType(const DataType& dtype, uint32_t row, uint32_t col) {
+SType IRBuilder::GetSType(const DataType& dtype, uint32_t row, uint32_t col,
+                          spv::CooperativeMatrixUse use) {
   if (dtype == DataType::Int(32)) {
     return t_int32_;
   } else if (dtype == DataType::Bool()) {
@@ -131,13 +135,18 @@ SType IRBuilder::GetSType(const DataType& dtype, uint32_t row, uint32_t col) {
   } else {
     type_key |= static_cast<uint64_t>(row) << 32U;
     type_key |= static_cast<uint64_t>(col) << 40U;
+
+    // Add 'use' for KHR cooperative matrices
+    if (use != spv::CooperativeMatrixUseMax) {
+      type_key |= static_cast<uint64_t>(use) << 48U;
+    }
   }
 
   auto it = pod_type_tbl_.find(type_key);
   if (it != pod_type_tbl_.end()) {
     return it->second;
   }
-  SType t = DeclareType(dtype, row, col);
+  SType t = DeclareType(dtype, row, col, use);
   pod_type_tbl_[type_key] = t;
   return t;
 }
@@ -494,7 +503,8 @@ Value IRBuilder::GetConst_(const SType& dtype, const uint64_t* pvalue) {
   return ret;
 }
 
-SType IRBuilder::DeclareType(const DataType& dtype, uint32_t row, uint32_t col) {
+SType IRBuilder::DeclareType(const DataType& dtype, uint32_t row, uint32_t col,
+                             spv::CooperativeMatrixUse use) {
   AddCapabilityFor(dtype);
 
   if (dtype.lanes() == 1) {
@@ -526,9 +536,16 @@ SType IRBuilder::DeclareType(const DataType& dtype, uint32_t row, uint32_t col) 
       Value v_row = GetSpecConst(GetSType(DataType::UInt(32)), row);
       Value v_col = GetSpecConst(GetSType(DataType::UInt(32)), col);
       Value scope = UIntImm(GetSType(DataType::UInt(32)), spv::ScopeSubgroup);
-      ib_.Begin(spv::OpTypeCooperativeMatrixNV)
-          .AddSeq(t, base_type, scope, v_row, v_col)
-          .Commit(&global_);
+      if (spirv_support_.supports_nv_cooperative_matrix) {
+        ib_.Begin(spv::OpTypeCooperativeMatrixNV)
+            .AddSeq(t, base_type, scope, v_row, v_col)
+            .Commit(&global_);
+      } else if (spirv_support_.supports_khr_cooperative_matrix) {
+        Value c_use = UIntImm(GetSType(DataType::UInt(32)), static_cast<uint32_t>(use));
+        ib_.Begin(spv::OpTypeCooperativeMatrixKHR)
+            .AddSeq(t, base_type, scope, v_row, v_col, c_use)
+            .Commit(&global_);
+      }
     }
     return t;
   }

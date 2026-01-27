@@ -51,6 +51,7 @@ from .op import tvm_tuple, handle_add_byte_offset, tvm_struct_get, tvm_struct_se
 from .op import address_of, lookup_param, assume, undef
 from .op import continue_loop, break_loop
 from .op import (
+    tvm_construct_coopmat_qcom,
     tvm_thread_allreduce,
     type_annotation,
     tvm_access_ptr,

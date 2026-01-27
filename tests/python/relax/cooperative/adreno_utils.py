@@ -14,23 +14,17 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-# ruff: noqa: F401
 
 import os
-
-import numpy as np
 import tvm
-import tempfile
-
-import tvm.testing
+import numpy as np
 from tvm import relax
-from tvm.contrib import dlpack as dl
-from tvm.contrib import ndk, utils
+from tvm.contrib import utils, ndk
+from tvm.script.parser import ir as I, relax as R, tir as T
 from tvm.relax.transform.legalize_ops import adreno as legalize_adreno
+from tvm.contrib import dlpack as dl
+import tvm.testing
 from tvm.rpc import connect_tracker
-from tvm.script.parser import ir as I
-from tvm.script.parser import relax as R
-from tvm.script.parser import tir as T
 
 
 def get_target(backend, is_adreno=False, options=None):
@@ -42,13 +36,10 @@ def get_target(backend, is_adreno=False, options=None):
     tvm.target.Target
         The target for the Adreno GPU.
     """
-    _TAG_MAP = {
-        ("opencl", False): "qcom/adreno-opencl",
-        ("opencl", True): "qcom/adreno-opencl-texture",
-        ("vulkan", False): "qcom/adreno-vulkan",
-        ("vulkan", True): "qcom/adreno-vulkan-texture",
-    }
-    return tvm.target.Target(_TAG_MAP[(backend, is_adreno)])
+    target = tvm.target.adreno(options=options, backend=backend)
+    if is_adreno:
+        target = tvm.target.adreno(options=options, cfg="texture", backend=backend)
+    return target
 
 
 def get_rpc():
@@ -117,13 +108,14 @@ def run_cpu(mod, inputs, save_lib=False):
     return tvm_output
 
 
-def build_run(mod, inputs, backend, is_adreno=False):
-    is_rpc = is_target_rpc()
-    target = get_target(backend, is_adreno)
+def build_run(mod, inputs, backend, options=None, is_adreno=False):
+    remote = get_rpc()
+    target = get_target(backend, is_adreno, options)
     if remote is None:
         tgt = tvm.target.Target(target, host="llvm")
     else:
-        tgt = tvm.target.Target(target, host={"kind": "llvm", "mtriple": "aarch64-linux-gnu"})
+        tgt = tvm.target.Target(target, host="llvm -mtriple=aarch64-linux-gnu")
+
     relax_pipeline = relax.pipeline.get_default_pipeline(tgt)
     tir_pipeline = tvm.tir.get_default_tir_pipeline(tgt)
     mod = relax_pipeline(mod)
@@ -185,6 +177,7 @@ def build_run(mod, inputs, backend, is_adreno=False):
 
 
 def verify(mod, backend):
+
     if backend not in ["opencl", "vulkan"]:
         raise ValueError(f"Unsupported API: {backend}. Must be 'opencl' or 'vulkan'.")
 
@@ -193,8 +186,34 @@ def verify(mod, backend):
         shape = tuple(shape_val.value for shape_val in arg.struct_info.shape.values)
         inputs.append(np.random.uniform(0, 1, size=shape).astype(arg.struct_info.dtype))
 
-    ret1 = build_run(mod, inputs, backend, None, True)
+    ret1 = build_run(mod, inputs, backend, True)
     ret2 = build_run(mod, inputs, backend)
+
+    if isinstance(ret1, tuple):
+        for val1, val2 in zip(ret1, ret2):
+            tvm.testing.assert_allclose(val1, ret2, rtol=1e-3, atol=1e-3)
+    else:
+        tvm.testing.assert_allclose(ret1, ret2, rtol=1e-3, atol=1e-3)
+
+
+def verify_results(mod):
+
+    inputs = []
+    for arg in mod["main"].params:
+        shape = tuple(shape_val.value for shape_val in arg.struct_info.shape.values)
+        inputs.append(np.random.uniform(0, 1, size=shape).astype(arg.struct_info.dtype))
+
+    ret1 = build_run(mod, inputs, "opencl")
+    ret2 = build_run(
+        mod,
+        inputs,
+        "vulkan",
+        options=[
+            "-supports_float16=1",
+            "-supports_16bit_buffer=1",
+            "-supports_khr_cooperative_matrix=1",
+        ],
+    )
 
     if isinstance(ret1, tuple):
         for val1, val2 in zip(ret1, ret2):

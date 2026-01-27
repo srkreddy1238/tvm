@@ -435,12 +435,21 @@ spirv::Value CodeGenSPIRV::VisitExpr_(const CallNode* op) {
     spirv::Value dst_ptr =
         builder_->StructArrayAccess(dst_ptr_type, var_map_[buffer_node], MakeValue(dst_index));
     spirv::Value src_ptr = VisitExpr(op->args[5]);
-    spirv::SType type_bool = builder_->GetSType(DataType::Bool());
-    spirv::Value t_val = builder_->UIntImm(type_bool, 1);
-    spirv::Value f_val = builder_->UIntImm(type_bool, 0);
-    spirv::Value loaded =
-        builder_->MakeValue(spv::OpCooperativeMatrixLoadNV, fragment_type, src_ptr, stride_val,
-                            (layout != "row_major") ? t_val : f_val);
+    spirv::Value loaded;
+    if (spirv_support_.supports_nv_cooperative_matrix) {
+      spirv::SType type_bool = builder_->GetSType(DataType::UInt(1));
+      spirv::Value t_val = builder_->UIntImm(type_bool, 1);
+      spirv::Value f_val = builder_->UIntImm(type_bool, 0);
+      loaded = builder_->MakeValue(spv::OpCooperativeMatrixLoadNV, fragment_type, src_ptr,
+                                   stride_val, (layout != "row_major") ? t_val : f_val);
+    } else if (spirv_support_.supports_khr_cooperative_matrix) {
+      // Handle Memory Layout for KHR extension
+      spirv::Value memory_layout = builder_->UIntImm(
+          type_int, (layout == "row_major") ? 0 : 1);  // 0 for Row Major, 1 for Column Major
+      loaded = builder_->MakeValue(spv::OpCooperativeMatrixLoadKHR, fragment_type, src_ptr,
+                                   memory_layout,  // Explicit Memory Layout (New in KHR)
+                                   stride_val, spv::MemoryAccessMaskNone);
+    }
     builder_->MakeInst(spv::OpStore, dst_ptr, loaded, spv::MemoryAccessMaskNone);
     return spirv::Value();
   } else if (op->op.same_as(builtin::tvm_mma_sync())) {
@@ -476,8 +485,14 @@ spirv::Value CodeGenSPIRV::VisitExpr_(const CallNode* op) {
     spirv::Value loaded_a = builder_->MakeValue(spv::OpLoad, fragment_type_a, ptr_a, mask);
     spirv::Value loaded_b = builder_->MakeValue(spv::OpLoad, fragment_type_b, ptr_b, mask);
     spirv::Value loaded_c = builder_->MakeValue(spv::OpLoad, fragment_type_c, ptr_c, mask);
-    spirv::Value result = builder_->MakeValue(spv::OpCooperativeMatrixMulAddNV, fragment_type_d,
-                                              loaded_a, loaded_b, loaded_c);
+    spirv::Value result;
+    if (spirv_support_.supports_nv_cooperative_matrix) {
+      result = builder_->MakeValue(spv::OpCooperativeMatrixMulAddNV, fragment_type_d, loaded_a,
+                                   loaded_b, loaded_c);
+    } else if (spirv_support_.supports_khr_cooperative_matrix) {
+      result = builder_->MakeValue(spv::OpCooperativeMatrixMulAddKHR, fragment_type_d, loaded_a,
+                                   loaded_b, loaded_c);
+    }
     builder_->MakeInst(spv::OpStore, ptr_d, result, spv::MemoryAccessMaskNone);
     return spirv::Value();
   } else if (op->op.same_as(builtin::tvm_store_matrix_sync())) {
@@ -497,11 +512,18 @@ spirv::Value CodeGenSPIRV::VisitExpr_(const CallNode* op) {
         builder_->StructArrayAccess(ptr_type, var_map_[buffer_node], MakeValue(index));
     uint32_t mask = spv::MemoryAccessMaskNone;
     spirv::Value loaded = builder_->MakeValue(spv::OpLoad, fragment_type, ptr, mask);
-    spirv::SType type_bool = builder_->GetSType(DataType::Bool());
-    spirv::Value t_val = builder_->UIntImm(type_bool, 1);
-    spirv::Value f_val = builder_->UIntImm(type_bool, 0);
-    builder_->MakeInst(spv::OpCooperativeMatrixStoreNV, dst_ptr, loaded, stride_val,
-                       (layout != "row_major") ? t_val : f_val);
+    if (spirv_support_.supports_nv_cooperative_matrix) {
+      spirv::SType type_bool = builder_->GetSType(DataType::UInt(1));
+      spirv::Value t_val = builder_->UIntImm(type_bool, 1);
+      spirv::Value f_val = builder_->UIntImm(type_bool, 0);
+      builder_->MakeInst(spv::OpCooperativeMatrixStoreNV, dst_ptr, loaded, stride_val,
+                         (layout != "row_major") ? t_val : f_val);
+    } else if (spirv_support_.supports_khr_cooperative_matrix) {
+      // Handle Memory Layout for KHR extension: 0 for Row Major, 1 for Column Major
+      spirv::Value memory_layout = builder_->UIntImm(type_int, (layout == "row_major") ? 0 : 1);
+      builder_->MakeInst(spv::OpCooperativeMatrixStoreKHR, dst_ptr, loaded, memory_layout,
+                         stride_val, spv::MemoryAccessMaskNone);
+    }
     return spirv::Value();
   } else if (op->op.same_as(builtin::address_of())) {
     const BufferLoadNode* load = op->args[0].as<BufferLoadNode>();
@@ -908,10 +930,22 @@ void CodeGenSPIRV::VisitStmt_(const EvaluateNode* op) { MakeValue(op->value); }
 spirv::SType CodeGenSPIRV::GetFragmentSType(const VarNode* buffer, const DataType& dtype) {
   TVM_FFI_ICHECK(fragment_info_.count(buffer));
   const std::string& scope = fragment_info_[buffer].scope;
+
+  spv::CooperativeMatrixUse use;  // FOR KHR cooperative matrix
+  if (scope == "wmma.accumulator") {
+    use = spv::CooperativeMatrixUseMatrixAccumulatorKHR;  // 2
+  } else if (scope == "wmma.matrix_a") {
+    use = spv::CooperativeMatrixUseMatrixAKHR;  // 0
+  } else if (scope == "wmma.matrix_b") {
+    use = spv::CooperativeMatrixUseMatrixBKHR;  // 1
+  } else {
+    use = spv::CooperativeMatrixUseMax;
+  }
+
   const std::string& shape_str = fragment_info_.at(buffer).shape;
   std::pair<int32_t, int32_t> dim = GetWmmaFragmentDimSize(shape_str, scope);
   int64_t size = dim.first * dim.second;
-  spirv::SType stype = builder_->GetSType(dtype.with_lanes(size), dim.first, dim.second);
+  spirv::SType stype = builder_->GetSType(dtype.with_lanes(size), dim.first, dim.second, use);
   fragment_info_[buffer].stype = stype;
   return stype;
 }

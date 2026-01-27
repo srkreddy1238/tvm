@@ -289,7 +289,21 @@ struct SPIRVSupport {
    * attempting to perform cooperative matrix.
    */
 
-  bool supports_cooperative_matrix{false};
+  bool supports_nv_cooperative_matrix{false};
+
+  /*!
+   * \brief  Whether the driver KHR supports operations involving cooperative matrix.
+   *
+   * Vulkan extension: VK_KHR_cooperative_matrix
+   * SPV Extension name: SPV_KHR_cooperative_matrix
+   * SPV Capability: spv::CapabilityCooperativeMatrixKHR
+   *
+   * If support is present, can perform cooperative matrix operations. If
+   * support is not present, codegen will throw an exception on
+   * attempting to perform cooperative matrix operations.
+   */
+
+  bool supports_khr_cooperative_matrix{false};
 };
 
 }  // namespace codegen

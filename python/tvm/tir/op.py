@@ -794,6 +794,31 @@ def tvm_throw_last_error():
     return call_intrin("handle", "tir.tvm_throw_last_error")
 
 
+def tvm_construct_coopmat_qcom(fragment, m_dim, n_dim, k_dim, src_array, layout, total_bits):
+    """TVM intrinsic for cooperative matrix load operators from array
+
+    parameters
+    -----------
+    fragment : Var
+        The wmma fragment.
+
+    src_array : Array
+        The source array.
+
+    """
+    return call_intrin(
+        "handle",
+        "tir.tvm_construct_coopmat_qcom",
+        fragment,  # cooperative matrix buffer
+        m_dim,
+        n_dim,
+        k_dim,
+        src_array,  # regular array buffer
+        layout,
+        total_bits,
+    )
+
+
 def tvm_load_matrix_sync(fragment, m, n, k, index, buffer_ptr, stride, layout):
     """TVM intrinsic for tensor core load operators
 

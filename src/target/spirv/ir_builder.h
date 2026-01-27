@@ -444,7 +444,8 @@ class IRBuilder {
    * \param dtype The data type.
    * \return The corresponding spirv type.
    */
-  SType GetSType(const tvm::DataType& dtype, uint32_t row = 0, uint32_t col = 0);
+  SType GetSType(const tvm::DataType& dtype, uint32_t row = 0, uint32_t col = 0,
+                 spv::CooperativeMatrixUse use = spv::CooperativeMatrixUseMax);
   /*!
    * \brief Get the pointer type that points to value_type
    * \param value_type.
@@ -656,7 +657,8 @@ class IRBuilder {
   Value GetConst_(const SType& dtype, const uint64_t* pvalue);
 
   // declare type
-  SType DeclareType(const DataType& dtype, uint32_t row = 0, uint32_t col = 0);
+  SType DeclareType(const DataType& dtype, uint32_t row = 0, uint32_t col = 0,
+                    spv::CooperativeMatrixUse use = spv::CooperativeMatrixUseMax);
 
   // Declare the appropriate SPIR-V capabilities and extensions to use
   // this data type.

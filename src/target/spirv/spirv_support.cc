@@ -103,9 +103,15 @@ SPIRVSupport::SPIRVSupport(tvm::Target target) {
       }
     }
   }
-  // Check whether cooperative matrix is enabled in the target string.
-  if (target->GetAttr<Bool>("supports_cooperative_matrix")) {
-    supports_cooperative_matrix = target->GetAttr<Bool>("supports_cooperative_matrix").value();
+  // Check whether Nvidia cooperative matrix is enabled in the target string.
+  if (target->GetAttr<Bool>("supports_nv_cooperative_matrix")) {
+    supports_nv_cooperative_matrix =
+        target->GetAttr<Bool>("supports_nv_cooperative_matrix").value();
+  }
+  // Check whether KHR cooperative matrix is enabled in the target string.
+  if (target->GetAttr<Bool>("supports_khr_cooperative_matrix")) {
+    supports_khr_cooperative_matrix =
+        target->GetAttr<Bool>("supports_khr_cooperative_matrix").value();
   }
 }
 
