@@ -217,6 +217,6 @@ def verify_results(mod):
 
     if isinstance(ret1, tuple):
         for val1, val2 in zip(ret1, ret2):
-            tvm.testing.assert_allclose(val1, ret2, rtol=1e-3, atol=1e-3)
+            tvm.testing.assert_allclose(val1, val2, rtol=1e-3, atol=1e-3)
     else:
         tvm.testing.assert_allclose(ret1, ret2, rtol=1e-3, atol=1e-3)

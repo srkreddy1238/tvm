@@ -106,7 +106,7 @@ def validate_supported_shape(
     return None
 
 
-class CooperativeMatmul(AdrenoScheduleRule):
+class MatmulTensorization(AdrenoScheduleRule):
     """Schedule rule for Adreno cooperative matrix matmul using tensor intrinsics"""
 
     def apply(
@@ -152,7 +152,6 @@ class CooperativeMatmul(AdrenoScheduleRule):
         shapes, dtypes = extract_shapes_and_dtypes(func)
         valid_tile = validate_supported_shape(shapes, dtypes)
         if valid_tile is None:
-            print("Not a supported matmul shape. Skipping")
             return None
 
         M_tile, N_tile, K_tile = valid_tile

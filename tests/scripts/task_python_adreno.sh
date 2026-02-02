@@ -106,7 +106,7 @@ for node_id in $RELAX_TESTS; do
 done
 
 pytest tests/python/relax/texture/
-pytest tests/python/relax/cooperative/
+pytest tests/python/relax/backend/adreno/matmul/
 
 kill ${TRACKER_PID} || true
 kill ${DEVICE_PID} || true

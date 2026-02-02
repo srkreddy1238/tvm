@@ -91,7 +91,7 @@ def legalize_passes(target: tvm.target.Target):  # pylint: disable=unused-argume
     pass_list.extend(
         [
             dl.ApplyDefaultSchedule(
-                dl.adreno.CooperativeMatmul(),
+                dl.adreno.MatmulTensorization(),
                 dl.adreno.Conv2d(),
                 dl.adreno.LayoutTransform(),
                 dl.adreno.Pool2D(),
