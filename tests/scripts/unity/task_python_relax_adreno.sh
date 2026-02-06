@@ -32,4 +32,4 @@ export TVM_NUM_THREADS=2
 #cd python; python3 setup.py build_ext --inplace; cd ..
 
 # Test for OpenCLML
-pytest tests/python/relax/backend/clml/
+pytest -k "clml" tests/python/relax/backend/adreno/

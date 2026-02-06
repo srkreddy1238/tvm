@@ -19,52 +19,51 @@ import tvm.testing
 
 from tvm import te, tir
 
+target = "opencl -device=adreno"
 
-@tvm.testing.requires_gpu
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl -device=adreno")
-def test_dp4a_codegen(target):
+
+@tvm.testing.requires_adreno_opencl(support_required="compile-only")
+def test_dp4a_codegen():
     from tvm.tir import tensor_intrin
 
     def reduction():
         n = 512
-        with tvm.target.Target(target):
-            A = te.placeholder((n, 4), "int8")
-            B = te.placeholder((n, 4), "int8")
-            j = te.reduce_axis((0, 4))
-            C = te.compute(
-                (n,),
-                lambda i: te.sum(
-                    tvm.te.multiply(tvm.tir.Cast("int32", A[i, j]), tvm.tir.Cast("int32", B[i, j])),
-                    axis=j,
-                ),
-                name="C",
-            )
+        A = te.placeholder((n, 4), "int8")
+        B = te.placeholder((n, 4), "int8")
+        j = te.reduce_axis((0, 4))
+        C = te.compute(
+            (n,),
+            lambda i: te.sum(
+                tvm.te.multiply(tvm.tir.Cast("int32", A[i, j]), tvm.tir.Cast("int32", B[i, j])),
+                axis=j,
+            ),
+            name="C",
+        )
 
-            func = te.create_prim_func([A, B, C])
-            sch = tvm.tir.Schedule(func)
-            blk = sch.get_block("C")
+        func = te.create_prim_func([A, B, C])
+        sch = tvm.tir.Schedule(func)
+        blk = sch.get_block("C")
 
-            (i, j) = sch.get_loops(sch.get_block("C"))
-            bx, tx = sch.split(i, [None, 256])
-            sch.bind(bx, "blockIdx.x")
-            sch.bind(tx, "threadIdx.x")
+        (i, j) = sch.get_loops(sch.get_block("C"))
+        bx, tx = sch.split(i, [None, 256])
+        sch.bind(bx, "blockIdx.x")
+        sch.bind(tx, "threadIdx.x")
 
-            A_local = sch.cache_read(blk, 0, "local")
-            B_local = sch.cache_read(blk, 1, "local")
-            C_local = sch.cache_write(blk, 0, "local")
-            sch.compute_at(A_local, tx)
-            sch.compute_at(B_local, tx)
-            sch.reverse_compute_at(C_local, tx)
+        A_local = sch.cache_read(blk, 0, "local")
+        B_local = sch.cache_read(blk, 1, "local")
+        C_local = sch.cache_write(blk, 0, "local")
+        sch.compute_at(A_local, tx)
+        sch.compute_at(B_local, tx)
+        sch.reverse_compute_at(C_local, tx)
 
-            init_blk = sch.decompose_reduction(blk, j)
-            sch.tensorize(j, tensor_intrin.adreno.ADRENO_DP4A_i8i8i32_INTRIN)
+        init_blk = sch.decompose_reduction(blk, j)
+        sch.tensorize(j, tensor_intrin.adreno.ADRENO_DP4A_i8i8i32_INTRIN)
 
-            ex = tvm.tir.build(sch.mod, target)
-            assembly = ex.imports[0].inspect_source()
+        ex = tvm.tir.build(sch.mod, target)
+        assembly = ex.imports[0].inspect_source()
 
-            pattern = "qcom_dot8_acc"
-            assert assembly.count(pattern)
+        pattern = "qcom_dot8_acc"
+        assert assembly.count(pattern)
 
     def matmul():
         M, N, K = 256, 256, 512

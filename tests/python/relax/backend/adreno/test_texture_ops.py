@@ -25,10 +25,11 @@ from tvm.relax.transform.legalize_ops import adreno as legalize_adreno
 from tvm.script.parser import ir as I
 from tvm.script.parser import relax as R
 from tvm.script.parser import tir as T
+from utils import verify_results
 
+TARGETS = ["opencl -device=adreno"]
 
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl")
+@tvm.testing.parametrize_targets(*TARGETS)
 def test_conv2d(target):
     @I.ir_module
     class Input:
@@ -41,11 +42,10 @@ def test_conv2d(target):
                 R.output(gv)
             return gv
 
-    verify(Input, target)
+    verify_results(Input, backend=target, cfg="texture", opts="", use_cpu=True)
 
 
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl")
+@tvm.testing.parametrize_targets(*TARGETS)
 def test_conv2d_relu(target):
     @I.ir_module
     class Input:
@@ -59,11 +59,10 @@ def test_conv2d_relu(target):
                 R.output(gv2)
             return gv2
 
-    verify(Input, target)
+    verify_results(Input, backend=target, cfg="texture", opts="", use_cpu=True)
 
 
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl")
+@tvm.testing.parametrize_targets(*TARGETS)
 def test_relu_conv2d_relu(target):
     @I.ir_module
     class Input:
@@ -78,11 +77,10 @@ def test_relu_conv2d_relu(target):
                 R.output(gv2)
             return gv2
 
-    verify(Input, target)
+    verify_results(Input, backend=target, cfg="texture", opts="", use_cpu=True)
 
 
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl")
+@tvm.testing.parametrize_targets(*TARGETS)
 def test_conv2d_relu_tanh(target):
     @I.ir_module
     class Input:
@@ -97,11 +95,10 @@ def test_conv2d_relu_tanh(target):
                 R.output(gv3)
             return gv3
 
-    verify(Input, target)
+    verify_results(Input, backend=target, cfg="texture", opts="", use_cpu=True)
 
 
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl")
+@tvm.testing.parametrize_targets(*TARGETS)
 def test_conv2d_add(target):
     @I.ir_module
     class Input:
@@ -117,11 +114,10 @@ def test_conv2d_add(target):
                 R.output(gv2)
             return gv2
 
-    verify(Input, target)
+    verify_results(Input, backend=target, cfg="texture", opts="", use_cpu=True)
 
 
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl")
+@tvm.testing.parametrize_targets(*TARGETS)
 def test_conv2d_sum(target):
     @I.ir_module
     class Input:
@@ -135,11 +131,10 @@ def test_conv2d_sum(target):
                 R.output(gv2)
             return gv2
 
-    verify(Input, target)
+    verify_results(Input, backend=target, cfg="texture", opts="", use_cpu=True)
 
 
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl")
+@tvm.testing.parametrize_targets(*TARGETS)
 def test_conv2d_sum_keepdims(target):
     @I.ir_module
     class Input:
@@ -153,11 +148,10 @@ def test_conv2d_sum_keepdims(target):
                 R.output(gv2)
             return gv2
 
-    verify(Input, target)
+    verify_results(Input, backend=target, cfg="texture", opts="", use_cpu=True)
 
 
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl")
+@tvm.testing.parametrize_targets(*TARGETS)
 def test_conv2d_sum_reduce(target):
     @I.ir_module
     class Input:
@@ -171,11 +165,10 @@ def test_conv2d_sum_reduce(target):
                 R.output(gv2)
             return gv2
 
-    verify(Input, target)
+    verify_results(Input, backend=target, cfg="texture", opts="", use_cpu=True)
 
 
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl")
+@tvm.testing.parametrize_targets(*TARGETS)
 def test_conv2d_transpose(target):
     @I.ir_module
     class Input:
@@ -189,11 +182,10 @@ def test_conv2d_transpose(target):
                 R.output(gv2)
             return gv2
 
-    verify(Input, target)
+    verify_results(Input, backend=target, cfg="texture", opts="", use_cpu=True)
 
 
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl")
+@tvm.testing.parametrize_targets(*TARGETS)
 def test_conv2d_expand_dims(target):
     @I.ir_module
     class Input:
@@ -207,11 +199,10 @@ def test_conv2d_expand_dims(target):
                 R.output(gv2)
             return gv2
 
-    verify(Input, target)
+    verify_results(Input, backend=target, cfg="texture", opts="", use_cpu=True)
 
 
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl")
+@tvm.testing.parametrize_targets(*TARGETS)
 def test_conv2d_squeeze(target):
     @I.ir_module
     class Input:
@@ -225,11 +216,10 @@ def test_conv2d_squeeze(target):
                 R.output(gv2)
             return gv2
 
-    verify(Input, target)
+    verify_results(Input, backend=target, cfg="texture", opts="", use_cpu=True)
 
 
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl")
+@tvm.testing.parametrize_targets(*TARGETS)
 def test_conv2d_strided_slice(target):
     @I.ir_module
     class Input:
@@ -245,11 +235,10 @@ def test_conv2d_strided_slice(target):
                 R.output(gv2)
             return gv2
 
-    verify(Input, target)
+    verify_results(Input, backend=target, cfg="texture", opts="", use_cpu=True)
 
 
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl")
+@tvm.testing.parametrize_targets(*TARGETS)
 def test_conv2d_relu_concat(target):
     @I.ir_module
     class Input:
@@ -264,11 +253,10 @@ def test_conv2d_relu_concat(target):
                 R.output(gv3)
             return gv3
 
-    verify(Input, target)
+    verify_results(Input, backend=target, cfg="texture", opts="", use_cpu=True)
 
 
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl")
+@tvm.testing.parametrize_targets(*TARGETS)
 def test_conv2d_relu_concat_split(target):
     @I.ir_module
     class Input:
@@ -284,11 +272,10 @@ def test_conv2d_relu_concat_split(target):
                 R.output(gv5)
             return gv5
 
-    verify(Input, target)
+    verify_results(Input, backend=target, cfg="texture", opts="", use_cpu=True)
 
 
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl")
+@tvm.testing.parametrize_targets(*TARGETS)
 def test_conv2d_relu_concat_split_transpose_concat(target):
     @I.ir_module
     class Input:
@@ -305,11 +292,10 @@ def test_conv2d_relu_concat_split_transpose_concat(target):
                 R.output(gv7)
             return gv7
 
-    verify(Input, target)
+    verify_results(Input, backend=target, cfg="texture", opts="", use_cpu=True)
 
 
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl")
+@tvm.testing.parametrize_targets(*TARGETS)
 def test_conv2d_maxpool2d(target):
     @I.ir_module
     class Input:
@@ -330,11 +316,10 @@ def test_conv2d_maxpool2d(target):
                 R.output(gv2)
             return gv2
 
-    verify(Input, target)
+    verify_results(Input, backend=target, cfg="texture", opts="", use_cpu=True)
 
 
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl")
+@tvm.testing.parametrize_targets(*TARGETS)
 def test_conv2d_avgpool2d(target):
     @I.ir_module
     class Input:
@@ -348,11 +333,10 @@ def test_conv2d_avgpool2d(target):
                 R.output(gv2)
             return gv2
 
-    verify(Input, target)
+    verify_results(Input, backend=target, cfg="texture", opts="", use_cpu=True)
 
 
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl")
+@tvm.testing.parametrize_targets(*TARGETS)
 def test_conv2d_softmax(target):
     @I.ir_module
     class Input:
@@ -366,11 +350,10 @@ def test_conv2d_softmax(target):
                 R.output(gv2)
             return gv2
 
-    verify(Input, target)
+    verify_results(Input, backend=target, cfg="texture", opts="", use_cpu=True)
 
 
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl")
+@tvm.testing.parametrize_targets(*TARGETS)
 def test_conv2d_layernorm(target):
     @I.ir_module
     class Input:
@@ -389,11 +372,10 @@ def test_conv2d_layernorm(target):
                 R.output(gv2)
             return gv2
 
-    verify(Input, target)
+    verify_results(Input, backend=target, cfg="texture", opts="", use_cpu=True)
 
 
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl")
+@tvm.testing.parametrize_targets(*TARGETS)
 def test_binary_broadcast(target):
     @I.ir_module
     class Input:
@@ -409,11 +391,10 @@ def test_binary_broadcast(target):
                 R.output(gv2)
             return gv2
 
-    verify(Input, target)
+    verify_results(Input, backend=target, cfg="texture", opts="", use_cpu=True)
 
 
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl")
+@tvm.testing.parametrize_targets(*TARGETS)
 def test_binary_ewise_scalar(target):
     @I.ir_module
     class Input:
@@ -427,11 +408,10 @@ def test_binary_ewise_scalar(target):
                 R.output(gv2)
             return gv2
 
-    verify(Input, target)
+    verify_results(Input, backend=target, cfg="texture", opts="", use_cpu=True)
 
 
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl")
+@tvm.testing.parametrize_targets(*TARGETS)
 def test_residual_block(target):
     """
     - some kind of residual block followed by convolution to have texture after residual block
@@ -475,11 +455,10 @@ def test_residual_block(target):
                 R.output(gv7)
             return gv7
 
-    verify(Input, target)
+    verify_results(Input, backend=target, cfg="texture", opts="", use_cpu=True)
 
 
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl")
+@tvm.testing.parametrize_targets(*TARGETS)
 def test_conv2d_conv2d_fallback_to_buffer_conv2d(target):
     """
         layout_transform (NCHW->NCHW4c)
@@ -516,11 +495,10 @@ def test_conv2d_conv2d_fallback_to_buffer_conv2d(target):
                 R.output(gv7)
             return gv7
 
-    verify(Input, "opencl")
+    verify(Input, *TARGETS)
 
 
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl")
+@tvm.testing.parametrize_targets(*TARGETS)
 def test_conv2d_conv2d_conv2d_concat(target):
     """
         layout_transform (NCHW->NCHW4c)
@@ -557,11 +535,10 @@ def test_conv2d_conv2d_conv2d_concat(target):
                 R.output(gv7)
             return gv7
 
-    verify(Input, "opencl")
+    verify(Input, *TARGETS)
 
 
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl")
+@tvm.testing.parametrize_targets(*TARGETS)
 def test_pooling_branching_texture_params(target):
     """
     Verification of the pooling and many branches having textures
@@ -611,11 +588,10 @@ def test_pooling_branching_texture_params(target):
                 R.output(gv9)
             return gv9
 
-    verify(Input, target)
+    verify_results(Input, backend=target, cfg="texture", opts="", use_cpu=True)
 
 
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl")
+@tvm.testing.parametrize_targets(*TARGETS)
 def test_injective_inputs1(target):
     """
                                      Input
@@ -660,11 +636,10 @@ def test_injective_inputs1(target):
                 R.output(gv)
             return gv
 
-    verify(Input, target)
+    verify_results(Input, backend=target, cfg="texture", opts="", use_cpu=True)
 
 
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl")
+@tvm.testing.parametrize_targets(*TARGETS)
 def test_injective_nwo_inputs2(target):
     """
                                      Input
@@ -711,7 +686,7 @@ def test_injective_nwo_inputs2(target):
                 R.output(gv)
             return gv
 
-    verify(Input, target)
+    verify_results(Input, backend=target, cfg="texture", opts="", use_cpu=True)
 
 
 if __name__ == "__main__":

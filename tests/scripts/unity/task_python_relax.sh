@@ -48,5 +48,5 @@ fi
 # Test for OpenCLML
 IS_CLML=`python3 -c 'import tvm; print(tvm.support.libinfo().get("USE_CLML", "OFF"))'`
 if [ ${IS_CLML} != "OFF" ] ; then
-    pytest tests/python/relax/backend/clml/
+    pytest -k "clml" tests/python/relax/backend/adreno/
 fi

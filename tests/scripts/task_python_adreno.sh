@@ -18,8 +18,7 @@
 
 set -euxo pipefail
 
-export TVM_TEST_TARGETS="opencl"
-export TVM_RELAX_TEXTURE_TARGETS="opencl -device=adreno"
+export TVM_TEST_TARGETS="opencl -device=adreno"
 
 source tests/scripts/setup-pytest-env.sh
 export LD_LIBRARY_PATH="build:${LD_LIBRARY_PATH:-}"
@@ -97,16 +96,7 @@ find . -type f -path "*.pyc" | xargs rm -f
 python3 -m pip install --target=python -v ./3rdparty/tvm-ffi/
 
 # Relax test
-RELAX_TESTS=$(./ci/scripts/jenkins/pytest_ids.py --folder tests/python/relax/backend/clml)
-i=0
-for node_id in $RELAX_TESTS; do
-    echo "$node_id"
-    CXX=${TVM_NDK_CC} pytest "$node_id" --reruns=0
-    i=$((i+1))
-done
-
-pytest tests/python/relax/texture/
-pytest tests/python/relax/backend/adreno/matmul/
+pytest tests/python/relax/backend/adreno
 
 kill ${TRACKER_PID} || true
 kill ${DEVICE_PID} || true

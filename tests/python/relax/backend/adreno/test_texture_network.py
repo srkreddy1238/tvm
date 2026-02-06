@@ -19,24 +19,28 @@
 import copy
 import json
 
-import numpy as np
+import copy
+import json
 import onnx
 import pytest
-from adreno_utils import verify
+import numpy as np
 
 import tvm
 import tvm.testing
+
 from tvm import relax
-from tvm.relax.frontend.onnx import from_onnx
-from tvm.relax.transform.legalize_ops import adreno as legalize_adreno
-from tvm.script import ir as I
 from tvm.script import relax as R
+from tvm.script import ir as I
 from tvm.script import tir as T
 from tvm.script.ir_builder import IRBuilder
 from tvm.script.ir_builder import relax as relax_builder
+from tvm.relax.frontend.onnx import from_onnx
+from tvm.relax.transform.legalize_ops import adreno as legalize_adreno
 
-@tvm.testing.requires_opencl
-@tvm.testing.parametrize_targets("opencl")
+from utils import verify_results
+
+TARGETS = ["opencl -device=adreno", "vulkan -device=adreno"]
+@tvm.testing.parametrize_targets(*TARGETS)
 def test_network_resnet(target):
     @I.ir_module
     class Resnet:
@@ -796,7 +800,7 @@ def test_network_resnet(target):
                 R.output(gv)
             return gv
 
-    verify(Resnet, target)
+    verify_results(Resnet, backend=target, cfg="texture", opts=None, use_cpu=True)
 
 
 if __name__ == "__main__":
