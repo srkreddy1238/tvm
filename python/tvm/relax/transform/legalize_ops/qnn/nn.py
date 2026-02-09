@@ -17,14 +17,10 @@
 # pylint: disable=invalid-name,unused-argument,unused-import
 """Default legalization function for quantized neural network operators."""
 import logging
-import math
-from typing import Optional
-
-from tvm import te, tir, topi
-
-from ...block_builder import BlockBuilder
-from ...expr import Call, Expr
-from .common import _call_topi_without_attr, register_legalize
+from tvm import tir, topi
+from ....block_builder import BlockBuilder
+from ....expr import Call, Expr
+from ..common import register_legalize
 
 
 @register_legalize("relax.qnn.conv2d")
@@ -54,7 +50,7 @@ def _qnn_conv2d(bb: BlockBuilder, call: Call) -> Expr:
             return call
 
     return bb.call_te(
-        topi.nn.qnn_conv2d,
+        topi.qnn.conv2d,
         data=call.args[0],
         weight=call.args[1],
         input_zero_point=call.args[2],

@@ -22,15 +22,13 @@
  * \brief The functions to make Relax neural network convolution operator calls.
  */
 
-#ifndef TVM_RELAX_OP_QNN_CONVOLUTION_H_
-#define TVM_RELAX_OP_QNN_CONVOLUTION_H_
-
-#include <tvm/relax/attrs/qnn.h>
+#ifndef TVM_RELAX_QNN_OP_NN_CONVOLUTION_H_
+#define TVM_RELAX_QNN_OP_NN_CONVOLUTION_H_
 
 #include <string>
 #include <utility>
-
-#include "../op_common.h"
+#include "tvm/relax/qnn/attrs.h"
+#include "../../../op/op_common.h"
 
 namespace tvm {
 namespace relax {
@@ -73,4 +71,4 @@ Expr conv2d(Expr data, Expr weight, Expr data_zero_point, Expr weight_zero_pt,
 }  // namespace relax
 }  // namespace tvm
 
-#endif  // TVM_RELAX_OP_QNN_CONVOLUTION_H_
+#endif  // TVM_RELAX_QNN_OP_NN_CONVOLUTION_H_

@@ -364,3 +364,8 @@ class SliceScatterAttrs(Attrs):
 @tvm_ffi.register_object("relax.attrs.OneHotAttrs")
 class OneHotAttrs(Attrs):
     """Attributes for one_hot operator"""
+
+
+@tvm_ffi.register_object("relax.qnn.attrs.BroadcastAttrs")
+class BroadcastAttrs(Attrs):
+    """Attributes for broadcast operators"""

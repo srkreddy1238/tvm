@@ -130,7 +130,7 @@ def get_qnn_impl(
     bb = relax.BlockBuilder()
     with bb.function("main", [data, weight]):
         with bb.dataflow():
-            out = relax.op.qnn.conv2d(
+            out = relax.qnn.op.conv2d(
                 data,
                 weight,
                 data_zero_point,

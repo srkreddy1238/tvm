@@ -76,7 +76,7 @@ Expr conv2d(Expr data, Expr weight, Expr input_zero_pt, Expr weight_zero_pt,
 
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def("relax.op.qnn.conv2d", conv2d);
+  refl::GlobalDef().def("relax.qnn.op.conv2d", conv2d);
 }
 
 StructInfo InferStructInfoQnnConv2d(const Call& call, const BlockBuilder& ctx) {
@@ -191,7 +191,6 @@ InferLayoutOutput InferLayoutQnnConv2d(
     const VarLayoutMap& var_layout_map) {
   const auto& it = desired_layouts.find("relax.qnn.conv2d_part");
   const auto* attrs = call->attrs.as<Conv2DAttrs>();
-  std::cout << "I'm Trying to convert Layout" << std::endl;
   ICHECK(attrs) << "Invalid Call";
 
   LayoutDecision data_layout, weight_layout, output_layout;

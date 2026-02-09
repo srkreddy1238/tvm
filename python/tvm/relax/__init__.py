@@ -117,6 +117,7 @@ from . import training
 from . import distributed
 from . import frontend
 from . import utils
+from . import qnn
 
 # VM
 from .vm_build import build, VMExecutable

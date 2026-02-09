@@ -14,7 +14,7 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-"""Neural network related operators."""
-from .qnn import (
-    conv2d,
-)
+"""Constructor APIs"""
+import tvm_ffi
+
+tvm_ffi.init_ffi_api("relax.qnn.op", __name__)

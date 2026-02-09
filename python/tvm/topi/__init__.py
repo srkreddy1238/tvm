@@ -54,6 +54,7 @@ from . import utils
 from . import image
 from . import vision
 from . import gpu
+from . import qnn
 
 # error reporting
 from .utils import InvalidShapeError

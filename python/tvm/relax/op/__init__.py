@@ -19,7 +19,7 @@
 """Relax core operators."""
 
 # Register operator gradient functions
-from . import _op_gradient, builtin, ccl, distributed, grad, image, memory, nn, qnn, op_attrs
+from . import _op_gradient, builtin, ccl, distributed, grad, image, memory, nn, op_attrs
 
 # Operators
 from .base import (

@@ -18,12 +18,36 @@
  */
 
 /*!
- * \file tvm/relax/attrs/qnn.h
- * \brief Attributes for neural network operators.
+ * \file binary.h
+ * \brief The functions to infer struct info for QNN binary operators
  */
-#ifndef TVM_RELAX_ATTRS_QNN_H_
-#define TVM_RELAX_ATTRS_QNN_H_
 
-#include <tvm/relax/attrs/nn.h>
+#ifndef TVM_RELAX_QNN_OP_TENSOR_BINARY_H_
+#define TVM_RELAX_QNN_OP_TENSOR_BINARY_H_
 
-#endif  // TVM_RELAX_ATTRS_QNN_H_
+#include <string>
+#include <utility>
+
+
+#include "../../../op/op_common.h"
+
+
+namespace tvm {
+namespace relax {
+namespace qnn {
+
+/*
+ * \brief Number of inputs for the QNN binary operator.
+ */
+static constexpr int kNumQnnBinaryOpInputs = 8;
+
+
+
+// Struct info inference functions
+StructInfo InferStructInfoQnnBinaryArith(const Call& call, const BlockBuilder& ctx);
+
+}  // namespace qnn
+}  // namespace relax
+}  // namespace tvm
+
+#endif  // TVM_RELAX_QNN_OP_TENSOR_BINARY_H_
