@@ -114,6 +114,7 @@ jobs:
            New-Item -ItemType Directory -Force -Path "./build"
            cd build
            cp ../cmake/config.cmake .
+           Add-Content config.cmake "set(USE_VULKAN ON)"
            Add-Content config.cmake "set(USE_OPENCL $ENV:OPENCL_SDK_ADRENO_X86)"
            Add-Content config.cmake "set(USE_LLVM $ENV:LLVM_CONFIG)"
            Add-Content config.cmake "set(USE_CLML $ENV:OPENCL_SDK_ADRENO_X86)"
@@ -136,6 +137,7 @@ jobs:
            New-Item -ItemType Directory -Force -Path "./build-arm64"
            cd build-arm64
            cp ../cmake/config.cmake .
+           Add-Content config.cmake "set(USE_VULKAN $ENV:VULKAN_SDK_ARM64)"
            Add-Content config.cmake "set(USE_OPENCL $ENV:OPENCL_SDK_ADRENO_ARM64)"
            Add-Content config.cmake "set(USE_CLML $ENV:OPENCL_SDK_ADRENO_ARM64)"
            Add-Content config.cmake "set(USE_RPC ON)"

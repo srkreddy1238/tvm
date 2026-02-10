@@ -104,6 +104,8 @@ class VulkanModuleNode final : public ffi::ModuleObj {
   ffi::Bytes SaveToBytes() const final;
   ffi::String InspectSource(const ffi::String& format) const final;
 
+  bool PreCompiledVulkanPipeline();
+
  private:
   // function information table.
   std::unordered_map<std::string, SPIRVShader> smap_;

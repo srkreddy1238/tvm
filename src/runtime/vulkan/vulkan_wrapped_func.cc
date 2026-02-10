@@ -209,6 +209,11 @@ VulkanModuleNode::~VulkanModuleNode() {
 ffi::Optional<ffi::Function> VulkanModuleNode::GetFunction(const ffi::String& name) {
   ObjectPtr<Object> sptr_to_self = ffi::GetObjectPtr<Object>(this);
   TVM_FFI_ICHECK_EQ(sptr_to_self.get(), this);
+  if (name == "precompiled_vulkan_pipeline") {
+    return ffi::Function([sptr_to_self, this](ffi::PackedArgs args, ffi::Any* rv) {
+      *rv = this->PreCompiledVulkanPipeline();
+    });
+  }
   auto opt_info = fmap_.Get(name);
   if (!opt_info.has_value()) return std::nullopt;
   FunctionInfo info = opt_info.value();
@@ -219,10 +224,26 @@ ffi::Optional<ffi::Function> VulkanModuleNode::GetFunction(const ffi::String& na
   return PackFuncNonBufferArg(std::move(f), info->arg_types);
 }
 
+bool VulkanModuleNode::PreCompiledVulkanPipeline() {
+  int device_id = VulkanDeviceAPI::Global()->GetActiveDeviceID();
+  for (const auto& pair : smap_) {
+    const std::string func_name = pair.first;
+    auto it = fmap_.find(func_name);
+    if (it == fmap_.end()) return false;
+    const FunctionInfo& info = it->second;
+    VulkanWrappedFunc f;
+    size_t num_buffer_args = NumBufferArgs(info.arg_types);
+    auto pe = this->GetPipeline(device_id, func_name, info.arg_types.size() - num_buffer_args);
+    ICHECK(pe);
+  }
+  return true;
+}
+
 std::shared_ptr<VulkanPipeline> VulkanModuleNode::GetPipeline(size_t device_id,
                                                               const std::string& func_name,
                                                               size_t num_pack_args) {
   auto& device = VulkanDeviceAPI::Global()->device(device_id);
+
   std::lock_guard<std::mutex> lock(mutex_);
   const auto& cp = ecache_[device_id][func_name];
   if (cp) {
@@ -230,6 +251,7 @@ std::shared_ptr<VulkanPipeline> VulkanModuleNode::GetPipeline(size_t device_id,
   }
   // Create new pipeline
   auto pe = std::make_shared<VulkanPipeline>();
+  pe->device = &device;
   {
     // create shader
     auto sit = smap_.find(func_name);
@@ -244,6 +266,7 @@ std::shared_ptr<VulkanPipeline> VulkanModuleNode::GetPipeline(size_t device_id,
     shader_cinfo.pCode = data.data();
     VULKAN_CALL(vkCreateShaderModule(device, &shader_cinfo, nullptr, &(pe->shader)));
   }
+
   std::vector<VkDescriptorSetLayoutBinding> arg_binding;
   std::vector<VkDescriptorUpdateTemplateEntryKHR> arg_template;
   std::vector<VkDescriptorPoolSize> descriptor_set_pool_sizes;
@@ -305,7 +328,6 @@ std::shared_ptr<VulkanPipeline> VulkanModuleNode::GetPipeline(size_t device_id,
     push_arg_info(num_buffer, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
     device.AllocateThreadLocalUniformBuffer(nbytes_scalars);
   }
-
   {
     VkDescriptorSetLayoutCreateInfo descrip_cinfo;
     descrip_cinfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -319,7 +341,6 @@ std::shared_ptr<VulkanPipeline> VulkanModuleNode::GetPipeline(size_t device_id,
     VULKAN_CALL(
         vkCreateDescriptorSetLayout(device, &descrip_cinfo, nullptr, &(pe->descriptor_set_layout)));
   }
-
   if (!device.UseImmediate()) {
     VkDescriptorPoolCreateInfo descrip_pool_cinfo;
     descrip_pool_cinfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -339,7 +360,6 @@ std::shared_ptr<VulkanPipeline> VulkanModuleNode::GetPipeline(size_t device_id,
     alloc_info.pSetLayouts = &(pe->descriptor_set_layout);
     VULKAN_CALL(vkAllocateDescriptorSets(device, &alloc_info, &(pe->descriptor_set)));
   }
-
   VkPushConstantRange crange;
   crange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
   crange.offset = 0;
@@ -366,7 +386,6 @@ std::shared_ptr<VulkanPipeline> VulkanModuleNode::GetPipeline(size_t device_id,
     playout_cinfo.pushConstantRangeCount = 0;
     playout_cinfo.pPushConstantRanges = nullptr;
   }
-
   VULKAN_CALL(vkCreatePipelineLayout(device, &playout_cinfo, nullptr, &(pe->pipeline_layout)));
 
   VkComputePipelineCreateInfo pipeline_cinfo;
@@ -385,7 +404,6 @@ std::shared_ptr<VulkanPipeline> VulkanModuleNode::GetPipeline(size_t device_id,
   pipeline_cinfo.basePipelineIndex = 0;
   VULKAN_CALL(vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipeline_cinfo, nullptr,
                                        &(pe->pipeline)));
-
   if (device.UseImmediate()) {
     VkDescriptorUpdateTemplateCreateInfoKHR descrip_template_cinfo;
     descrip_template_cinfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_UPDATE_TEMPLATE_CREATE_INFO_KHR;

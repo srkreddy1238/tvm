@@ -942,23 +942,6 @@ class Matmul(GPUScheduleRule):
                 storage_align=True,
                 inner_x=False,
             )
-        elif target.kind.name == "opencl" and (
-            ("android" in str(target.host)) or ("adreno" in str(target.attrs))
-        ):
-            return Matmul.Config(
-                block_size_x=32,
-                block_size_y=4,
-                vthread_x=1,
-                vthread_y=1,
-                micro_size_x=8,
-                micro_size_y=2,
-                micro_size_k=16,
-                vector_size=8,
-                unroll=16,
-                use_shared=False,
-                storage_align=False,
-                inner_x=True,
-            )
         else:
             return Matmul.Config()
 
@@ -993,10 +976,10 @@ class Matmul(GPUScheduleRule):
             return {it.var: it.kind for it in iter_infos}.get(end_it, "O") == "R"
 
         if (
-            target.kind.name == "opencl"
-            and (("android" in str(target.host)) or ("adreno" in str(target.attrs)))
+            ((target.kind.name == "opencl") or (target.kind.name == "vulkan"))
+            and (("android" in str(target.host)) or ("adreno" in str(target.device_name)))
         ) and not is_inner_reduction(block_stmt, iter_infos):
-            ret = self.sch_outer_reduction(sch, config, main_block, blocks)
+            ret = self.sch_outer_reduction(sch, main_block, blocks, target)
             if ret is not None:
                 return ret
 
@@ -1133,6 +1116,17 @@ class Matmul(GPUScheduleRule):
     ) -> s_tir.Schedule | None:
         """Get vectorization factor"""
 
+        if target.kind.name == "opencl":
+            block_size_x = 32
+            block_size_y = 4
+            vector_size = 8
+            unroll = 16
+        elif target.kind.name == "vulkan":
+            block_size_x = 32
+            block_size_y = 4
+            vector_size = 4
+            unroll = 4
+
         def get_max_factor(n, factors):
             factors = sorted(factors, reverse=True)
             for factor in factors:
@@ -1153,10 +1147,10 @@ class Matmul(GPUScheduleRule):
             return None
 
         Threads_X, Threads_Y, VecSize, Unroll_M = (
-            config.block_size_x,
-            config.block_size_y,
-            config.vector_size,
-            config.unroll,
+            block_size_x,
+            block_size_y,
+            vector_size,
+            unroll,
         )
 
         VecSize = min(get_max_factor(sch.get(n).extent // Threads_X, [1, 2, 4, 8]), VecSize)

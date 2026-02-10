@@ -1104,10 +1104,11 @@ def _get_prefill_kernel_config(h_kv, h_q, d, dtype, target: Target):
         tile_z = 8
         num_warps = 2
 
-    if target.kind.name == "opencl" and (
-        ("android" in str(target.host)) or ("adreno" in str(target.attrs))
+    if ((target.kind.name == "opencl") or (target.kind.name == "vulkan")) and (
+        ("android" in str(target.host)) or ("adreno" in str(target.device_name))
     ):
-        LOAD_VEC = 16 // ((DataType(dtype).bits + 7) // 8)  # 16 bytes
+        if target.kind.name == "opencl":
+            LOAD_VEC = 16 // ((DataType(dtype).bits + 7) // 8)  # 16 bytes
         NUM_BLKS = group_size * 8
         tile_x = 32
         tile_z = 4
@@ -1701,8 +1702,8 @@ def _attention_decode(
 
     THREAD_LIMIT = 512
     TILE_SIZE_PER_BDX = 2
-    if target.kind.name == "opencl" and (
-        ("android" in str(target.host)) or ("adreno" in str(target.attrs))
+    if ((target.kind.name == "opencl") or (target.kind.name == "vulkan")) and (
+        ("android" in str(target.host)) or ("adreno" in str(target.device_name))
     ):
         # Keeping lower thread limit for this kernel on adreno target
         # to avoid register spill

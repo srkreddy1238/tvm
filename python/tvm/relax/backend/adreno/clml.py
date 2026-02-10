@@ -702,7 +702,7 @@ class OpenCLMLOffLoadForLLM:
     ) -> IRModule:
         """Apply required passed to transform"""
 
-        if "adreno" in str(self.target.attrs) and (clml_sdk_version() >= 5):
+        if "adreno" in str(self.target.device_name) and (clml_sdk_version() >= 5):
             mod = tvm.transform.Sequential(
                 [
                     transform.Normalize(),

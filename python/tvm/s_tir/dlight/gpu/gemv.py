@@ -358,10 +358,19 @@ class GEMV(GPUScheduleRule):
             else:
                 TS, TR = 1, 64
         elif target.kind.name == "opencl" and (
-            ("android" in str(target.host)) or ("adreno" in str(target.attrs))
+            ("android" in str(target.host)) or ("adreno" in str(target.device_name))
         ):
             TAG_S, TAG_R = "threadIdx.x", "threadIdx.y"
             VEC_C = 8
+            LOAD_V_SHARED = False
+            LOAD_V_VEC = -1
+            UNROLL = 8
+            TS, TR = 2, 32
+        elif target.kind.name == "vulkan" and (
+            ("android" in str(target.host)) or ("adreno" in str(target.device_name))
+        ):
+            TAG_S, TAG_R = "threadIdx.x", "threadIdx.y"
+            VEC_C = 4
             LOAD_V_SHARED = False
             LOAD_V_VEC = -1
             UNROLL = 8
@@ -568,10 +577,20 @@ class GEMV(GPUScheduleRule):
         SCALE_PACK = 4
 
         if target.kind.name == "opencl" and (
-            ("android" in str(target.host)) or ("adreno" in str(target.attrs))
+            ("android" in str(target.host)) or ("adreno" in str(target.device_name))
         ):
             TAG_S, TAG_R = "threadIdx.x", "threadIdx.y"
             VEC_C = 8
+            UNROLL = 8
+            TS, TR = 64, 4
+            LOAD_V_SHARED = False
+            LOAD_V_VEC = 4
+            LOAD_V_TILE = 8
+        elif target.kind.name == "vulkan" and (
+            ("android" in str(target.host)) or ("adreno" in str(target.device_name))
+        ):
+            TAG_S, TAG_R = "threadIdx.x", "threadIdx.y"
+            VEC_C = 4
             UNROLL = 8
             TS, TR = 64, 4
             LOAD_V_SHARED = False
@@ -640,8 +659,8 @@ class GEMV(GPUScheduleRule):
         """Schedule the outer reduction block."""
         # NOTE: Only Android is supported so far
         if not (
-            target.kind.name == "opencl"
-            and (("android" in str(target.host)) or ("adreno" in str(target.attrs)))
+            ((target.kind.name == "opencl") or (target.kind.name == "vulkan"))
+            and (("android" in str(target.host)) or ("adreno" in str(target.device_name)))
         ):
             return None
         batch, s, r, c = sch.get_loops(block)

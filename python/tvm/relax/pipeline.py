@@ -269,7 +269,9 @@ def library_dispatch_passes(target: tvm.target.Target):
         return backend.gpu_generic.library_dispatch_passes(target)
     if target.kind.name == "llvm":
         return backend.cpu_generic.library_dispatch_passes(target)
-    if target.kind.name == "opencl" and "adreno" in target.keys:
+    if (
+        (target.kind.name == "opencl") or (target.kind.name == "vulkan")
+    ) and "adreno" in target.device_name:
         return backend.adreno.library_dispatch_passes(target)
     if BackendDispatcher.is_gpu_target(target):
         return backend.gpu_generic.library_dispatch_passes(target)
@@ -286,7 +288,9 @@ def legalize_passes(target: tvm.target.Target):
         return backend.gpu_generic.legalize_passes(target)
     if target.kind.name == "llvm":
         return backend.cpu_generic.legalize_passes(target)
-    if target.kind.name == "opencl" and "adreno" in target.keys:
+    if (
+        (target.kind.name == "opencl") or (target.kind.name == "vulkan")
+    ) and "adreno" in target.device_name:
         return backend.adreno.legalize_passes(target)
     if BackendDispatcher.is_gpu_target(target):
         return backend.gpu_generic.legalize_passes(target)
@@ -303,7 +307,9 @@ def dataflow_lower_passes(target: tvm.target.Target):
         return backend.gpu_generic.dataflow_lower_passes(target)
     if target.kind.name == "llvm":
         return backend.cpu_generic.dataflow_lower_passes(target)
-    if target.kind.name == "opencl" and "adreno" in target.keys:
+    if (
+        (target.kind.name == "opencl") or (target.kind.name == "vulkan")
+    ) and "adreno" in target.device_name:
         return backend.adreno.dataflow_lower_passes(target)
     if BackendDispatcher.is_gpu_target(target):
         return backend.gpu_generic.dataflow_lower_passes(target)
@@ -320,7 +326,9 @@ def finalize_passes(target: tvm.target.Target):
         return backend.gpu_generic.finalize_passes(target)
     if target.kind.name == "llvm":
         return backend.cpu_generic.finalize_passes(target)
-    if target.kind.name == "opencl" and "adreno" in target.keys:
+    if (
+        (target.kind.name == "opencl") or (target.kind.name == "vulkan")
+    ) and "adreno" in target.device_name:
         return backend.adreno.finalize_passes(target)
     if BackendDispatcher.is_gpu_target(target):
         return backend.gpu_generic.finalize_passes(target)

@@ -139,7 +139,7 @@ class PartitionForAdrenoACCL:
     ) -> IRModule:
         """Apply required passed to transform"""
 
-        if "adreno" in str(self.target.attrs):
+        if "adreno" in str(self.target.device_name):
             mod = tvm.transform.Sequential(
                 [
                     transform.Normalize(),
