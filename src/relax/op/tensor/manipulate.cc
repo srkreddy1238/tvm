@@ -207,9 +207,11 @@ ffi::Optional<ffi::Array<PrimExpr>> CheckConcatOutputShape(
 }
 
 StructInfo InferStructInfoConcat(const Call& call, const BlockBuilder& ctx) {
-  if (call->args.size() != 1) {
-    ctx->ReportFatal(Diagnostic::Error(call) << "Concat op should have 1 argument");
+  if (call->args.size() != 1 && call->args.size() != 5) {
+    ctx->ReportFatal(Diagnostic::Error(call)
+        << "Concat op should have 1 argument or QNN Concat op should have 5 arguments.");
   }
+
   ffi::Array<TensorStructInfo> tensor_sinfo =
       GetTensorStructInfoFromTuple(call, ctx, call->args[0]);
   if (tensor_sinfo.empty()) {
@@ -218,6 +220,69 @@ StructInfo InferStructInfoConcat(const Call& call, const BlockBuilder& ctx) {
                         "given input Tuple is empty.");
   }
 
+  // If the op is QNN validate input zero point, scale and output zero point, scale.
+  if (call->args.size() == 5) {
+    // QNN constraints: input_scales/input_zero_points must be Tuple of scalars
+    const auto* input_scales_tuple = call->args[1].as<TupleNode>();
+    const auto* input_zps_tuple = call->args[2].as<TupleNode>();
+    if (!input_scales_tuple || !input_zps_tuple ||
+        input_scales_tuple->fields.size() != tensor_sinfo.size() ||
+        input_zps_tuple->fields.size() != tensor_sinfo.size()) {
+      ctx->ReportFatal(Diagnostic::Error(call)
+                       << "qnn.concatenate expects input_scales and input_zero_points tuples "
+                          "with the same length as input tensors");
+    }
+
+    // Check all scale/zp fields are scalars and have correct dtypes
+    for (size_t i = 0; i < tensor_sinfo.size(); ++i) {
+      Expr scale_expr = input_scales_tuple->fields[i];
+      Expr zp_expr = input_zps_tuple->fields[i];
+
+      if (!IsScalarTensor(scale_expr) || !IsScalarTensor(zp_expr)) {
+        ctx->ReportFatal(Diagnostic::Error(call)
+                         << "qnn.concatenate: each input_scale and input_zero_point must be a "
+                            "scalar. Failed at index "
+                         << i);
+      }
+
+      if (!IsFloatExpr(scale_expr)) {
+        ctx->ReportFatal(Diagnostic::Error(call)
+                         << "qnn.concatenate: input_scale at index " << i
+                         << " must be a floating-point tensor, but got dtype "
+                         << GetStructInfoAs<TensorStructInfoNode>(scale_expr)->dtype);
+      }
+
+      if (!IsIntExpr(zp_expr) && !IsUIntExpr(zp_expr)) {
+        ctx->ReportFatal(Diagnostic::Error(call)
+                         << "qnn.concatenate: input_zero_point at index " << i
+                         << " must be an integer tensor, but got dtype "
+                         << GetStructInfoAs<TensorStructInfoNode>(zp_expr)->dtype);
+      }
+    }
+
+    // Check output scale/zp (should be scalar as well, and correct dtypes)
+    Expr out_scale_expr = call->args[3];
+    Expr out_zp_expr = call->args[4];
+
+    if (!IsScalarTensor(out_scale_expr) || !IsScalarTensor(out_zp_expr)) {
+      ctx->ReportFatal(Diagnostic::Error(call)
+                       << "qnn.concatenate: output_scale and output_zero_point must be scalar.");
+    }
+
+    if (!IsFloatExpr(out_scale_expr)) {
+      ctx->ReportFatal(Diagnostic::Error(call)
+                       << "qnn.concatenate: output_scale must be a floating-point tensor, but got "
+                          "dtype "
+                       << GetStructInfoAs<TensorStructInfoNode>(out_scale_expr)->dtype);
+    }
+
+    if (!IsIntExpr(out_zp_expr) && !IsUIntExpr(out_zp_expr)) {
+      ctx->ReportFatal(Diagnostic::Error(call)
+                       << "qnn.concatenate: output_zero_point must be an integer tensor, but got "
+                          "dtype "
+                       << GetStructInfoAs<TensorStructInfoNode>(out_zp_expr)->dtype);
+    }
+  }
   const auto* attrs = call->attrs.as<ConcatAttrs>();
   int output_ndim = attrs->axis.has_value() ? kUnknownNDim : 1;
   DataType output_dtype = DataType::Void();

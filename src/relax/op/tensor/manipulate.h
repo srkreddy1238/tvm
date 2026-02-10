@@ -27,8 +27,11 @@
 #include <tvm/ffi/container/variant.h>
 #include <tvm/relax/attrs/manipulate.h>
 
+#include <vector>
+
 #include "../op_common.h"
 #include "tvm/relax/expr.h"
+#include "../../transform/utils.h"
 
 namespace tvm {
 namespace relax {
@@ -45,6 +48,16 @@ Expr broadcast_to(Expr x, Expr shape);
  * \return The concatenated tensor.
  */
 Expr concat(Expr tensors, ffi::Optional<int64_t> axis);
+
+ffi::Optional<ffi::Array<PrimExpr>> CheckConcatOutputShape(
+    const Call& call, const BlockBuilder& ctx,
+    const std::vector<ffi::Array<PrimExpr>>& shape_values, int axis);
+
+StructInfo InferStructInfoConcat(const Call& call, const BlockBuilder& ctx);
+
+InferLayoutOutput InferLayoutConcat(
+    const Call& call, const ffi::Map<ffi::String, ffi::Array<ffi::String>>& desired_layouts,
+    const VarLayoutMap& var_layout_map);
 
 /*!
  * \brief Insert new axes at the positions given by `axis`.

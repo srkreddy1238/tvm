@@ -24,6 +24,30 @@
 namespace tvm {
 namespace relax {
 
+bool IsFloatExpr(const Expr& expr) {
+  const auto* sinfo = GetStructInfoAs<TensorStructInfoNode>(expr);
+  if (sinfo == nullptr || sinfo->IsUnknownDtype()) {
+    return false;
+  }
+  return sinfo->dtype.is_float();
+}
+
+bool IsIntExpr(const Expr& expr) {
+  const auto* sinfo = GetStructInfoAs<TensorStructInfoNode>(expr);
+  if (sinfo == nullptr || sinfo->IsUnknownDtype()) {
+    return false;
+  }
+  return sinfo->dtype.is_int();
+}
+
+bool IsUIntExpr(const Expr& expr) {
+  const auto* sinfo = GetStructInfoAs<TensorStructInfoNode>(expr);
+  if (sinfo == nullptr || sinfo->IsUnknownDtype()) {
+    return false;
+  }
+  return sinfo->dtype.is_uint();
+}
+
 bool IsScalarTensor(const StructInfo& sinfo) {
   if (!sinfo->IsInstance<TensorStructInfoNode>()) {
     return false;

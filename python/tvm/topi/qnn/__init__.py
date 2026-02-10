@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+
 """ QNN Neural network topi operators. """
 
 # pylint: disable=wildcard-import
@@ -22,3 +23,4 @@
 from .binary import *
 from .utils import *
 from .nn import *
+from .mainpulate import *

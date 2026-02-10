@@ -145,6 +145,10 @@ IRModule MakeGroupedFunctions(
     IRModule mod, const std::unordered_map<const Object*, GraphPartitioner::Group*>& partition,
     bool lift_constants = true, const ffi::Array<ffi::String>& entry_function_names = {});
 
+bool IsFloatExpr(const Expr& expr);
+bool IsIntExpr(const Expr& expr);
+bool IsUIntExpr(const Expr& expr);
+
 /*!
  * \brief Check if the given StructInfo is a scalar tensor. The sinfo should be an instance of
  * TensorStructInfo; its shape must be ShapeExpr.

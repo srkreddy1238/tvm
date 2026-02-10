@@ -14,6 +14,7 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+
 # pylint: disable=invalid-name, unused-variable, too-many-locals
 # pylint: disable=unused-argument, redefined-
 """ QNN utility functions """
@@ -21,7 +22,20 @@ import math
 import struct
 from typing import Tuple, Union
 import tvm
-from tvm import te
+from tvm import te, tir, topi
+
+
+def is_scalar_tensor(t: te.Tensor) -> bool:
+    return len(t.shape) == 0
+
+
+def get_qnn_param(param, indices, axis):
+    # Account scalar and 1D quantization parameters:
+    if is_scalar_tensor(param):
+        return param
+
+    param_idx = tir.indexmod(indices[axis], topi.shape(param)[0])
+    return param[param_idx]
 
 
 def subtract_zero_point(

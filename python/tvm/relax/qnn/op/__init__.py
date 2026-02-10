@@ -17,3 +17,4 @@
 """Quantized Neural network related operators."""
 from .binary import *
 from .nn import *
+from .manipulate import *
