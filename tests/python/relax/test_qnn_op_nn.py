@@ -20,7 +20,7 @@ import tvm
 import tvm.testing
 
 from tvm import relax
-from tvm.relax import TensorStructInfo
+from tvm.relax import TensorStructInfo, ShapeExpr
 
 
 def get_ref_impl(
@@ -52,9 +52,17 @@ def get_ref_impl(
     assert (data_scale is None and weight_scale is None) or (
         not (data_scale is None) and not (weight_scale is None)
     ), "Both must be None or a Constant"
-    has_scale = not (data_scale is None)
+    has_scale = data_scale is not None
 
     if has_scale:
+        if isinstance(weight_scale, float):
+            scale_reshape = [1, 1, 1, 1]
+        else:
+            out_idx = tvm.tir.layout(out_layout).index_of("C")
+            scale_reshape = [1, 1, 1]
+            scale_reshape.insert(out_idx, weight_scale.shape[0])
+
+        scale_reshape = ShapeExpr(scale_reshape)
         data_scale, weight_scale = relax.const(data_scale, dtype=scale_dtype), relax.const(
             weight_scale, dtype=scale_dtype
         )
@@ -81,6 +89,7 @@ def get_ref_impl(
 
             if has_scale:
                 scale = bb.emit(relax.op.multiply(data_scale, weight_scale))
+                scale = bb.emit(relax.op.reshape(scale, scale_reshape))
                 conv = bb.emit(conv_op)
                 out = bb.emit_output(relax.op.multiply(conv, scale))
             else:
@@ -173,17 +182,27 @@ def run_cpu(ex, inputs):
     "weight_shape,weight_layout", [((32, 16, 3, 3), "OIHW"), ((32, 64, 3, 3), "OIHW")]
 )
 @pytest.mark.parametrize("has_scale", [True, False])
-def test_qnn_conv2d(data_shape, weight_shape, has_scale, data_layout, weight_layout):
+@pytest.mark.parametrize("is_weight_scalar", [True, False])
+def test_qnn_conv2d(
+    data_shape, weight_shape, has_scale, data_layout, weight_layout, is_weight_scalar
+):
     dtype, zp_dtype, scale_dtype = "int8", "int32", "float32"
     strides, padding, dilation = (2, 2), (2, 2, 2, 2), (2, 2)
     out_layout = "NCHW"
 
+    out_channel = int(
+        tvm.tir.bijective_layout(weight_layout, "OIHW").forward_shape(weight_shape)[0]
+    )
     data_zp, weight_zp = (
         np.random.randint(low=0, high=128, size=1)[0],
         np.random.randint(low=0, high=128, size=1)[0],
     )
     if has_scale:
-        data_scale, weight_scale = np.random.uniform(-255, 255), np.random.uniform(-255, 255)
+        data_scale = np.random.uniform(-255, 255)
+        if is_weight_scalar:
+            weight_scale = np.random.uniform(-255, 255)
+        else:
+            weight_scale = np.random.uniform(-255, 255, size=(out_channel,))
         out_dtype = scale_dtype
     else:
         data_scale, weight_scale = None, None
@@ -247,7 +266,7 @@ def test_qnn_conv2d(data_shape, weight_shape, has_scale, data_layout, weight_lay
 
     assert len(ref_outputs) == len(qnn_outputs)
     for ref, res in zip(ref_outputs, qnn_outputs):
-        np.testing.assert_allclose(ref, res)
+        np.testing.assert_allclose(ref, res, atol=0, rtol=1e-5)
 
 
 if __name__ == "__main__":

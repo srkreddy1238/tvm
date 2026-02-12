@@ -23,7 +23,7 @@ from tvm import te
 
 from tvm.topi.nn import conv
 from ..utils import get_const_tuple
-from .utils import subtract_zero_point
+from .utils import subtract_zero_point, is_scalar_tensor
 
 
 def conv2d(  # Conv2d inputs
@@ -63,14 +63,30 @@ def conv2d(  # Conv2d inputs
             f"Can't handle legalization for the given layouts {data_layout} and {kernel_layout}"
         )
 
-    # Handle Scales if supplied
-    if not (input_scale is None) and not (kernel_scale is None):
+    # Handle Scale if supplied
+    if input_scale is not None:
+        assert is_scalar_tensor(input_scale)
         out = te.compute(
             out.shape,
-            lambda *i: tvm.tir.multiply(
-                out(*i), tvm.tir.multiply(input_scale, kernel_scale)
-            ).astype(out_dtype),
-            name="scale",
+            lambda *indices: tvm.tir.multiply(out(*indices), input_scale).astype(out_dtype),
+            name="input_scale",
         )
+
+    if kernel_scale is not None:
+        if is_scalar_tensor(kernel_scale):
+            out = te.compute(
+                out.shape,
+                lambda *indices: tvm.tir.multiply(out(*indices), kernel_scale).astype(out_dtype),
+                name="kernel_scale",
+            )
+        else:
+            oc_idx = tvm.tir.layout(data_layout).index_of("C")
+            out = te.compute(
+                out.shape,
+                lambda *indices: tvm.tir.multiply(
+                    out(*indices), kernel_scale[indices[oc_idx]]
+                ).astype(out_dtype),
+                name="kernel_scale",
+            )
 
     return out

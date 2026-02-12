@@ -112,8 +112,9 @@ StructInfo InferStructInfoQnnConv2d(const Call& call, const BlockBuilder& ctx) {
   ffi::Optional<ShapeExpr> weight_shape =
       CheckNdimPerLayoutAndGetShape(call, ctx, weight_sinfo, weight_layout);
 
-  ICHECK(GetElementDType(data_sinfo) == GetElementDType(weight_sinfo))
-      << "Mismatch between Input and Weight DataType";
+  ICHECK(GetElementDType(data_sinfo) == GetElementDType(weight_sinfo) ||
+         !attrs->out_dtype.is_void())
+      << "Cannot Infer Output Datatype";
   ICHECK(GetElementDType(data_zero_pt_sinfo) == GetElementDType(weight_zero_pt_sinfo))
       << "Mismatch between Data Zero Point and Weight Zero Point DataType";
   ICHECK(data_zero_pt_sinfo.as<TensorStructInfoNode>()->ndim == 0)
@@ -124,14 +125,16 @@ StructInfo InferStructInfoQnnConv2d(const Call& call, const BlockBuilder& ctx) {
     ICHECK(GetElementDType(data_scale_sinfo.value()) == GetElementDType(weight_scale_sinfo.value()))
         << "Mismatch between Input and Weight DataType";
     ICHECK(data_scale_sinfo.as<TensorStructInfoNode>()->ndim == 0) << "Data Scale Must be a Scalar";
-    ICHECK(weight_scale_sinfo.as<TensorStructInfoNode>()->ndim == 0)
-        << "Weight Scale Point Must be a Scalar";
+    ICHECK(weight_scale_sinfo.as<TensorStructInfoNode>()->ndim == 0 ||
+           weight_scale_sinfo.as<TensorStructInfoNode>()->ndim == 1)
+        << "Weight Scale Point Must be a Scalar/1-D Tensor";
   }
 
   DataType out_dtype =
       attrs->out_dtype.is_void()
           ? GetElementDType((has_scale ? data_scale_sinfo.value() : data_sinfo)).value()
           : attrs->out_dtype;
+
   ffi::Optional<VDevice> vdevice =
       InferBinaryArithOpOutVDevice(call, ctx, data_sinfo, weight_sinfo);
   if (!data_shape.defined() || !weight_shape.defined()) {
@@ -144,6 +147,15 @@ StructInfo InferStructInfoQnnConv2d(const Call& call, const BlockBuilder& ctx) {
   arith::Analyzer* analyzer = ctx->GetAnalyzer();
   PrimExpr input_channel_data = data_NCHW_shape[1];
   PrimExpr input_channel_kernel = weight_OIHW_shape[1];
+  if (has_scale && weight_scale_sinfo.as<TensorStructInfoNode>()->ndim == 1) {
+    PrimExpr scale_axis = weight_scale_sinfo.as<TensorStructInfoNode>()->GetShape().value()[0];
+    PrimExpr weight_out_channel = weight_OIHW_shape[0];
+    if (!analyzer->CanProveEqual(weight_out_channel, scale_axis)) {
+      ctx->ReportFatal(Diagnostic::Error(call)
+                       << "Qnn Conv2d expects weight scale dim(" << scale_axis
+                       << ") to match the out channel dim(" << weight_out_channel << ")");
+    }
+  }
   if (analyzer->CanProve(input_channel_data != input_channel_kernel * attrs->groups)) {
     ctx->ReportFatal(
         Diagnostic::Error(call)
@@ -157,7 +169,7 @@ StructInfo InferStructInfoQnnConv2d(const Call& call, const BlockBuilder& ctx) {
   }
   if (analyzer->CanProve(floormod(weight_OIHW_shape[0], attrs->groups) != 0)) {
     ctx->ReportFatal(Diagnostic::Error(call)
-                     << "Conv2d expects the number of output channels to be divisible by the "
+                     << "Qnn Conv2d expects the number of output channels to be divisible by the "
                         "number of groups. However, the number of output channels is "
                      << weight_OIHW_shape[0] << " while the number of groups is " << attrs->groups);
   } else if (!analyzer->CanProveEqual(floormod(weight_OIHW_shape[0], attrs->groups), 0)) {
