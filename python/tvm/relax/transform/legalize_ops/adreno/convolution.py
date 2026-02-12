@@ -21,16 +21,22 @@ from tvm import relax, topi
 
 
 def conv2d_NCHWc_OIHWo(bb: relax.BlockBuilder, call: relax.Call) -> relax.Expr:
-    return bb.call_te(
-        topi.nn.conv2d_NCHWc_OIHWo,
-        data=call.args[0],
-        kernel=call.args[1],
-        stride=call.attrs.strides,
-        padding=call.attrs.padding,
-        dilation=call.attrs.dilation,
-        layout=call.attrs.data_layout,
-        out_layout=call.attrs.out_layout,
-        # out_dtype=call.attrs.out_dtype,
-        sinfo_args=call.sinfo_args,
-        primfunc_name_hint="conv2d_NCHWc_OIHWo",
-    )
+    if (
+        call.attrs.data_layout == "NCHW4c"
+        and call.attrs.kernel_layout == "OIHW4o"
+        and call.attrs.out_layout == "NCHW4c"
+    ):
+        return bb.call_te(
+            topi.nn.conv2d_NCHWc_OIHWo,
+            data=call.args[0],
+            kernel=call.args[1],
+            stride=call.attrs.strides,
+            padding=call.attrs.padding,
+            dilation=call.attrs.dilation,
+            layout=call.attrs.data_layout,
+            out_layout=call.attrs.out_layout,
+            out_dtype=str(call.struct_info.dtype),
+            sinfo_args=call.sinfo_args,
+            primfunc_name_hint="conv2d_NCHWc_OIHWo",
+        )
+    return call
