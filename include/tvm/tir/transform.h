@@ -773,6 +773,11 @@ TVM_DLL Pass DefaultGPUSchedule();
  */
 TVM_DLL Pass UseAssumeToReduceBranches();
 
+TVM_DLL Pass CanonicalizeLoop();
+TVM_DLL Pass AnnotateIrregularLoop();
+TVM_DLL Pass VerifyVTCMLimit(ffi::Optional<Target> target);
+TVM_DLL Pass VerifyMemory();
+
 }  // namespace transform
 }  // namespace tir
 }  // namespace tvm

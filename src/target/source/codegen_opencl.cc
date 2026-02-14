@@ -716,6 +716,9 @@ ffi::Module BuildOpenCL(IRModule mod, Target target) {
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef().def("target.build.opencl", BuildOpenCL);
+  refl::GlobalDef().def("target.build.opencl-clml", BuildOpenCL);
+  refl::GlobalDef().def("target.build.adreno-opencl", BuildOpenCL);
+  refl::GlobalDef().def("target.build.adreno-opencl-clml", BuildOpenCL);
 }
 
 ffi::String DeviceScopeCompatibilityFromTarget(Target target, ffi::String memory_scope) {

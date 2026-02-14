@@ -17,33 +17,34 @@
  * under the License.
  */
 
-/*!
- * \file build_vulkan.cc
- * \brief Build SPIRV block
- */
-
 #include <tvm/ffi/reflection/registry.h>
+#include <tvm/ir/expr.h>
+#include <tvm/ir/transform.h>
+#include <tvm/node/serialization.h>
+#include <tvm/relax/attrs/nn.h>
+#include <tvm/relax/attrs/op.h>
+#include <tvm/relax/dataflow_pattern.h>
+#include <tvm/relax/exec_builder.h>
+#include <tvm/relax/expr.h>
+#include <tvm/relax/op_attr_types.h>
+#include <tvm/runtime/module.h>
+#include <tvm/runtime/vm/executable.h>
+#include <tvm/runtime/vm/vm.h>
+#include <tvm/tir/function.h>
+#include <tvm/tir/index_map.h>
 
-#include "../../runtime/spirv/spirv_shader.h"
-#include "../../runtime/vulkan/vulkan_module.h"
-#include "../build_common.h"
-#include "spirv_utils.h"
+#include <chrono>
+#include <iostream>
+#include <limits>
+#include <string>
+#include <unordered_set>
 
 namespace tvm {
-namespace codegen {
+namespace driver {
 
-ffi::Module BuildSPIRV(IRModule mod, Target target) {
-  auto [smap, spirv_text] = LowerToSPIRV(mod, target);
-  return runtime::VulkanModuleCreate(smap, ExtractFuncInfo(mod), spirv_text);
-}
+ffi::Module Compile(IRModule mod, ffi::Any target,
+                    ffi::Optional<ffi::String> relax_pipeline = std::nullopt,
+                    ffi::Optional<ffi::String> tir_pipeline = std::nullopt);
 
-TVM_FFI_STATIC_INIT_BLOCK() {
-  namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def("target.build.vulkan",
-                        [](IRModule mod, Target target) { return BuildSPIRV(mod, target); });
-  refl::GlobalDef().def("target.build.adreno-vulkan",
-                        [](IRModule mod, Target target) { return BuildSPIRV(mod, target); });
-}
-
-}  // namespace codegen
+}  // namespace driver
 }  // namespace tvm

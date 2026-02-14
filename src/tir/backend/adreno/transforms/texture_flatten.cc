@@ -18,7 +18,7 @@
  */
 
 /*!
- * \file texture_flatten.cc
+ * \file src/tir/backend/adreno/transforms/texture_flatten.cc
  * \brief Flattens texture storage from multi-dimensional array
  * to 2D (width, height, depth) array access
  */
@@ -32,9 +32,9 @@
 
 #include <unordered_map>
 
-#include "../../../arith/ir_visitor_with_analyzer.h"
-#include "../../../runtime/texture.h"
-#include "../../../runtime/thread_storage_scope.h"
+#include "../../../../arith/ir_visitor_with_analyzer.h"
+#include "../../../../runtime/texture.h"
+#include "../../../../runtime/thread_storage_scope.h"
 
 namespace tvm {
 namespace tir {

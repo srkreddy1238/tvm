@@ -50,6 +50,11 @@ echo set\(USE_OPENCL_GTEST ON\) >> config.cmake
 
 echo set\(USE_OPENCL_EXTN_QCOM ON\) >> config.cmake
 
+if [ -f "${ADRENO_LLVM}/bin/llvm-config-native" ] ; then
+echo set\(USE_LLVM "${ADRENO_LLVM}/bin/llvm-config-native"\) >> config.cmake
+fi
+
+
 cmake -DANDROID_ABI=arm64-v8a \
       -DCMAKE_SYSTEM_NAME=Android \
       -DCMAKE_ANDROID_ARCH_ABI="arm64-v8a" \
@@ -62,5 +67,9 @@ cmake -DANDROID_ABI=arm64-v8a \
       -DCMAKE_CXX_COMPILER="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android28-clang++" \
       -DCMAKE_C_COMPILER="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android28-clang" \
       -DMACHINE_NAME="aarch64-linux-gnu" ..
+
+if [ -f "${ADRENO_LLVM}/bin/llvm-config-native" ] ; then
+  make -j$(nproc) tvm
+fi
 
 make -j$(nproc) tvm_rpc opencl-cpptest

@@ -247,9 +247,9 @@
 
 #include <tuple>
 
-#include "../../op/tensor/manipulate.h"
-#include "../../transform/infer_layout_utils.h"
-#include "../../transform/utils.h"
+#include "../../../op/tensor/manipulate.h"
+#include "../../../transform/infer_layout_utils.h"
+#include "../../../transform/utils.h"
 
 namespace tvm {
 namespace relax {

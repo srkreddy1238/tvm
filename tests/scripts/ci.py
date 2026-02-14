@@ -153,7 +153,7 @@ def docker(
     scripts: List[str],
     env: Dict[str, str],
     interactive: bool,
-    additional_flags: Optional[Dict[str, str]] = None,
+    additional_flags: Optional[List[Dict[str, str]]] = None,
 ):
     """
     Invoke a set of bash scripts through docker/bash.sh
@@ -176,7 +176,7 @@ def docker(
         "ci_arm",
         "ci_hexagon",
         "ci_riscv",
-        "ci_adreno",
+        "ci_adreno_v2",
     }
 
     if image in sccache_images and os.getenv("USE_SCCACHE", "1") == "1":
@@ -208,9 +208,10 @@ def docker(
         command.append(f"{key}={value}")
 
     if additional_flags is not None:
-        for key, value in additional_flags.items():
-            command.append(key)
-            command.append(value)
+        for flag in additional_flags:
+            for key, value in flag.items():
+                command.append(key)
+                command.append(value)
 
     SCRIPT_DIR.mkdir(exist_ok=True)
 
@@ -685,13 +686,16 @@ generated = [
         name="adreno",
         help="Run Adreno build and test(s)",
         post_build=["./tests/scripts/task_build_adreno_bins.sh"],
-        additional_flags={
-            "--volume": os.environ.get("ADRENO_OPENCL", "/tmp/") + ":/adreno-opencl",
-            "--net": "host",
-        },
+        additional_flags=[
+            {"--volume": os.environ.get("ADRENO_OPENCL", "/tmp/") + ":/adreno-opencl"},
+            {"--volume": os.environ.get("ADRENO_LLVM", "/tmp/") + ":/adreno-llvm"},
+            {"--net": "host"},
+        ],
+
         env={
             "ADRENO_OPENCL": "/adreno-opencl",
             "ADRENO_TARGET_CLML_VERSION": os.environ.get("ADRENO_TARGET_CLML_VERSION", "3"),
+            "ADRENO_LLVM": "/adreno-llvm",
         },
         options={
             "test": (

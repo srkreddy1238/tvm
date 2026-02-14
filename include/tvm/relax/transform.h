@@ -251,8 +251,8 @@ TVM_DLL Pass FoldConstant();
  * showing up in the database.
  * \return The Pass.
  */
-TVM_DLL Pass LegalizeOps(ffi::Optional<ffi::Map<ffi::String, ffi::Function>> cmap,
-                         ffi::Optional<ffi::Array<ffi::String>> skip_ops,
+TVM_DLL Pass LegalizeOps(ffi::Optional<ffi::Map<ffi::String, ffi::Function>> cmap = std::nullopt,
+                         ffi::Optional<ffi::Array<ffi::String>> skip_ops = std::nullopt,
                          bool enable_warning = false);
 
 /*!
@@ -691,6 +691,17 @@ TVM_DLL Pass FewShotTuning(int valid_count, bool benchmark);
  * This pass recreates the buffers and updates the map.
  */
 TVM_DLL Pass SpecializePrimFuncBasedOnCallSite();
+
+/*!
+ * \brief This pass calls all given dlight schedule handlers in the same order given.
+ */
+TVM_DLL Pass ApplyDlightSchedule(ffi::Array<ffi::String> dlight_rules);
+
+TVM_DLL Pass LowerAllocTensor();
+TVM_DLL Pass KillAfterLastUse();
+TVM_DLL Pass LowerRuntimeBuiltin();
+TVM_DLL Pass ComputePrimValue();
+TVM_DLL Pass VMShapeLower(bool emit_err_ctx = true);
 
 }  // namespace transform
 }  // namespace relax

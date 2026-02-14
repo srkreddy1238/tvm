@@ -18,7 +18,7 @@
  */
 
 /*!
- * \file inject_texture_alloc.cc
+ * \file src/tir/backend/adreno/transforms/inject_texture_alloc.cc
  */
 
 #include <tvm/arith/iter_affine_map.h>
@@ -26,9 +26,9 @@
 #include <tvm/tir/backend/adreno/transform.h>
 #include <tvm/tir/stmt_functor.h>
 
-#include "../../../arith/ir_mutator_with_analyzer.h"
-#include "../../../runtime/texture.h"
-#include "../../transforms/ir_utils.h"
+#include "../../../../arith/ir_mutator_with_analyzer.h"
+#include "../../../../runtime/texture.h"
+#include "../../../transforms/ir_utils.h"
 
 namespace tvm {
 namespace tir {

@@ -1,3 +1,4 @@
+
 /*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
@@ -16,34 +17,13 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-
-/*!
- * \file build_vulkan.cc
- * \brief Build SPIRV block
- */
-
+#include <tvm/dlight/dlight_rule.h>
 #include <tvm/ffi/reflection/registry.h>
 
-#include "../../runtime/spirv/spirv_shader.h"
-#include "../../runtime/vulkan/vulkan_module.h"
-#include "../build_common.h"
-#include "spirv_utils.h"
+#include "../analysis/common_analysis.h"
 
 namespace tvm {
-namespace codegen {
-
-ffi::Module BuildSPIRV(IRModule mod, Target target) {
-  auto [smap, spirv_text] = LowerToSPIRV(mod, target);
-  return runtime::VulkanModuleCreate(smap, ExtractFuncInfo(mod), spirv_text);
-}
-
-TVM_FFI_STATIC_INIT_BLOCK() {
-  namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def("target.build.vulkan",
-                        [](IRModule mod, Target target) { return BuildSPIRV(mod, target); });
-  refl::GlobalDef().def("target.build.adreno-vulkan",
-                        [](IRModule mod, Target target) { return BuildSPIRV(mod, target); });
-}
-
-}  // namespace codegen
+namespace dlight {
+void DlightTryInline(tir::Schedule& sch, ffi::Array<DlightSBlockInfo>& blk_info);
+}  // namespace dlight
 }  // namespace tvm

@@ -16,34 +16,25 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-
-/*!
- * \file build_vulkan.cc
- * \brief Build SPIRV block
- */
-
+#include <tvm/dlight/dlight_rule.h>
 #include <tvm/ffi/reflection/registry.h>
 
-#include "../../runtime/spirv/spirv_shader.h"
-#include "../../runtime/vulkan/vulkan_module.h"
-#include "../build_common.h"
-#include "spirv_utils.h"
-
 namespace tvm {
-namespace codegen {
+namespace dlight {
 
-ffi::Module BuildSPIRV(IRModule mod, Target target) {
-  auto [smap, spirv_text] = LowerToSPIRV(mod, target);
-  return runtime::VulkanModuleCreate(smap, ExtractFuncInfo(mod), spirv_text);
+int GetMaxThreadsPerBlock(const tvm::Target& target) {
+  auto attrs = target->attrs;
+  if (attrs.find("max_threads_per_block") != attrs.end()) {
+    return attrs["max_threads_per_block"].cast<int>();
+  }
+  if (attrs.find("max_num_threads") != attrs.end()) {
+    return attrs["max_num_threads"].cast<int>();
+  }
+  if (target->kind->name == "cuda") {
+    return 1024;
+  }
+  return 256;
 }
 
-TVM_FFI_STATIC_INIT_BLOCK() {
-  namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def("target.build.vulkan",
-                        [](IRModule mod, Target target) { return BuildSPIRV(mod, target); });
-  refl::GlobalDef().def("target.build.adreno-vulkan",
-                        [](IRModule mod, Target target) { return BuildSPIRV(mod, target); });
-}
-
-}  // namespace codegen
+}  // namespace dlight
 }  // namespace tvm
