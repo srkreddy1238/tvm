@@ -24,3 +24,4 @@ from .binary import *
 from .utils import *
 from .nn import *
 from .mainpulate import *
+from .requantize import *

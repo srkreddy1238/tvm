@@ -19,3 +19,4 @@ from . import binary
 from . import nn
 from . import utils
 from . import manipulate
+from . import requantize

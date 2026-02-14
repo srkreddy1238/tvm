@@ -18,3 +18,4 @@
 from .binary import *
 from .nn import *
 from .manipulate import *
+from .requantize import *

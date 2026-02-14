@@ -16,6 +16,7 @@
 # under the License.
 """Common functionality for legalization."""
 import logging
+from tvm import relax
 from ....expr import Call, Constant
 
 
@@ -68,3 +69,17 @@ def qnn_binary_ops_extract_params(call: Call, op_name: str):
             return None
 
     return (lhs, rhs, float(l_sc), int(l_zp), float(r_sc), int(r_zp), float(o_sc), int(o_zp))
+
+
+def get_values_from_expr(expr):
+    """Get the values from an relax expression."""
+
+    if isinstance(expr, relax.Constant):
+        sinfo = expr.struct_info
+        if sinfo.ndim > 0:
+            return expr.data.numpy().tolist()
+        return expr.data.numpy().item()
+    elif isinstance(expr, relax.Expr):
+        return [input.data.numpy().item() for input in expr]
+    else:
+        raise ValueError(f"Unsupported expression type: {type(expr)}")
