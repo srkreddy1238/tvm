@@ -16,12 +16,16 @@
 # under the License.
 # pylint: disable=invalid-name,missing-function-docstring,unused-variable,unused-import
 """Intrinsics for tensorization on Adreno GPU."""
-from typing import Dict, Literal, Optional, Tuple
+
+from typing import Dict, Literal, Optional, Tuple, Union
 
 from tvm.runtime import convert
 from tvm.script import tir as T
 from tvm.tir import Cast, IntImm, TensorIntrin
 from tvm.tir.function import PrimFunc
+from tvm import DataType
+
+########################### DP4A OP ########################################
 
 
 def get_dotprod_intrin(in_dtype, out_dtype):
@@ -56,8 +60,16 @@ def get_dotprod_intrin(in_dtype, out_dtype):
 
 
 ADRENO_DP4A_i8i8i32_INTRIN = "dp4a_i8i8i32_adreno"
-
 TensorIntrin.register(ADRENO_DP4A_i8i8i32_INTRIN, *get_dotprod_intrin("int8", "int32"))
+
+######################### MATRIX OPS #######################################
+
+SUPPORTED_PROFILES = {
+    ("float16", "float16", "float16"): (64, 64, 16),
+    ("float16", "float16", "float32"): (64, 64, 16),
+    ("float32", "float32", "float32"): (64, 64, 8),
+    ("int8", "int8", "int32"): (64, 64, 32),
+}
 
 
 def get_wmma_fragment_index(buffer, stride, m_dim, n_dim):
@@ -395,111 +407,80 @@ def get_wmma_sync_intrin(
     return wmma_sync_desc, wmma_sync_impl
 
 
-WMMA_STORE_64x64x16_F32_GLOBAL_INTRIN = "wmma_store_64x64x16_f32_global"
-TensorIntrin.register(
-    WMMA_STORE_64x64x16_F32_GLOBAL_INTRIN, *get_wmma_store_intrin(64, 64, 16, "float32", "global")
-)
+def get_wmma_qcom_intrin(
+    m_dim: int, n_dim: int, k_dim: int, dtype: str, is_b: bool, is_col_major: bool, is_load: bool
+) -> Tuple[PrimFunc, PrimFunc]:
+    """Generator of wmma_load intrins"""
+    wmma_fragment_scope = f"wmma.matrix_{'b' if is_b else 'a'}"
+    layout = "col_major" if is_col_major else "row_major"
+    if not is_load:
+        wmma_fragment_scope = "wmma.accumulator"
+    intrin_func = T.tvm_construct_coopmat_qcom if is_load else T.tvm_deconstruct_coopmat_qcom
 
-WMMA_SYNC_64x64x16_f16f16f32_INTRIN = "wmma_sync_64x64x16_f16f16f32"
-TensorIntrin.register(
-    WMMA_SYNC_64x64x16_f16f16f32_INTRIN,
-    *get_wmma_sync_intrin(64, 64, 16, "float16", "float32", False),
-)
+    if is_load:
+        frag_m, frag_n = (n_dim, k_dim) if is_b else (m_dim, k_dim)
+    else:
+        frag_m, frag_n = m_dim, n_dim
+    offset_factor = frag_n
+    bits = DataType(dtype).bits
 
-WMMA_LOAD_64x64x16_F16_A_INTRIN = "wmma_load_64x64x16_f16_a_shared"
-TensorIntrin.register(
-    WMMA_LOAD_64x64x16_F16_A_INTRIN,
-    *get_wmma_load_intrin(64, 64, 16, "float16", "shared", False, False),
-)
+    scope_a, scope_c = (
+        "local" if is_load else wmma_fragment_scope,
+        wmma_fragment_scope if is_load else "local",
+    )
 
-WMMA_LOAD_64x64x16_F16_B_INTRIN = "wmma_load_64x64x16_f16_b_shared"
-TensorIntrin.register(
-    WMMA_LOAD_64x64x16_F16_B_INTRIN,
-    *get_wmma_load_intrin(64, 64, 16, "float16", "shared", True, False),
-)
+    @T.prim_func
+    def wmma_load_desc(a: T.handle, c: T.handle) -> None:
+        A = T.match_buffer(a, (frag_n), dtype, offset_factor=offset_factor, scope=scope_a)
+        C = T.match_buffer(
+            c,
+            (frag_n),
+            dtype,
+            offset_factor=offset_factor,
+            scope=scope_c,
+        )
+        with T.block("root"):
+            T.reads(A[0:frag_n])
+            T.writes(C[0:frag_n])
+            for j in T.grid(frag_n):
+                with T.block("load"):
+                    vjj = T.axis.remap("S", [j])
+                    C[vjj] = A[vjj]
 
-WMMA_STORE_64x64x16_F16_GLOBAL_INTRIN = "wmma_store_64x64x16_f16_global"
-TensorIntrin.register(
-    WMMA_STORE_64x64x16_F16_GLOBAL_INTRIN, *get_wmma_store_intrin(64, 64, 16, "float16", "global")
-)
+    @T.prim_func
+    def wmma_load_impl(a: T.handle, c: T.handle) -> None:
+        s1 = T.int32()
+        s0 = T.int32()
+        d1 = T.int32()
+        d0 = T.int32()
+        A = T.match_buffer(
+            a,
+            (frag_n),
+            dtype,
+            offset_factor=offset_factor,
+            scope=scope_a,
+        )
+        C = T.match_buffer(
+            c,
+            (frag_n),
+            dtype,
+            offset_factor=offset_factor,
+            scope=scope_c,
+        )
+        with T.block("root"):
+            T.reads(A[0:frag_n])
+            T.writes(C[0:frag_n])
+            T.evaluate(
+                intrin_func(
+                    C.data if is_load else A.data,
+                    m_dim,
+                    n_dim,
+                    k_dim,
+                    A.data if is_load else C.data,
+                )
+            )
 
-WMMA_SYNC_64x64x16_f16f16f16_INTRIN = "wmma_sync_64x64x16_f16f16f16"
-TensorIntrin.register(
-    WMMA_SYNC_64x64x16_f16f16f16_INTRIN,
-    *get_wmma_sync_intrin(64, 64, 16, "float16", "float16", False),
-)
-
-WMMA_FILL_64x64x16_F16_INTRIN = "wmma_fill_64x64x16_f16"
-TensorIntrin.register(WMMA_FILL_64x64x16_F16_INTRIN, *get_wmma_fill_intrin(64, 64, 16, "float16"))
-
-WMMA_LOAD_64x64x16_F32_A_INTRIN = "wmma_load_64x64x16_f32_a_shared"
-TensorIntrin.register(
-    WMMA_LOAD_64x64x16_F32_A_INTRIN,
-    *get_wmma_load_intrin(64, 64, 16, "float32", "shared", False, False),
-)
-
-# ----------------------- [ fp32 ] ------------------------
-
-WMMA_LOAD_64x64x8_F32_A_INTRIN = "wmma_load_64x64x8_f32_a_shared"
-TensorIntrin.register(
-    WMMA_LOAD_64x64x8_F32_A_INTRIN,
-    *get_wmma_load_intrin(64, 64, 8, "float32", "shared", False, False),
-)
-
-WMMA_LOAD_64x64x8_F32_B_INTRIN = "wmma_load_64x64x8_f32_b_shared"
-TensorIntrin.register(
-    WMMA_LOAD_64x64x8_F32_B_INTRIN,
-    *get_wmma_load_intrin(64, 64, 8, "float32", "shared", True, False),
-)
-
-WMMA_FILL_64x64x8_F32_INTRIN = "wmma_fill_64x64x8_f32"
-TensorIntrin.register(WMMA_FILL_64x64x8_F32_INTRIN, *get_wmma_fill_intrin(64, 64, 8, "float32"))
-
-WMMA_STORE_64x64x8_F32_GLOBAL_INTRIN = "wmma_store_64x64x8_f32_global"
-TensorIntrin.register(
-    WMMA_STORE_64x64x8_F32_GLOBAL_INTRIN, *get_wmma_store_intrin(64, 64, 8, "float32", "global")
-)
-
-WMMA_SYNC_64x64x8_f32f32f32_INTRIN = "wmma_sync_64x64x8_f32f32f32"
-TensorIntrin.register(
-    WMMA_SYNC_64x64x8_f32f32f32_INTRIN,
-    *get_wmma_sync_intrin(64, 64, 8, "float32", "float32", False),
-)
-
-# --------------- [int8] ------------------------
-WMMA_LOAD_64x64x32_I8_A_INTRIN = "wmma_load_64x64x32_i8_a_shared"
-TensorIntrin.register(
-    WMMA_LOAD_64x64x32_I8_A_INTRIN,
-    *get_wmma_load_intrin(64, 64, 32, "int8", "shared", False, False),
-)
-
-WMMA_LOAD_64x64x32_I8_B_INTRIN = "wmma_load_64x64x32_i8_b_shared"
-TensorIntrin.register(
-    WMMA_LOAD_64x64x32_I8_B_INTRIN,
-    *get_wmma_load_intrin(64, 64, 32, "int8", "shared", True, False),
-)
-
-WMMA_FILL_64x64x32_I8_INTRIN = "wmma_fill_64x64x32_i8"
-TensorIntrin.register(WMMA_FILL_64x64x32_I8_INTRIN, *get_wmma_fill_intrin(64, 64, 32, "int8"))
-
-WMMA_STORE_64x64x32_I8_GLOBAL_INTRIN = "wmma_store_64x64x32_i8_global"
-TensorIntrin.register(
-    WMMA_STORE_64x64x32_I8_GLOBAL_INTRIN, *get_wmma_store_intrin(64, 64, 32, "int8", "global")
-)
-
-WMMA_SYNC_64x64x32_i8i8i8_INTRIN = "wmma_sync_64x64x32_i8i8i8"
-TensorIntrin.register(
-    WMMA_SYNC_64x64x32_i8i8i8_INTRIN,
-    *get_wmma_sync_intrin(64, 64, 32, "int8", "int8", False),
-)
-
-# Supported shape profiles
-SUPPORTED_PROFILES = {
-    ("float16", "float16", "float16"): (64, 64, 16),
-    ("float16", "float16", "float32"): (64, 64, 16),
-    ("float32", "float32", "float32"): (64, 64, 8),
-    ("int8", "int8", "int8"): (64, 64, 32),
-}
+    return wmma_load_desc, wmma_load_impl
 
 
 def get_shorthand_dtype(dtype: str) -> str:
@@ -520,36 +501,42 @@ def get_shorthand_dtype(dtype: str) -> str:
         return "f32"
     elif dtype == "int8":
         return "i8"
+    elif dtype == "int32":
+        return "i32"
     else:
         raise ValueError(f"Unsupported dtype: {dtype}")
 
 
+def get_wmma_tile_sizes(in_dtype: str, out_dtype: str) -> Union[Tuple[int, int, int], None]:
+    return SUPPORTED_PROFILES.get((in_dtype, in_dtype, out_dtype), None)
+
+
+SCOPE = Literal["local", "shared", "global"]
+
+
 def get_adreno_wmma_intrin_group(
-    load_scope: Literal["shared"],
-    store_scope: Literal["global"],
-    dtype: str,
-    out_dtype: Optional[str] = None,
-    trans_a: bool = False,
-    trans_b: bool = False,
-    m: int = 64,
-    n: int = 64,
-    k: int = 16,
+    m: int,
+    n: int,
+    k: int,
+    load_scope: Union[SCOPE, Tuple[SCOPE, SCOPE]],
+    store_scope: SCOPE,
+    trans_a: bool,
+    trans_b: bool,
+    dtype: Literal["int8", "float16", "float32"],
+    out_dtype: Literal["int32", "float16", "float32"],
 ) -> Dict[str, str]:
     """Get a group of WMMA intrinsics for tensorization on Adreno GPU.
 
     Parameters
     ----------
-    load_scope : Literal["shared"]
+    m, n, k : int
+        Dimensions for WMMA operation.
+
+    load_scope : Literal["local, "shared", "global"]
         The memory scope of the input buffers.
 
-    store_scope : Literal["global"]
+    store_scope : Literal["local", "shared", "global"]
         The memory scope of the result buffer.
-
-    dtype : str
-        The data type of the input matrices A and B.
-
-    out_dtype : Optional[str]
-        The data type of the output matrix C.
 
     trans_a : bool
         Whether matrix A is transposed.
@@ -557,40 +544,86 @@ def get_adreno_wmma_intrin_group(
     trans_b : bool
         Whether matrix B is transposed.
 
-    m, n, k : int
-        Dimensions for WMMA operation.
+    dtype : str
+        The data type of the input matrices A and B.
+
+    out_dtype : Optional[str]
+        The data type of the output matrix C.
 
     Returns
     -------
     ret : Dict[str, str]
         A group of WMMA tensor intrinsics.
     """
-    assert load_scope == "shared"
-    assert store_scope == "global"
     if out_dtype is None:
         out_dtype = dtype
 
-    # Validate requested shape
-    if (dtype, dtype, out_dtype) not in SUPPORTED_PROFILES:
+    PROFILE = (dtype, dtype, out_dtype)
+    if PROFILE not in SUPPORTED_PROFILES:
         raise ValueError(f"Unsupported dtype profile: {(dtype, dtype, out_dtype)}")
 
-    expected_m, expected_n, expected_k = SUPPORTED_PROFILES[(dtype, dtype, out_dtype)]
+    expected_m, expected_n, expected_k = SUPPORTED_PROFILES[PROFILE]
     if (m, n, k) != (expected_m, expected_n, expected_k):
         raise ValueError(f"Unsupported shape: {(m, n, k)} for dtype {dtype}")
 
-    trans_a_suffix = "_a" if not trans_a else "_a_trans"
-    trans_b_suffix = "_b" if not trans_b else "_b_trans"
+    if isinstance(load_scope, str):
+        load_scope = (load_scope, load_scope)
 
-    dtype = get_shorthand_dtype(dtype)
-    out_dtype = get_shorthand_dtype(out_dtype)
+    dtype_suffix = get_shorthand_dtype(dtype)
+    out_dtype_suffix = get_shorthand_dtype(out_dtype)
+
+    a_suffix = "_a" if not trans_a else "_a_trans"
+    b_suffix = "_b" if not trans_b else "_b_trans"
 
     shape_str = f"{m}x{n}x{k}"
-    load_a_intrin = f"wmma_load_{shape_str}_{dtype}{trans_a_suffix}_{load_scope}"
-    load_b_intrin = f"wmma_load_{shape_str}_{dtype}{trans_b_suffix}_{load_scope}"
-    compute_intrin = f"wmma_sync_{shape_str}_{dtype}{dtype}{out_dtype}"
-    init_intrin = f"wmma_fill_{shape_str}_{out_dtype}"
-    store_intrin = f"wmma_store_{shape_str}_{out_dtype}_{store_scope}"
+    load_a_intrin = f"wmma_load_{shape_str}_{dtype_suffix}{a_suffix}_{load_scope[0]}"
+    load_b_intrin = f"wmma_load_{shape_str}_{dtype_suffix}{b_suffix}_{load_scope[1]}"
+    compute_intrin = f"wmma_sync_{shape_str}_{dtype_suffix}{dtype_suffix}{out_dtype}"
+    init_intrin = f"wmma_fill_{shape_str}_{out_dtype_suffix}"
+    store_intrin = f"wmma_store_{shape_str}_{out_dtype_suffix}_{store_scope}"
 
+    def check_and_register_intrin():
+        if not TensorIntrin.get(init_intrin, allow_missing=True):
+            TensorIntrin.register(init_intrin, *get_wmma_fill_intrin(m, n, k, out_dtype))
+
+        if not TensorIntrin.get(load_a_intrin, allow_missing=True):
+            if load_scope[0] == "local":
+                TensorIntrin.register(
+                    load_a_intrin, *get_wmma_qcom_intrin(m, n, k, dtype, False, False, True)
+                )
+            else:
+                TensorIntrin.register(
+                    load_a_intrin,
+                    *get_wmma_load_intrin(m, n, k, dtype, load_scope[0], False, trans_a),
+                )
+
+        if not TensorIntrin.get(load_b_intrin, allow_missing=True):
+            if load_scope[1] == "local":
+                TensorIntrin.register(
+                    load_b_intrin, *get_wmma_qcom_intrin(m, n, k, dtype, True, False, True)
+                )
+            else:
+                TensorIntrin.register(
+                    load_b_intrin,
+                    *get_wmma_load_intrin(m, n, k, dtype, load_scope[1], True, trans_b),
+                )
+
+        if not TensorIntrin.get(compute_intrin, allow_missing=True):
+            TensorIntrin.register(
+                compute_intrin, *get_wmma_sync_intrin(m, n, k, dtype, out_dtype, trans_b)
+            )
+
+        if not TensorIntrin.get(store_intrin, allow_missing=True):
+            if store_scope == "local":
+                TensorIntrin.register(
+                    store_intrin, *get_wmma_qcom_intrin(m, n, k, dtype, False, False, False)
+                )
+            else:
+                TensorIntrin.register(
+                    store_intrin, *get_wmma_store_intrin(m, n, k, out_dtype, store_scope)
+                )
+
+    check_and_register_intrin()
     return {
         "init": init_intrin,
         "load_a": load_a_intrin,

@@ -138,6 +138,8 @@ VulkanDeviceProperties::VulkanDeviceProperties(const VulkanInstance& instance,
 
   supports_nv_cooperative_matrix = device.HasExtension("VK_NV_cooperative_matrix");
   supports_khr_cooperative_matrix = device.HasExtension("VK_KHR_cooperative_matrix");
+  supports_qcom_cooperative_matrix_conversion =
+      device.HasExtension("VK_QCOM_cooperative_matrix_conversion");
 
   // The check of VK_SHADER_STAGE_COMPUTE_BIT isn't technically
   // needed, since it will be set so long at least one queue has
@@ -453,7 +455,8 @@ std::vector<const char*> VulkanDevice::SelectEnabledExtensions() const {
                                                "VK_KHR_spirv_1_4",
                                                "VK_KHR_shader_integer_dot_product",
                                                "VK_NV_cooperative_matrix",
-                                               "VK_KHR_cooperative_matrix"};
+                                               "VK_KHR_cooperative_matrix",
+                                               "VK_QCOM_cooperative_matrix_conversion"};
 
   uint32_t device_extension_prop_count;
   VULKAN_CALL(vkEnumerateDeviceExtensionProperties(physical_device_, nullptr,
@@ -481,7 +484,6 @@ void VulkanDevice::CreateVkDevice(const VulkanInstance& instance) {
       VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES};
   VkPhysicalDeviceCooperativeMatrixFeaturesNV coop_mat_nv_features = {
       VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_NV, nullptr, VK_TRUE, VK_FALSE};
-
   VkPhysicalDeviceCooperativeMatrixFeaturesKHR coop_mat_khr_features = {
       VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_KHR, nullptr, VK_TRUE,
       VK_FALSE};

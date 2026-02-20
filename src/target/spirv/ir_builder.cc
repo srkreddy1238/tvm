@@ -39,7 +39,7 @@ void IRBuilder::InitHeader() {
 
   // Target SPIR-V version 1.0.  Additional functionality will be
   // enabled through extensions.
-  header_.push_back(0x10000);
+  header_.push_back(0x10300);
 
   // generator: set to 0, unknown
   header_.push_back(0U);
@@ -63,14 +63,20 @@ void IRBuilder::InitHeader() {
   if (spirv_support_.supports_nv_cooperative_matrix) {
     capabilities_used_.insert(spv::CapabilityCooperativeMatrixNV);
     extensions_used_.insert("SPV_NV_cooperative_matrix");
-  } else if (spirv_support_.supports_khr_cooperative_matrix) {
+  }
+  if (spirv_support_.supports_khr_cooperative_matrix) {
     capabilities_used_.insert(spv::CapabilityCooperativeMatrixKHR);
     extensions_used_.insert("SPV_KHR_cooperative_matrix");
   }
+  if (spirv_support_.supports_qcom_cooperative_matrix_conversion) {
+    capabilities_used_.insert(spv::CapabilityCooperativeMatrixConversionQCOM);
+    extensions_used_.insert("SPV_QCOM_cooperative_matrix_conversion");
+  }
 
-  // memory model
+  capabilities_used_.insert(spv::CapabilityVulkanMemoryModel);
+  extensions_used_.insert("SPV_KHR_vulkan_memory_model");
   ib_.Begin(spv::OpMemoryModel)
-      .AddSeq(spv::AddressingModelLogical, spv::MemoryModelGLSL450)
+      .AddSeq(spv::AddressingModelLogical, spv::MemoryModelVulkan)
       .Commit(&entry_);
   this->InitPreDefs();
 }
@@ -168,12 +174,10 @@ SType IRBuilder::GetPointerType(const SType& value_type, spv::StorageClass stora
   return t;
 }
 
-SType IRBuilder::GetStructArrayType(const SType& value_type, uint32_t num_elems,
-                                    bool interface_block) {
-  auto key = std::make_tuple(value_type.id, num_elems, interface_block);
-  auto it = struct_array_type_tbl_.find(key);
-  if (it != struct_array_type_tbl_.end()) {
-    return it->second;
+SType IRBuilder::GetArrayType(const SType& value_type, uint32_t num_elems) {
+  auto key = std::make_pair(value_type.id, num_elems);
+  if (array_type_tbl_.count(key)) {
+    return array_type_tbl_[key];
   }
 
   SType arr_type;
@@ -190,8 +194,20 @@ SType IRBuilder::GetStructArrayType(const SType& value_type, uint32_t num_elems,
   int nbits = value_type.type.bits() * value_type.type.lanes();
   TVM_FFI_ICHECK_EQ(nbits % 8, 0);
   uint32_t nbytes = static_cast<uint32_t>(nbits) / 8;
-  // decorate the array type.
   this->Decorate(spv::OpDecorate, arr_type, spv::DecorationArrayStride, nbytes);
+
+  array_type_tbl_[key] = arr_type;
+  return arr_type;
+}
+
+SType IRBuilder::GetStructArrayType(const SType& value_type, uint32_t num_elems,
+                                    bool interface_block) {
+  auto key = std::make_tuple(value_type.id, num_elems, interface_block);
+  if (struct_array_type_tbl_.count(key)) {
+    return struct_array_type_tbl_[key];
+  }
+
+  SType arr_type = this->GetArrayType(value_type, num_elems);
   // declare struct of array
   SType struct_type;
   struct_type.id = id_counter_++;
@@ -199,9 +215,11 @@ SType IRBuilder::GetStructArrayType(const SType& value_type, uint32_t num_elems,
   struct_type.element_type_id = value_type.id;
   ib_.Begin(spv::OpTypeStruct).AddSeq(struct_type, arr_type).Commit(&global_);
   // decorate the array type.
-  ib_.Begin(spv::OpMemberDecorate)
-      .AddSeq(struct_type, 0, spv::DecorationOffset, 0)
-      .Commit(&decorate_);
+  if (value_type.storage_class != spv::StorageClassWorkgroup) {
+    ib_.Begin(spv::OpMemberDecorate)
+        .AddSeq(struct_type, 0, spv::DecorationOffset, 0)
+        .Commit(&decorate_);
+  }
 
   if (interface_block) {
     // Runtime array are always decorated as Block or BufferBlock
@@ -211,9 +229,11 @@ SType IRBuilder::GetStructArrayType(const SType& value_type, uint32_t num_elems,
       // SPV_KHR_storage_buffer_storage_class, BufferBlock is
       // deprecated.
       extensions_used_.insert("SPV_KHR_storage_buffer_storage_class");
-      this->Decorate(spv::OpDecorate, struct_type, spv::DecorationBlock);
+      if (value_type.storage_class != spv::StorageClassWorkgroup) {
+        this->Decorate(spv::OpDecorate, struct_type, spv::DecorationBlock);
+      }
     } else {
-      if (num_elems == 0) {
+      if (num_elems == 0 && value_type.storage_class != spv::StorageClassWorkgroup) {
         this->Decorate(spv::OpDecorate, struct_type, spv::DecorationBufferBlock);
       }
     }

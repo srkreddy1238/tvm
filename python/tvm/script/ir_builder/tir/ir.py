@@ -1925,6 +1925,7 @@ tvm_struct_get = _tir_op.tvm_struct_get
 tvm_thread_invariant = _op_wrapper(_tir_op.tvm_thread_invariant)
 tvm_thread_allreduce = _op_wrapper(_tir_op.tvm_thread_allreduce)
 tvm_construct_coopmat_qcom = _op_wrapper(_tir_op.tvm_construct_coopmat_qcom)
+tvm_deconstruct_coopmat_qcom = _op_wrapper(_tir_op.tvm_deconstruct_coopmat_qcom)
 tvm_load_matrix_sync = _op_wrapper(_tir_op.tvm_load_matrix_sync)
 tvm_mma_sync = _op_wrapper(_tir_op.tvm_mma_sync)
 tvm_bmma_sync = _op_wrapper(_tir_op.tvm_bmma_sync)
@@ -2210,6 +2211,8 @@ __all__ = float_types + [
     "tvm_struct_get",
     "tvm_thread_invariant",
     "tvm_thread_allreduce",
+    "tvm_construct_coopmat_qcom",
+    "tvm_deconstruct_coopmat_qcom",
     "tvm_load_matrix_sync",
     "tvm_mma_sync",
     "tvm_bmma_sync",

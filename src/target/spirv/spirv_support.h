@@ -49,7 +49,7 @@ struct SPIRVSupport {
    *  latest Vulkan version that does pass the conformance test
    *  instead.
    */
-  uint32_t vulkan_api_version{VK_MAKE_VERSION(1, 0, 0)};
+  uint32_t vulkan_api_version{VK_MAKE_VERSION(1, 3, 0)};
 
   /*!
    * \brief The supported subgroup operations
@@ -278,32 +278,46 @@ struct SPIRVSupport {
   bool supports_integer_dot_product{false};
 
   /*!
-   * \brief  Whether the driver supports operations involving cooperative matrix.
+   * \brief  Whether the driver supports operations involving NV cooperative matrix.
    *
    * Vulkan extension: VK_NV_cooperative_matrix
    * SPV Extension name: SPV_NV_cooperative_matrix
    * SPV Capability: spv::CapabilityCooperativeMatrixNV
    *
-   * If support is present, can perform cooperative matrix operations.  If
-   * support is not present, codegen will throw exception on
-   * attempting to perform cooperative matrix.
+   * If either support of nv/khr cooperative matrix extn is present,
+   * can perform cooperative matrix operations.
+   * If support is not present, codegen will throw an exception on
+   * attempting to perform cooperative matrix operations.
    */
-
   bool supports_nv_cooperative_matrix{false};
 
   /*!
-   * \brief  Whether the driver KHR supports operations involving cooperative matrix.
+   * \brief  Whether the driver supports operations involving KHR cooperative matrix.
    *
    * Vulkan extension: VK_KHR_cooperative_matrix
    * SPV Extension name: SPV_KHR_cooperative_matrix
    * SPV Capability: spv::CapabilityCooperativeMatrixKHR
    *
-   * If support is present, can perform cooperative matrix operations. If
-   * support is not present, codegen will throw an exception on
+   * If either support of nv/khr cooperative matrix extn is present,
+   * can perform cooperative matrix operations.
+   * If support is not present, codegen will throw an exception on
    * attempting to perform cooperative matrix operations.
    */
-
   bool supports_khr_cooperative_matrix{false};
+
+  /*!
+   * \brief  Whether the driver supports operations involving QCOM cooperative matrix conversion.
+   *
+   * Vulkan extension: VK_QCOM_cooperative_matrix_conversion
+   * SPV Extension name: SPV_QCOM_cooperative_matrix_conversion
+   * SPV Capability: spv::CapabilityCooperativeMatrixConversionQCOM
+   *
+   * If either support of nv/khr cooperative matrix extn is present,
+   * can perform cooperative matrix operations.
+   * If support is not present, codegen will throw an exception on
+   * attempting to perform cooperative matrix operations.
+   */
+  bool supports_qcom_cooperative_matrix_conversion{false};
 };
 
 }  // namespace codegen

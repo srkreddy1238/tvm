@@ -265,6 +265,10 @@ void VulkanDeviceAPI::GetTargetProperty(Device dev, const std::string& property,
     *rv = prop.supports_khr_cooperative_matrix;
   }
 
+  if (property == "supports_qcom_cooperative_matrix_conversion") {
+    *rv = prop.supports_qcom_cooperative_matrix_conversion;
+  }
+
   if (property == "device_name") {
     *rv = prop.device_name;
   }

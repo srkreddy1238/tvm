@@ -159,7 +159,7 @@ spirv::Value CodeGenSPIRV::CreateStorageSync(const CallNode* op) {
   uint32_t vulkan_api_version = spirv_support_.vulkan_api_version;
 
   int64_t sync_scope;
-  int64_t memory_semantics = spv::MemorySemanticsSequentiallyConsistentMask;
+  int64_t memory_semantics = spv::MemorySemanticsAcquireReleaseMask;
   if ((sync == "warp") && (vulkan_api_version >= VK_API_VERSION_1_1)) {
     // Synchronize control at the Subgroup level, but memory at the
     // Workgroup level.  This is because different invocations in a
@@ -418,7 +418,128 @@ spirv::Value CodeGenSPIRV::VisitExpr_(const CallNode* op) {
     spirv::Value ptr = builder_->StructArrayAccess(ptr_type, var_map_[buffer_node], index);
     builder_->MakeInst(spv::OpStore, ptr, init_val, spv::MemoryAccessMaskNone);
     return spirv::Value();
+  } else if (op->op.same_as(builtin::tvm_construct_coopmat_qcom()) ||
+             op->op.same_as(builtin::tvm_deconstruct_coopmat_qcom())) {
+    if (!spirv_support_.supports_qcom_cooperative_matrix_conversion) {
+      LOG(FATAL) << "Target doesn't Support QCOM cooperative matrix conversion";
+    }
+    ICHECK_EQ(op->args.size(), 5U);
+    bool is_construct = op->op.same_as(builtin::tvm_construct_coopmat_qcom());
 
+    /* Extract Fragment Node Ptr from Struct */
+    const VarNode* fragment_node = op->args[0].as<VarNode>();
+    spirv::SType& fragment_type = fragment_info_[fragment_node].stype;
+    spirv::SType fragment_ptr_type =
+        builder_->GetPointerType(fragment_type, fragment_info_[fragment_node].sclass);
+    spirv::Value fragment_ptr =
+        builder_->StructArrayAccess(fragment_ptr_type, var_map_[fragment_node], MakeValue(0));
+
+    /* Extract Array of Vector from Struct Node */
+    const VarNode* array_node = op->args[4].as<VarNode>();
+    const DataType component_dtype = storage_info_[array_node].element_type;
+    const int component_lanes = component_dtype.lanes();
+    spirv::SType component_stype = builder_->GetSType(storage_info_[array_node].element_type);
+    spirv::SType component_ptr_stype =
+        builder_->GetPointerType(component_stype, var_map_[array_node].stype.storage_class);
+    const int array_len = (is_construct ? Downcast<IntImm>(op->args[3])->value
+                                        : Downcast<IntImm>(op->args[2])->value) /
+                          component_lanes;
+    spirv::SType array_stype =
+        builder_->GetArrayType(builder_->GetSType(component_dtype), array_len);
+    spirv::SType array_ptr_stype =
+        builder_->GetPointerType(array_stype, var_map_[array_node].stype.storage_class);
+    spirv::Value array_struct_value = VisitExpr(op->args[4]);
+    spirv::Value array_ptr_value = builder_->MakeValue(spv::OpInBoundsAccessChain, array_ptr_stype,
+                                                       array_struct_value, MakeValue(0));
+    // TODO(sanjs): Add Checks for Buffer...
+
+    /* Bit cast into OpTypeArray Uint32 */
+    spirv::Value cast_array;
+    spirv::SType cast_type = builder_->GetSType(DataType::UInt(32));
+    const uint32_t cast_length =
+        component_dtype.bits() * component_dtype.lanes() * array_len / DataType::UInt(32).bits();
+    spirv::SType cast_array_stype = builder_->GetArrayType(cast_type, cast_length);
+
+    bool needs_cast = component_dtype.lanes() != 1;
+    if (is_construct) {
+      if (!needs_cast) {
+        spirv::Value array_value = builder_->MakeValue(spv::OpLoad, array_stype, array_ptr_value);
+        if (component_dtype != DataType::UInt(32)) {
+          cast_array = builder_->MakeValue(spv::OpBitCastArrayQCOM, cast_array_stype, array_value);
+        } else {
+          cast_array = array_value;
+        }
+      } else {
+        const DataType flat_dtype = component_dtype.with_lanes(1);
+        spirv::SType flat_stype = builder_->GetSType(flat_dtype);
+        spirv::SType flat_ptr_stype =
+            builder_->GetPointerType(flat_stype, spv::StorageClassFunction);
+        const uint32_t flat_array_len = component_dtype.lanes() * array_len;
+        spirv::SType flat_array_stype = builder_->GetArrayType(flat_stype, flat_array_len);
+        spirv::SType flat_array_ptr_stype =
+            builder_->GetPointerType(flat_array_stype, spv::StorageClassFunction);
+        spirv::Value flat_array_struct =
+            builder_->Allocate(flat_stype, flat_array_len, spv::StorageClassFunction);
+        for (int i = 0; i < array_len; ++i) {
+          spirv::Value component_ptr = builder_->MakeValue(
+              spv::OpInBoundsAccessChain, component_ptr_stype, array_ptr_value, MakeValue(i));
+          spirv::Value component = builder_->MakeValue(spv::OpLoad, component_stype, component_ptr);
+          for (int j = 0; j < component_lanes; j++) {
+            int index = i * component_lanes + j;
+            spirv::Value array_ptr_component =
+                builder_->MakeValue(spv::OpInBoundsAccessChain, flat_ptr_stype, flat_array_struct,
+                                    MakeValue(0), MakeValue(index));
+            spirv::Value component_value =
+                builder_->MakeValue(spv::OpCompositeExtract, flat_stype, component, j);
+            builder_->MakeInst(spv::OpStore, array_ptr_component, component_value);
+          }
+        }
+        spirv::Value flat_array_ptr = builder_->MakeValue(
+            spv::OpInBoundsAccessChain, flat_array_ptr_stype, flat_array_struct, MakeValue(0));
+        spirv::Value flat_array =
+            builder_->MakeValue(spv::OpLoad, flat_array_stype, flat_array_ptr);
+        cast_array = builder_->MakeValue(spv::OpBitCastArrayQCOM, cast_array_stype, flat_array);
+      }
+
+      spirv::Value constructed =
+          builder_->MakeValue(spv::OpCompositeConstructCoopMatQCOM, fragment_type, cast_array);
+      builder_->MakeInst(spv::OpStore, fragment_ptr, constructed);
+    } else {
+      if (!needs_cast) {
+        spirv::Value fragment_value = builder_->MakeValue(spv::OpLoad, fragment_type, fragment_ptr);
+        cast_array = builder_->MakeValue(spv::OpCompositeExtractCoopMatQCOM, cast_array_stype,
+                                         fragment_value);
+        if (component_dtype != DataType::UInt(32)) {
+          cast_array = builder_->MakeValue(spv::OpBitCastArrayQCOM, array_stype, cast_array);
+        }
+        builder_->MakeInst(spv::OpStore, array_ptr_value, cast_array);
+      } else {
+        const DataType flat_dtype = component_dtype.with_lanes(1);
+        spirv::SType flat_stype = builder_->GetSType(flat_dtype);
+        spirv::SType flat_array_stype =
+            builder_->GetArrayType(flat_stype, array_len * component_lanes);
+        spirv::Value fragment_value = builder_->MakeValue(spv::OpLoad, fragment_type, fragment_ptr);
+        cast_array = builder_->MakeValue(spv::OpCompositeExtractCoopMatQCOM, cast_array_stype,
+                                         fragment_value);
+        spirv::Value flat_array =
+            builder_->MakeValue(spv::OpBitCastArrayQCOM, flat_array_stype, cast_array);
+
+        std::vector<spirv::Value> array_components(array_len), component(component_lanes);
+        for (int i = 0; i < array_len; i++) {
+          for (int j = 0; j < component_lanes; j++) {
+            int index = i * component_lanes + j;
+            spirv::Value component_sub_val =
+                builder_->MakeValue(spv::OpCompositeExtract, flat_stype, flat_array, index);
+            component[j] = component_sub_val;
+          }
+          spirv::Value constructed_component = builder_->MakeComposite(component_stype, component);
+          array_components[i] = constructed_component;
+        }
+        spirv::Value array_value = builder_->MakeComposite(array_stype, array_components);
+        builder_->MakeInst(spv::OpStore, array_ptr_value, array_value);
+      }
+    }
+    return spirv::Value();
   } else if (op->op.same_as(builtin::tvm_load_matrix_sync())) {
     TVM_FFI_ICHECK_EQ(op->args.size(), 8U);
     const VarNode* buffer_node = op->args[0].as<VarNode>();
@@ -449,6 +570,8 @@ spirv::Value CodeGenSPIRV::VisitExpr_(const CallNode* op) {
       loaded = builder_->MakeValue(spv::OpCooperativeMatrixLoadKHR, fragment_type, src_ptr,
                                    memory_layout,  // Explicit Memory Layout (New in KHR)
                                    stride_val, spv::MemoryAccessMaskNone);
+    } else {
+      LOG(FATAL) << "Target Doesn't Support Matrix Cooperative Matrix Operation(s).";
     }
     builder_->MakeInst(spv::OpStore, dst_ptr, loaded, spv::MemoryAccessMaskNone);
     return spirv::Value();

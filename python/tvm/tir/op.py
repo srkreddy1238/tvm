@@ -17,7 +17,7 @@
 # pylint: disable=redefined-builtin, invalid-name, too-many-arguments
 """Operators used in TIR expression."""
 
-from typing import Any
+from typing import Any, Optional, Union
 
 import tvm_ffi
 
@@ -794,29 +794,52 @@ def tvm_throw_last_error():
     return call_intrin("handle", "tir.tvm_throw_last_error")
 
 
-def tvm_construct_coopmat_qcom(fragment, m_dim, n_dim, k_dim, src_array, layout, total_bits):
-    """TVM intrinsic for cooperative matrix load operators from array
+def tvm_construct_coopmat_qcom(fragment, m, n, k, src_array):
+    """TVM qcom intrinsic for cooperative matrix load operation from array to matrix
 
     parameters
     -----------
     fragment : Var
         The wmma fragment.
 
+    m : UIntImm
+        The shape of wmma fragment.
+
+    n : UIntImm
+        The shape of wmma fragment.
+
+    k : UIntImm
+        The shape of wmma fragment.
+
     src_array : Array
         The source array.
 
     """
-    return call_intrin(
-        "handle",
-        "tir.tvm_construct_coopmat_qcom",
-        fragment,  # cooperative matrix buffer
-        m_dim,
-        n_dim,
-        k_dim,
-        src_array,  # regular array buffer
-        layout,
-        total_bits,
-    )
+    return call_intrin("handle", "tir.tvm_construct_coopmat_qcom", fragment, m, n, k, src_array)
+
+
+def tvm_deconstruct_coopmat_qcom(fragment, m, n, k, dst_array):
+    """TVM qcom intrinsic for cooperative matrix store operation from matrix to array
+
+    parameters
+    -----------
+    fragment : Var
+        The wmma fragment.
+
+    m : UIntImm
+        The shape of wmma fragment.
+
+    n : UIntImm
+        The shape of wmma fragment.
+
+    k : UIntImm
+        The shape of wmma fragment.
+
+    dst_array: Array
+        The destination array.
+
+    """
+    return call_intrin("handle", "tir.tvm_deconstruct_coopmat_qcom", fragment, m, n, k, dst_array)
 
 
 def tvm_load_matrix_sync(fragment, m, n, k, index, buffer_ptr, stride, layout):

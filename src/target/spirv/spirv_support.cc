@@ -113,6 +113,11 @@ SPIRVSupport::SPIRVSupport(tvm::Target target) {
     supports_khr_cooperative_matrix =
         target->GetAttr<Bool>("supports_khr_cooperative_matrix").value();
   }
+  // Check whether QCOM cooperative matrix conversion is enabled in the target string.
+  if (target->GetAttr<Bool>("supports_qcom_cooperative_matrix_conversion")) {
+    supports_qcom_cooperative_matrix_conversion =
+        target->GetAttr<Bool>("supports_qcom_cooperative_matrix_conversion").value();
+  }
 }
 
 }  // namespace codegen

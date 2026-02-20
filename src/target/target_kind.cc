@@ -405,6 +405,7 @@ TVM_REGISTER_TARGET_KIND("vulkan", kDLVulkan)
     .add_attr_option<bool>("supports_integer_dot_product")
     .add_attr_option<bool>("supports_nv_cooperative_matrix")
     .add_attr_option<bool>("supports_khr_cooperative_matrix")
+    .add_attr_option<bool>("supports_qcom_cooperative_matrix_conversion")
     .add_attr_option<int64_t>("supported_subgroup_operations")
     // Physical device limits
     .add_attr_option<int64_t>("max_num_threads", refl::DefaultValue(256))

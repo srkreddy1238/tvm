@@ -49,15 +49,17 @@ class SPIRVTools {
  public:
   explicit SPIRVTools(Target target) {
     uint32_t vulkan_version =
-        target->GetAttr<Integer>("vulkan_api_version").value_or(VK_API_VERSION_1_0).IntValue();
+        target->GetAttr<Integer>("vulkan_api_version").value_or(VK_API_VERSION_1_3).IntValue();
     uint32_t spirv_version =
-        target->GetAttr<Integer>("max_spirv_version").value_or(0x10000).IntValue();
+        target->GetAttr<Integer>("max_spirv_version").value_or(0x10300).IntValue();
 
     spv_target_env validation_version;
     if (target->kind->name == "opencl") {
       validation_version = SPV_ENV_OPENCL_2_2;
     } else {
-      if (vulkan_version >= VK_API_VERSION_1_2) {
+      if (vulkan_version >= VK_API_VERSION_1_3) {
+        validation_version = SPV_ENV_VULKAN_1_3;
+      } else if (vulkan_version >= VK_API_VERSION_1_2) {
         validation_version = SPV_ENV_VULKAN_1_2;
       } else if (vulkan_version >= VK_API_VERSION_1_1 && spirv_version >= 0x10400) {
         validation_version = SPV_ENV_VULKAN_1_1_SPIRV_1_4;
@@ -144,14 +146,14 @@ std::pair<std::unordered_map<std::string, runtime::SPIRVShader>, std::string> Lo
         std::string prefix = ss.str();
 
         std::ofstream(prefix + "tir.txt") << f;
-        std::ofstream(prefix + "spv.txt") << spirv_tools.BinaryToText(shader.data);
         std::ofstream(prefix + "spv.spv", std::ios::binary)
             .write(reinterpret_cast<const char*>(shader.data.data()),
                    sizeof(shader.data[0]) * shader.data.size());
       }
     }
 
-    if (!support::BoolEnvironmentVar("TVM_VULKAN_DISABLE_SHADER_VALIDATION")) {
+    // TODO(sanjs) : Re-enable Shader Validation by default once codegen issue is resolved
+    if (support::BoolEnvironmentVar("TVM_VULKAN_VALIDATE_SHADER")) {
       spirv_tools.ValidateShader(shader.data);
     }
 

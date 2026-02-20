@@ -104,39 +104,33 @@ class FragmentGetter : public StmtExprVisitor {
         FragmentInfo info(m->value, n->value, k->value, "row_major", scope);
         fragments[buffer_var] = info;
       }
-    } else if (op->op.same_as(builtin::tvm_construct_coopmat_qcom())) {
-      // our new intrinsic: (frag, m_dim, n_dim, k_dim, src, layout)
-      ICHECK_EQ(op->args.size(), 7U);
+    } else if (op->op.same_as(builtin::tvm_construct_coopmat_qcom()) ||
+               op->op.same_as(builtin::tvm_deconstruct_coopmat_qcom())) {
+      ICHECK_EQ(op->args.size(), 5U);
       const VarNode* buffer_var = op->args[0].as<VarNode>();
       ICHECK(buffer_var);
 
-      // Get shape
       const IntImmNode* m = op->args[1].as<IntImmNode>();
       const IntImmNode* n = op->args[2].as<IntImmNode>();
       const IntImmNode* k = op->args[3].as<IntImmNode>();
-      const StringImmNode* layout = op->args[5].as<StringImmNode>();
       ICHECK(m);
       ICHECK(n);
       ICHECK(k);
-      ICHECK(layout);
 
       std::string scope = GetPtrStorageScope(ffi::GetRef<Var>(buffer_var));
       if (fragments.count(buffer_var)) {
-        // check if the fragment has met before
         FragmentInfo info = fragments[buffer_var];
         ICHECK_EQ(m->value, info.m);
         ICHECK_EQ(n->value, info.n);
         ICHECK_EQ(k->value, info.k);
-        if (scope == "wmma.matrix_a" || scope == "wmma.matrix_b") {
-          ICHECK_EQ(layout->value, info.layout);
-        }
+        ICHECK_EQ(info.scope, scope);
       } else {
-        // store metadata
         FragmentInfo info;
-        if (scope == "wmma.matrix_a" || scope == "wmma.matrix_b") {
-          info = FragmentInfo(m->value, n->value, k->value, layout->value, scope);
-        } else if (scope == "wmma.accumulator") {
-          info = FragmentInfo(m->value, n->value, k->value, "", scope);
+        if (scope == "wmma.matrix_a" || scope == "wmma.matrix_b" || scope == "wmma.accumulator") {
+          info = FragmentInfo(m->value, n->value, k->value, "row-major", scope);
+        } else {
+          LOG(ERROR) << "Invalid scope for TensorFragment(" << buffer_var->name_hint
+                     << "): " << scope;
         }
         fragments[buffer_var] = info;
       }

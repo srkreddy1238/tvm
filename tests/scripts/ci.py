@@ -608,8 +608,12 @@ generated = [
             ),
             "frontend": ("run frontend tests", ["./tests/scripts/task_python_frontend.sh"]),
         },
+        additional_flags=[
+            {"--volume": os.environ.get("VULKAN_SDK", "/tmp/") + ":/adreno-vulkan"},
+        ],
         env={
             "LD_LIBRARY_PATH": "/usr/local/cuda/lib64/",
+            "VULKAN_SDK": "/adreno-vulkan",
         },
     ),
     generate_command(
@@ -685,11 +689,13 @@ generated = [
         post_build=["./tests/scripts/task_build_adreno_bins.sh"],
         additional_flags=[
             {"--volume": os.environ.get("ADRENO_OPENCL", "/tmp/") + ":/adreno-opencl"},
+            {"--volume": os.environ.get("VULKAN_SDK", "/tmp/") + ":/adreno-vulkan"},
             {"--volume": os.environ.get("CI_TEST_INVENTORY", "/Inventory") + ":/Inventory"},
             {"--net": "host"},
         ],
         env={
             "ADRENO_OPENCL": "/adreno-opencl",
+            "VULKAN_SDK": "/adreno-vulkan",
             "ADRENO_TARGET_CLML_VERSION": os.environ.get("ADRENO_TARGET_CLML_VERSION", "3"),
             "ADRENO_TARGET_COOP": os.environ.get("ADRENO_TARGET_COOP", "NO"),
             "CI_TEST_INVENTORY": "/Inventory",

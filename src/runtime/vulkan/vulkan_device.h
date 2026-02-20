@@ -90,6 +90,7 @@ struct VulkanDeviceProperties {
   bool supports_integer_dot_product{false};
   bool supports_nv_cooperative_matrix{false};
   bool supports_khr_cooperative_matrix{false};
+  bool supports_qcom_cooperative_matrix_conversion{false};
   uint32_t supported_subgroup_operations{0};
   uint32_t max_num_threads{1};
   uint32_t thread_warp_size{1};

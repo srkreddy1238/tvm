@@ -262,6 +262,9 @@ TIR_DEFINE_BUILTIN_FUNC(tvm_thread_allreduce)
 TIR_DEFINE_BUILTIN_FUNC(tvm_construct_coopmat_qcom)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
+TIR_DEFINE_BUILTIN_FUNC(tvm_deconstruct_coopmat_qcom)
+    .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
+
 TIR_DEFINE_BUILTIN_FUNC(tvm_load_matrix_sync)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kReadState));
 

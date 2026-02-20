@@ -454,6 +454,15 @@ class IRBuilder {
    */
   SType GetPointerType(const SType& value_type, spv::StorageClass storage_class);
   /*!
+   * \brief Get a value_type[num_elems] type.
+   * \param value_type the content value type.
+   * \param num_elems number of elements in array
+   *   num_elems = 0 means runtime array with BufferBlock Decoration
+   *
+   * \return The corresponding spirv type.
+   */
+  SType GetArrayType(const SType& value_type, uint32_t num_elems);
+  /*!
    * \brief Get a struct{ value_type[num_elems] } type.
    * \param value_type the content value type.
    * \param num_elems number of elements in array
@@ -714,6 +723,8 @@ class IRBuilder {
   Value push_const_;
   /*! \brief map from type code to the type */
   std::unordered_map<uint64_t, SType> pod_type_tbl_;
+  /*! \brief map from value to array type */
+  std::map<std::pair<uint32_t, uint32_t>, SType> array_type_tbl_;
   /*! \brief map from value to array type */
   std::map<std::tuple<uint32_t, uint32_t, bool>, SType> struct_array_type_tbl_;
   /*! \brief map from value to its pointer type */

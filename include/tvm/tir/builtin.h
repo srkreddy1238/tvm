@@ -527,9 +527,24 @@ TVM_DLL const Op& tvm_global_barrier_kinit();
 TVM_DLL const Op& tvm_thread_allreduce();
 
 /*!
- * \brief tvm intrinsic for cooperative matrix load operators from array
+ * \brief tvm qcom intrinsic for cooperative matrix construct operation from array to matrix
+ *
+ * operation is equivalent to vectorToCoopmatQCOM(src, fragment);
+ *
+ * void tvm_construct_coopmat_qcom(Var fragment, UIntImm m, UIntImm n
+ *                    UIntImm k, Var src);
  */
 TVM_DLL const Op& tvm_construct_coopmat_qcom();
+
+/*!
+ * \brief tvm qcom intrinsic for cooperative matrix extract operation from matrix to array
+ *
+ * operation is equivalent to coopmatToVectorQCOM(fragment, src);
+ *
+ * void tvm_deconstruct_coopmat_qcom(Var fragment, UIntImm m, UIntImm n
+ *                    UIntImm k, Var dst);
+ */
+TVM_DLL const Op& tvm_deconstruct_coopmat_qcom();
 
 // TODO(tvm-team) TensorCore specific intrinsics should be directly registered under
 //                cuda. namespace and used through op.
