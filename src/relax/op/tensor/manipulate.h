@@ -29,9 +29,9 @@
 
 #include <vector>
 
+#include "../../transform/utils.h"
 #include "../op_common.h"
 #include "tvm/relax/expr.h"
-#include "../../transform/utils.h"
 
 namespace tvm {
 namespace relax {

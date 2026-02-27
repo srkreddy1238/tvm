@@ -66,6 +66,7 @@ class FunctionInfoObj : public Object {
   ffi::String name;
   ffi::Array<DLDataType> arg_types;
   ffi::Array<ffi::String> launch_param_tags;
+  ffi::Array<ffi::String> storage_scopes;
   ffi::Array<ArgExtraTags> arg_extra_tags;
 
   ffi::json::Value SaveToJSON() const;
@@ -77,7 +78,8 @@ class FunctionInfoObj : public Object {
 class FunctionInfo : public ObjectRef {
  public:
   FunctionInfo(ffi::String name, ffi::Array<DLDataType> arg_types,
-               ffi::Array<ffi::String> launch_param_tags, ffi::Array<ArgExtraTags> arg_extra_tags);
+               ffi::Array<ffi::String> launch_param_tags, ffi::Array<ffi::String> storage_scopes,
+               ffi::Array<ArgExtraTags> arg_extra_tags);
 
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(FunctionInfo, ObjectRef, FunctionInfoObj);
 };

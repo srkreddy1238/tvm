@@ -133,11 +133,11 @@ cl_mem AllocateOnChipTensorMemory(size_t size, cl_uint on_chip_mem_offset) {
  */
 tensor_dims_t GetTensorDims(const JSONGraphNode& node) {
   auto shape = node.GetOpShape()[0];
-  tensor_dims_t dims;
+  tensor_dims_t dims = {0, 0, 0, 0};
   dims.n = fmax(shape[0], 0);
-  dims.c = fmax(shape[1], 0);
-  dims.h = fmax(shape[2], 0);
-  dims.w = fmax(shape[3], 0);
+  if (shape.size() > 1) dims.c = fmax(shape[1], 0);
+  if (shape.size() > 2) dims.h = fmax(shape[2], 0);
+  if (shape.size() > 3) dims.w = fmax(shape[3], 0);
   return dims;
 }
 
@@ -189,14 +189,9 @@ cl_arithmetic_mode_qcom MakeCLArithMode(const cl_channel_type& data_type,
  */
 std::shared_ptr<cl_ml_tensor_memory_desc_qcom> MakeCLMLTensor(
     const JSONGraphNode& tensor_rep, void* data, std::vector<size_t> c_shape,
-<<<<<<< HEAD
-    cl_ml_tensor_layout_qcom layout, cl_uint dtype, cl_ml_tensor_usage_qcom usage) {
-  auto shape = tensor_rep.GetOpShape()[0];
-=======
     cl_ml_tensor_layout_qcom layout, cl_uint dtype, cl_ml_tensor_usage_qcom usage,
     cl_ml_tensor_properties_qcom* tensorProps) {
-  std::vector<int64_t> shape = tensor_rep.GetOpShape()[0];
->>>>>>> 9d711b818 (Enable Dequant matmul ops in CLML runtime (#129))
+  std::vector<int64_t> shape(tensor_rep.GetOpShape()[0].begin(), tensor_rep.GetOpShape()[0].end());
   std::vector<size_t> clml_shape(shape.begin(), shape.end());
   if (c_shape.size() > 0) {
     clml_shape = c_shape;

@@ -208,7 +208,8 @@ ffi::Optional<ffi::Array<PrimExpr>> CheckConcatOutputShape(
 
 StructInfo InferStructInfoConcat(const Call& call, const BlockBuilder& ctx) {
   if (call->args.size() != 1 && call->args.size() != 5) {
-    ctx->ReportFatal(Diagnostic::Error(call)
+    ctx->ReportFatal(
+        Diagnostic::Error(call)
         << "Concat op should have 1 argument or QNN Concat op should have 5 arguments.");
   }
 
@@ -2039,7 +2040,7 @@ InferLayoutOutput InferLayoutTile(
     // Same dimension: reorder repeats according to layout transformation.
     // If len(repeats) < ndim, it's padded with 1s at the beginning.
     for (int i = 0; i < ndim; ++i) {
-      const tir::LayoutAxis& axis = existing_layout_obj[i];
+      const tir::IterVar& axis = existing_layout_obj[i];
       int pos_in_initial = initial_layout.IndexOf(axis);
       TVM_FFI_ICHECK_NE(pos_in_initial, -1) << "Axis not found in initial layout";
       // If len(repeats) < ndim, repeats are right-aligned.
@@ -2061,7 +2062,7 @@ InferLayoutOutput InferLayoutTile(
     }
     // Repeats for existing dimensions need to be permuted.
     for (int i = 0; i < ndim; ++i) {
-      const tir::LayoutAxis& axis = existing_layout_obj[i];
+      const tir::IterVar& axis = existing_layout_obj[i];
       int pos_in_initial = initial_layout.IndexOf(axis);
       TVM_FFI_ICHECK_NE(pos_in_initial, -1) << "Axis not found in initial layout";
       new_repeats.push_back(attrs->repeats[pos_in_initial + num_new_dims]);

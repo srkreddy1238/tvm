@@ -22,31 +22,26 @@
  * \brief QNN manipulate operators implementation
  */
 
-
 #include "./manipulate.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdlib>
-
-#include <vector>
 #include <string>
-
-#include <algorithm>
+#include <vector>
 
 namespace tvm {
 namespace relax {
 namespace qnn {
 
 /* relax.qnn.concat (builder) */
-Expr concat(Expr data, Expr input_scales, Expr input_zero_points,
-                     Expr output_scale, Expr output_zero_point, int axis) {
+Expr concat(Expr data, Expr input_scales, Expr input_zero_points, Expr output_scale,
+            Expr output_zero_point, int axis) {
   auto attrs = tvm::ffi::make_object<ConcatAttrs>();
   attrs->axis = axis;
   static const Op& op = Op::Get("relax.qnn.concat");
-  return Call(op,
-              {data, input_scales, input_zero_points, output_scale, output_zero_point},
-              Attrs(attrs),
-              {});
+  return Call(op, {data, input_scales, input_zero_points, output_scale, output_zero_point},
+              Attrs(attrs), {});
 }
 
 TVM_FFI_STATIC_INIT_BLOCK() {
@@ -57,8 +52,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
 TVM_REGISTER_OP("relax.qnn.concat")
     .set_attrs_type<ConcatAttrs>()
     .set_num_inputs(5)
-    .add_argument("data", "Tuple of Tensors",
-                  "The input tensors to concatenate (as a Tuple).")
+    .add_argument("data", "Tuple of Tensors", "The input tensors to concatenate (as a Tuple).")
     .add_argument("input_scales", "Tuple",
                   "Per-input quantization scales (each element is scalar () or 1-D (C,)).")
     .add_argument("input_zero_points", "Tuple",
@@ -69,8 +63,7 @@ TVM_REGISTER_OP("relax.qnn.concat")
                   "Output zero point (scalar () or 1-D (C,) along the concat axis).")
     .set_attr<FInferStructInfo>("FInferStructInfo", InferStructInfoConcat)
     .set_attr<FRelaxInferLayout>("FRelaxInferLayout", InferLayoutConcat)
-    .set_attr<TMixedPrecisionPolicy>("TMixedPrecisionPolicy",
-                                     MixedPrecisionPolicyKind::kFollow)
+    .set_attr<TMixedPrecisionPolicy>("TMixedPrecisionPolicy", MixedPrecisionPolicyKind::kFollow)
     .set_attr<Bool>("FPurity", Bool(true));
 
 }  // namespace qnn

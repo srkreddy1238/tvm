@@ -18,7 +18,7 @@
 import os
 
 import pytest
-from utils import verify_results
+from utils import verify_results, requires_adreno_vulkan
 
 import tvm.testing
 from tvm.script import ir as I
@@ -27,14 +27,18 @@ from tvm.script import relax as R
 # TODO: Add codegen tests to verify extn usage.
 
 TARGET_SUPPORTS_EXTENSION = os.getenv("ADRENO_TARGET_COOP", "").strip().lower() == "yes"
-TARGET_OPTS = (
-    "-supports_float16=1",
-    "-supports_16bit_buffer=1",
-    "-supports_khr_cooperative_matrix=1",
+target = tvm.target.Target(
+    {
+        "kind": "vulkan",
+        "supports_float16": 1,
+        "supports_16bit_buffer": 1,
+        "supports_khr_cooperative_matrix": 1,
+    }
 )
+ref_target = tvm.target.Target("llvm")
 
 
-@tvm.testing.requires_adreno_vulkan
+@requires_adreno_vulkan
 @pytest.mark.skipif(not TARGET_SUPPORTS_EXTENSION, reason="Device not supported.")
 def test_non_batch_fp16():
     @I.ir_module
@@ -48,10 +52,10 @@ def test_non_batch_fp16():
                 R.output(gv)
             return gv
 
-    verify_results(Matmul, backend="vulkan", cfg=None, opts=TARGET_OPTS, use_cpu=True)
+    verify_results(Matmul, target, ref_target)
 
 
-@tvm.testing.requires_adreno_vulkan
+@requires_adreno_vulkan
 @pytest.mark.skipif(not TARGET_SUPPORTS_EXTENSION, reason="Device not supported.")
 def test_non_batch_fp32():
     @I.ir_module
@@ -65,10 +69,10 @@ def test_non_batch_fp32():
                 R.output(gv)
             return gv
 
-    verify_results(Matmul, backend="vulkan", cfg=None, opts=TARGET_OPTS, use_cpu=True)
+    verify_results(Matmul, target, ref_target)
 
 
-@tvm.testing.requires_adreno_vulkan
+@requires_adreno_vulkan
 @pytest.mark.skipif(not TARGET_SUPPORTS_EXTENSION, reason="Device not supported.")
 def test_batch_fp16():
     @I.ir_module
@@ -82,10 +86,10 @@ def test_batch_fp16():
                 R.output(gv)
             return gv
 
-    verify_results(Matmul, backend="vulkan", cfg=None, opts=TARGET_OPTS, use_cpu=True)
+    verify_results(Matmul, target, ref_target)
 
 
-@tvm.testing.requires_adreno_vulkan
+@requires_adreno_vulkan
 @pytest.mark.skipif(not TARGET_SUPPORTS_EXTENSION, reason="Device not supported.")
 def test_batch_fp32():
     @I.ir_module
@@ -99,10 +103,10 @@ def test_batch_fp32():
                 R.output(gv)
             return gv
 
-    verify_results(Matmul, backend="vulkan", cfg=None, opts=TARGET_OPTS, use_cpu=True)
+    verify_results(Matmul, target, ref_target)
 
 
-@tvm.testing.requires_adreno_vulkan
+@requires_adreno_vulkan
 @pytest.mark.skipif(not TARGET_SUPPORTS_EXTENSION, reason="Device not supported.")
 def test_invalid_shape():
     @I.ir_module
@@ -116,10 +120,10 @@ def test_invalid_shape():
                 R.output(gv)
             return gv
 
-    verify_results(Matmul, backend="vulkan", cfg=None, opts=TARGET_OPTS, use_cpu=True)
+    verify_results(Matmul, target, ref_target)
 
 
-@tvm.testing.requires_adreno_vulkan
+@requires_adreno_vulkan
 @pytest.mark.skipif(not TARGET_SUPPORTS_EXTENSION, reason="Device not supported.")
 def test_invalid_dtype():
     @I.ir_module
@@ -133,7 +137,7 @@ def test_invalid_dtype():
                 R.output(gv)
             return gv
 
-    verify_results(Matmul, backend="vulkan", cfg=None, opts=TARGET_OPTS, use_cpu=True)
+    verify_results(Matmul, target, ref_target)
 
 
 if __name__ == "__main__":

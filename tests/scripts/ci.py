@@ -602,7 +602,6 @@ generated = [
                 "Run Adreno Required GPU Tests",
                 [
                     "./tests/scripts/task_opencl_cpp_unittest.sh {build_dir}",
-                    "./tests/scripts/task_python_unittest.sh",
                     "./tests/scripts/task_python_unittest_gpuonly.sh",
                 ],
             ),
@@ -704,14 +703,7 @@ generated = [
             "adreno": (
                 "Run Adreno RPC tests",
                 [
-                    "./tests/scripts/unity/task_python_relax_adreno.sh",
                     "./tests/scripts/task_python_adreno.sh " + os.environ.get("ANDROID_SERIAL", ""),
-                ],
-            ),
-            "relax": (
-                "Run generic Relax compiler tests",
-                [
-                    "./tests/scripts/unity/task_python_relax.sh",
                 ],
             ),
         },

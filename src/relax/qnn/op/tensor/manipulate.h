@@ -35,8 +35,8 @@
 namespace tvm {
 namespace relax {
 namespace qnn {
-Expr concat(Expr data, Expr input_scales, Expr input_zero_points,
-                     Expr output_scale, Expr output_zero_point, int axis);
+Expr concat(Expr data, Expr input_scales, Expr input_zero_points, Expr output_scale,
+            Expr output_zero_point, int axis);
 
 }  // namespace qnn
 }  // namespace relax

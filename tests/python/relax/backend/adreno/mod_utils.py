@@ -141,28 +141,28 @@ def get_clml_conv2d_codegen(
         "name": "",
         "inputs": [],
         "attrs": {
-            "groups": [[str(groups)]],
-            "num_outputs": "1",
-            "data_layout": [["NCHW"]],
-            "kernel_layout": [[weight_layout]],
-            "dilation": [[str(dilation[0]), str(dilation[1])]],
-            "out_layout": [["NCHW"]],
-            "out_dtype": [[out_dtype]],
-            "shape": [[list(output_shape)]],
-            "dtype": [[dtype]],
-            "padding": [[str(p) for p in padding]],
-            "strides": [[str(s) for s in stride]],
+            "groups": groups,
+            "num_outputs": 1,
+            "data_layout": "NCHW",
+            "kernel_layout": weight_layout,
+            "dilation": dilation,
+            "out_layout": "NCHW",
+            "out_dtype": out_dtype,
+            "shape": [list(output_shape)],
+            "dtype": [dtype],
+            "padding": padding,
+            "strides": stride,
         },
     }
 
     if has_activation:
-        node["attrs"]["activation_type"] = [["relu"]]
+        node["attrs"]["activation_type"] = "relu"
 
     nodes = [
         {
             "op": "input",
             "name": "",
-            "attrs": {"shape": [[list(data_shape)]], "dtype": [[str(dtype)]]},
+            "attrs": {"shape": [list(data_shape)], "dtype": [str(dtype)]},
         },
     ]
 
@@ -170,7 +170,7 @@ def get_clml_conv2d_codegen(
         {
             "op": "const",
             "name": "",
-            "attrs": {"shape": [[list(weight_shape)]], "dtype": [[str(dtype)]]},
+            "attrs": {"shape": [list(weight_shape)], "dtype": [str(dtype)]},
         }
     )
 
@@ -181,20 +181,20 @@ def get_clml_conv2d_codegen(
                 "op": "const",
                 "name": "",
                 "attrs": {
-                    "shape": [[[1, weight_shape[1] if is_depthwise else weight_shape[0], 1, 1]]],
-                    "dtype": [[bias_dtype]],
+                    "shape": [[1, weight_shape[1] if is_depthwise else weight_shape[0], 1, 1]],
+                    "dtype": [bias_dtype],
                 },
             }
         )
 
     if has_bn:
-        bn_shape = [[1, weight_shape[0], 1, 1]]
+        bn_shape = [1, weight_shape[0], 1, 1]
         # conv2d + bn --> conv2d + Add due to OptimizeBatchNorm transformation Pass
         nodes.append(
             {
                 "name": "",
                 "op": "const",
-                "attrs": {"dtype": [[dtype]], "shape": [[[1, weight_shape[0], 1, 1]]]},
+                "attrs": {"dtype": [dtype], "shape": [[1, weight_shape[0], 1, 1]]},
             },
         )
 
@@ -202,7 +202,7 @@ def get_clml_conv2d_codegen(
     for _ in range(len(nodes)):
         node["inputs"].append([input_idx, 0, 0])
         input_idx += 1
-    node["attrs"]["num_inputs"] = str(len(nodes))
+    node["attrs"]["num_inputs"] = len(nodes)
     nodes.append(node)
     return nodes
 
@@ -245,31 +245,31 @@ def get_conv2d_transpose_expected_codegen(
     dshape, kshape, channels, kernel_size, strides, padding, dilation, dtype, output_shape
 ):
     attrs = {
-        "data_layout": [["NCHW"]],
-        "kernel_layout": [["OIHW"]],
-        "groups": [["1"]],
-        "dilation": [[str(p) for p in dilation]],
-        "num_inputs": "2",
-        "num_outputs": "1",
-        "padding": [[str(p) for p in padding]],
-        "shape": [[list(output_shape)]],
-        "dtype": [[dtype]],
-        "strides": [[str(s) for s in strides]],
-        "out_dtype": [[""]],
-        "out_layout": [["NCHW"]],
-        "output_padding": [["0", "0"]],
+        "data_layout": "NCHW",
+        "kernel_layout": "OIHW",
+        "groups": 1,
+        "dilation": dilation,
+        "num_inputs": 2,
+        "num_outputs": 1,
+        "padding": padding,
+        "shape": [list(output_shape)],
+        "dtype": [dtype],
+        "strides": strides,
+        "out_dtype": "",
+        "out_layout": "NCHW",
+        "output_padding": [0, 0],
     }
 
     exp_codegen = [
         {
             "op": "input",
             "name": "",
-            "attrs": {"shape": [[list(dshape)]], "dtype": [[str(dtype)]]},
+            "attrs": {"shape": [list(dshape)], "dtype": [str(dtype)]},
         },
         {
             "op": "const",
             "name": "",
-            "attrs": {"shape": [[list(kshape)]], "dtype": [[str(dtype)]]},
+            "attrs": {"shape": [list(kshape)], "dtype": [str(dtype)]},
         },
         {
             "op": "kernel",
@@ -405,27 +405,27 @@ def get_maxpool_expected_codegen(input_shape, pool_size, stride, padding, pool_t
     output_shape = [adjusted_input_shape[0], adjusted_input_shape[1], pool_height, pool_width]
 
     attrs = {
-        "ceil_mode": [["0"]],
-        "dilation": [["1", "1"]],
-        "layout": [["NCHW"]],
-        "num_inputs": "1",
-        "num_outputs": "1",
-        "out_layout": [["NCHW"]],
-        "padding": [[str(0) for p in padding]],
-        "pool_size": [[str(p) for p in pool_size]],
-        "shape": [[list(output_shape)]],
-        "dtype": [[dtype]],
-        "strides": [[str(s) for s in stride]],
-        "count_include_pad": [["0"]],
+        "ceil_mode": 0,
+        "dilation": [1, 1],
+        "layout": "NCHW",
+        "num_inputs": 1,
+        "num_outputs": 1,
+        "out_layout": "NCHW",
+        "padding": list(padding),
+        "pool_size": pool_size,
+        "shape": [list(output_shape)],
+        "dtype": [dtype],
+        "strides": stride,
+        "count_include_pad": 0,
     }
     if sum(padding):
-        attrs["count_include_pad"] = [["0"]]
+        attrs["count_include_pad"] = 0
 
     exp_codegen = [
         {
             "op": "input",
             "name": "",
-            "attrs": {"shape": [[list(adjusted_input_shape)]], "dtype": [[str(dtype)]]},
+            "attrs": {"shape": [list(adjusted_input_shape)], "dtype": [str(dtype)]},
         },
         {
             "op": "kernel",
@@ -497,27 +497,27 @@ def get_avgpool_expected_codegen(input_shape, pool_size, stride, padding, pool_t
     output_shape = [adjusted_input_shape[0], adjusted_input_shape[1], pool_height, pool_width]
 
     attrs = {
-        "ceil_mode": [["0"]],
-        "dilation": [["1", "1"]],
-        "layout": [["NCHW"]],
-        "num_inputs": "1",
-        "num_outputs": "1",
-        "out_layout": [["NCHW"]],
-        "padding": [[str(0) for p in padding]],
-        "pool_size": [[str(p) for p in pool_size]],
-        "shape": [[list(output_shape)]],
-        "dtype": [[dtype]],
-        "strides": [[str(s) for s in stride]],
-        "count_include_pad": [["0"]],
+        "ceil_mode": 0,
+        "dilation": [1, 1],
+        "layout": "NCHW",
+        "num_inputs": 1,
+        "num_outputs": 1,
+        "out_layout": "NCHW",
+        "padding": list(padding),
+        "pool_size": pool_size,
+        "shape": [list(output_shape)],
+        "dtype": [dtype],
+        "strides": stride,
+        "count_include_pad": 0,
     }
     if sum(padding):
-        attrs["count_include_pad"] = [["0"]]
+        attrs["count_include_pad"] = 0
 
     exp_codegen = [
         {
             "op": "input",
             "name": "",
-            "attrs": {"shape": [[list(adjusted_input_shape)]], "dtype": [[str(dtype)]]},
+            "attrs": {"shape": [list(adjusted_input_shape)], "dtype": [str(dtype)]},
         },
         {
             "op": "kernel",
@@ -566,18 +566,18 @@ def get_relax_reshape_codegen(input_shape, output_shape, dtype):
     expected_codegen_str = [
         {
             "attrs": {
-                "dtype": [[dtype]],
-                "shape": [[list(input_shape)]],
+                "dtype": [dtype],
+                "shape": [list(input_shape)],
             },
             "name": "",
             "op": "input",
         },
         {
             "attrs": {
-                "dtype": [[dtype]],
-                "num_inputs": "1",
-                "num_outputs": "1",
-                "shape": [[expected_output_shape]],
+                "dtype": [dtype],
+                "num_inputs": 1,
+                "num_outputs": 1,
+                "shape": [expected_output_shape],
             },
             "inputs": [[0, 0, 0]],
             "name": "",
@@ -630,19 +630,19 @@ def get_global_avgpool_expected_codegen(input_shape, keep_dims, dtype):
         else [input_shape[0], input_shape[1], 1, 1]
     )
     attrs = {
-        "num_inputs": "1",
-        "num_outputs": "1",
-        "shape": [[list(output_shape)]],
-        "dtype": [[dtype]],
-        "axis": [["2", "3"]],
-        "keepdims": [["1" if keep_dims else "0"]],
+        "num_inputs": 1,
+        "num_outputs": 1,
+        "shape": [list(output_shape)],
+        "dtype": [dtype],
+        "axis": [2, 3],
+        "keepdims": 1 if keep_dims else 0,
     }
 
     exp_codegen = [
         {
             "op": "input",
             "name": "",
-            "attrs": {"shape": [[list(input_shape)]], "dtype": [[str(dtype)]]},
+            "attrs": {"shape": [list(input_shape)], "dtype": [str(dtype)]},
         },
         {"op": "kernel", "name": "", "inputs": [[0, 0, 0]], "attrs": attrs},
     ]
@@ -693,27 +693,27 @@ def get_global_maxpool_expected_codegen(input_shape, pool_size, stride, padding,
     output_shape = [adjusted_input_shape[0], adjusted_input_shape[1], 1, 1]
 
     attrs = {
-        "ceil_mode": [["0"]],
-        "dilation": [["1", "1"]],
-        "layout": [["NCHW"]],
-        "num_inputs": "1",
-        "num_outputs": "1",
-        "out_layout": [["NCHW"]],
-        "padding": [[str(0) for p in padding]],
-        "pool_size": [[str(p) for p in pool_size]],
-        "shape": [[list(output_shape)]],
-        "dtype": [[dtype]],
-        "strides": [[str(s) for s in stride]],
-        "count_include_pad": [["0"]],
+        "ceil_mode": 0,
+        "dilation": [1, 1],
+        "layout": "NCHW",
+        "num_inputs": 1,
+        "num_outputs": 1,
+        "out_layout": "NCHW",
+        "padding": padding,
+        "pool_size": pool_size,
+        "shape": [list(output_shape)],
+        "dtype": [dtype],
+        "strides": stride,
+        "count_include_pad": 0,
     }
     if sum(padding):
-        attrs["count_include_pad"] = [["0"]]
+        attrs["count_include_pad"] = 0
 
     exp_codegen = [
         {
             "op": "input",
             "name": "",
-            "attrs": {"shape": [[list(adjusted_input_shape)]], "dtype": [[str(dtype)]]},
+            "attrs": {"shape": [list(adjusted_input_shape)], "dtype": [str(dtype)]},
         },
         {
             "op": "kernel",
@@ -754,10 +754,10 @@ def get_dequant_matmul_module(K, N):
             lm_head_q_weight1 = T.match_buffer(weight, (T.int64(K // 8), T.int64(N)), "uint32")
             lm_head_q_scale1 = T.match_buffer(scale, (T.int64(K // 32), T.int64(N)), "float16")
             dequantize = T.match_buffer(var_dequantize, (T.int64(K), T.int64(N)), "float16")
-            # with T.block("root"):
+            # with T.sblock("root"):
             compute = T.alloc_buffer((T.int64(K), T.int64(N)), "float16")
             for i0, i1 in T.grid(T.int64(K), T.int64(N)):
-                with T.block("compute"):
+                with T.sblock("compute"):
                     v_i0, v_i1 = T.axis.remap("SS", [i0, i1])
                     T.reads(lm_head_q_weight1[v_i0 // T.int64(8), v_i1])
                     T.writes(compute[v_i0, v_i1])
@@ -772,7 +772,7 @@ def get_dequant_matmul_module(K, N):
                         ),
                     )
             for i0, i1 in T.grid(T.int64(K), T.int64(N)):
-                with T.block("dequantize"):
+                with T.sblock("dequantize"):
                     v_i0, v_i1 = T.axis.remap("SS", [i0, i1])
                     T.reads(compute[v_i0, v_i1], lm_head_q_scale1[v_i0 // T.int64(32), v_i1])
                     T.writes(dequantize[v_i0, v_i1])
@@ -813,10 +813,10 @@ def get_dequant_vec_matmul_module(K, N):
             lm_head_q_weight1 = T.match_buffer(weight, (T.int64(K // 8), vocab_size), "uint32")
             lm_head_q_scale1 = T.match_buffer(scale, (T.int64(K // 32), vocab_size), "float16")
             dequantize = T.match_buffer(var_dequantize, (T.int64(K), vocab_size), "float16")
-            # with T.block("root"):
+            # with T.sblock("root"):
             compute = T.alloc_buffer((T.int64(K), vocab_size), "float16")
             for i0, i1 in T.grid(T.int64(K), vocab_size):
-                with T.block("compute"):
+                with T.sblock("compute"):
                     v_i0, v_i1 = T.axis.remap("SS", [i0, i1])
                     T.reads(lm_head_q_weight1[v_i0 // T.int64(8), v_i1])
                     T.writes(compute[v_i0, v_i1])
@@ -831,7 +831,7 @@ def get_dequant_vec_matmul_module(K, N):
                         ),
                     )
             for i0, i1 in T.grid(T.int64(K), vocab_size):
-                with T.block("dequantize"):
+                with T.sblock("dequantize"):
                     v_i0, v_i1 = T.axis.remap("SS", [i0, i1])
                     T.reads(compute[v_i0, v_i1], lm_head_q_scale1[v_i0 // T.int64(32), v_i1])
                     T.writes(dequantize[v_i0, v_i1])

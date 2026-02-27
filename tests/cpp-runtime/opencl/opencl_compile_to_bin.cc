@@ -155,8 +155,8 @@ class OpenCLCompileBin : public ::testing::Test {
           std::regex_replace(kernelTemplate, std::regex("kernel_name_placeholder"), kernel_name);
       std::string name1 = kernel_name + "0";
       std::string name2 = kernel_name + "1";
-      FunctionInfo fi1(name1, {}, {}, {});
-      FunctionInfo fi2(name2, {}, {}, {});
+      FunctionInfo fi1(name1, {}, {}, {}, {});
+      FunctionInfo fi2(name2, {}, {}, {}, {});
       m_fmap.Set(name1, fi1);
       m_fmap.Set(name2, fi2);
       m_kernelNames[i * 2] = name1;

@@ -27,8 +27,9 @@
 
 #include <string>
 #include <utility>
-#include "tvm/relax/qnn/attrs.h"
+
 #include "../../../op/op_common.h"
+#include "tvm/relax/qnn/attrs.h"
 
 namespace tvm {
 namespace relax {
@@ -36,20 +37,20 @@ namespace relax {
 template <typename T>
 inline Expr MakeConv(Expr data, Expr weight, Expr input_zero_pt, Expr weight_zero_pt,
                      ffi::Optional<Expr> input_scale, ffi::Optional<Expr> weight_scale,
-                     ffi::Array<IntImm> strides, ffi::Array<IntImm> padding,
-                     ffi::Array<IntImm> dilation, int groups, ffi::String data_layout,
+                     ffi::Array<int64_t> strides, ffi::Array<int64_t> padding,
+                     ffi::Array<int64_t> dilation, int groups, ffi::String data_layout,
                      ffi::String kernel_layout, ffi::String out_layout, DataType out_dtype,
                      std::string op_name) {
   auto attrs = ffi::make_object<T>();
-  attrs->strides = ConvertIntImmToInt64(strides);
-  attrs->padding = ConvertIntImmToInt64(padding);
-  attrs->dilation = ConvertIntImmToInt64(dilation);
+  attrs->strides = std::move(strides);
+  attrs->padding = std::move(padding);
+  attrs->dilation = std::move(dilation);
   attrs->groups = groups;
   attrs->data_layout = std::move(data_layout);
   attrs->kernel_layout = std::move(kernel_layout);
   attrs->out_layout = std::move(out_layout);
   attrs->out_dtype = std::move(out_dtype);
-  ICHECK((input_scale && weight_scale) || (!input_scale && !weight_scale))
+  TVM_FFI_ICHECK((input_scale && weight_scale) || (!input_scale && !weight_scale))
       << "Can't Create Op where only one of Input Scale and Kernel Scale is Present";
 
   const Op& op = Op::Get(op_name);
@@ -64,7 +65,7 @@ inline Expr MakeConv(Expr data, Expr weight, Expr input_zero_pt, Expr weight_zer
 /*! \brief 2D convolution */
 Expr conv2d(Expr data, Expr weight, Expr data_zero_point, Expr weight_zero_pt,
             ffi::Optional<Expr> data_scale, ffi::Optional<Expr> weight_scale,
-            ffi::Array<IntImm> strides, ffi::Array<IntImm> padding, ffi::Array<IntImm> dilation,
+            ffi::Array<int64_t> strides, ffi::Array<int64_t> padding, ffi::Array<int64_t> dilation,
             int groups, ffi::String data_layout, ffi::String kernel_layout,
             ffi::Optional<ffi::String> out_layout, DataType out_dtype);
 

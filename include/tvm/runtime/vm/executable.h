@@ -187,11 +187,6 @@ class VMExecutable : public ffi::ModuleObj {
    */
   void SaveMemoryScopeSection(support::Stream* strm) const;
   /*!
-   * \brief Save the memory scopes.
-   * \param strm The output stream.
-   */
-  void SaveMemoryScopeSection(dmlc::Stream* strm) const;
-  /*!
    * \brief Save the constant pool.
    * \param strm The input stream.
    */
@@ -216,11 +211,6 @@ class VMExecutable : public ffi::ModuleObj {
    * \param strm The input stream.
    */
   void LoadMemoryScopeSection(support::Stream* strm);
-  /*!
-   * \brief Load the memory scopes.
-   * \param strm The input stream.
-   */
-  void LoadMemoryScopeSection(dmlc::Stream* strm);
   /*!
    * \brief Load the constant pool.
    * \param strm The input stream.

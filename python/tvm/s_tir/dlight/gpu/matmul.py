@@ -977,7 +977,7 @@ class Matmul(GPUScheduleRule):
 
         if (
             ((target.kind.name == "opencl") or (target.kind.name == "vulkan"))
-            and (("android" in str(target.host)) or ("adreno" in str(target.device_name)))
+            and ("adreno" in target.keys)
         ) and not is_inner_reduction(block_stmt, iter_infos):
             ret = self.sch_outer_reduction(sch, main_block, blocks, target)
             if ret is not None:
@@ -1110,10 +1110,10 @@ class Matmul(GPUScheduleRule):
     def sch_outer_reduction(
         self,
         sch: s_tir.Schedule,
-        config: Config,
         reduction_block: s_tir.schedule.SBlockRV,
-        blocks: list[s_tir.schedule.SBlockRV],
-    ) -> s_tir.Schedule | None:
+        blocks: List[s_tir.schedule.SBlockRV],
+        target: Target,
+    ) -> Optional[s_tir.Schedule]:
         """Get vectorization factor"""
 
         if target.kind.name == "opencl":

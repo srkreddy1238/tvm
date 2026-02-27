@@ -92,12 +92,14 @@ Layout::Layout(const ffi::Array<IterVar>& axes) {
         TVM_FFI_ICHECK_GT(factor->value, 0);
         repr << factor->value;
       } else {
-        TVM_FFI_ICHECK(!is_grouped) << "Only Subordinate Axes with extent is allowed within a packed dim";
+        TVM_FFI_ICHECK(!is_grouped)
+            << "Only Subordinate Axes with extent is allowed within a packed dim";
       }
       TVM_FFI_ICHECK_EQ(axis->var.get()->name_hint.size(), 1)
           << "Invalid layout axis " << axis->var.get()->name_hint;
       char c = axis->var.get()->name_hint.operator std::string()[0];
-      TVM_FFI_ICHECK((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) << "Invalid layout axis " << c;
+      TVM_FFI_ICHECK((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'))
+          << "Invalid layout axis " << c;
       repr << axis->var.get()->name_hint;
     }
     if (is_grouped) repr << "]";
@@ -123,8 +125,8 @@ Layout::Layout(const std::string& name, DataType dtype) {  // NOLINT(*)
 
   for (char c : name) {
     if (c >= 'A' && c <= 'Z') {
-      TVM_FFI_ICHECK_EQ(factor, 0) << "Invalid layout " << name << ": invalid factor size " << factor
-                           << " before dimension " << c;
+      TVM_FFI_ICHECK_EQ(factor, 0) << "Invalid layout " << name << ": invalid factor size "
+                                   << factor << " before dimension " << c;
       IterVar axis(Range(IntImm(dtype, 0), Var(std::string(1, c), dtype)),
                    Var(std::string(1, c), dtype), tir::kDataPar);
       if (!in_packing) {
@@ -133,8 +135,8 @@ Layout::Layout(const std::string& name, DataType dtype) {  // NOLINT(*)
         unpacked_axes.push_back(axis);
       }
     } else if (c >= 'a' && c <= 'z') {
-      TVM_FFI_ICHECK_GT(factor, 0) << "Invalid layout " << name << ": invalid factor size " << factor
-                           << " for dimension " << c;
+      TVM_FFI_ICHECK_GT(factor, 0) << "Invalid layout " << name << ": invalid factor size "
+                                   << factor << " for dimension " << c;
       std::stringstream name;
       name << factor << c;
       IterVar axis(Range(IntImm(dtype, 0), IntImm(dtype, factor)), Var(name.str(), dtype),
@@ -152,7 +154,8 @@ Layout::Layout(const std::string& name, DataType dtype) {  // NOLINT(*)
       TVM_FFI_ICHECK(!in_packing) << "Invalid layout " << name << ": can't do nested packing";
       in_packing = true;
     } else if (c == ']') {
-      TVM_FFI_ICHECK(in_packing) << "Invalid layout " << name << ": encountered ] without matching bracket";
+      TVM_FFI_ICHECK(in_packing) << "Invalid layout " << name
+                                 << ": encountered ] without matching bracket";
       TVM_FFI_ICHECK(unpacked_axes.size() > 1)
           << "Invalid layout " << name << ": found empty/single packed axis";
       std::stringstream ss;
@@ -177,8 +180,8 @@ Layout::Layout(const std::string& name, DataType dtype) {  // NOLINT(*)
       TVM_FFI_THROW(InternalError) << "Invalid layout " << name;
     }
   }
-  TVM_FFI_ICHECK(in_packing == false) << "Invalid Layout " << name
-                              << ": haven't terminated the packing sequence";
+  TVM_FFI_ICHECK(in_packing == false)
+      << "Invalid Layout " << name << ": haven't terminated the packing sequence";
 
   // validate layout
   std::vector<int> axis_cnt(256, 0);
@@ -197,8 +200,9 @@ Layout::Layout(const std::string& name, DataType dtype) {  // NOLINT(*)
       if (axis >= 'a' && axis <= 'z') {
         TVM_FFI_ICHECK(axis_cnt[axis - 'a' + 'A'])
             << "Invalid layout " << name << ": missing axis " << std::toupper(axis);
-        TVM_FFI_ICHECK(axis_cnt[axis] == 1) << "Invalid layout " << name
-                                    << ": found more than one subordinate " << std::toupper(axis);
+        TVM_FFI_ICHECK(axis_cnt[axis] == 1)
+            << "Invalid layout " << name << ": found more than one subordinate "
+            << std::toupper(axis);
       }
     }
   }
@@ -250,7 +254,8 @@ IterVar Layout::PackIterVar(ffi::Array<IterVar> iter_vars) {
 
   DataType dtype = iter_vars[0]->dom->extent.as<PrimExpr>().value()->dtype;
   for (auto itvar : iter_vars) {
-    TVM_FFI_ICHECK(itvar->dom->extent.as<IntImm>()) << "Packed Axis can contain only Subordinate Axes";
+    TVM_FFI_ICHECK(itvar->dom->extent.as<IntImm>())
+        << "Packed Axis can contain only Subordinate Axes";
     name << itvar->dom->extent.as<IntImm>().value() << itvar->var->name_hint;
     extent = extent * itvar->dom->extent.as<IntImm>().value()->value;
   }

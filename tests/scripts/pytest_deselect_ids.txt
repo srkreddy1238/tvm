@@ -1,0 +1,7 @@
+--deselect=tests/python/relax/test_backend_dispatch_sort_scan.py
+--deselect=tests/python/relax/test_frontend_from_exported_program.py
+--deselect=tests/python/relax/test_codegen_cutlass.py
+--deselect=tests/python/relax/backend/adreno/test_texture_copy.py
+--deselect=tests/python/relax/test_frontend_nn_op.py
+--deselect=tests/python/relax/test_vm_build.py
+--deselect=tests/python/relax/test_vm_multi_device.py

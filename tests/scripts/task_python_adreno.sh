@@ -54,7 +54,7 @@ export TVM_TRACKER_HOST=127.0.0.1
 FREE_PORT=`find_free_port 9000 1`
 export TVM_TRACKER_PORT=$FREE_PORT
 export RPC_DEVICE_KEY="android"
-export RPC_TARGET="adreno"
+export ADRENO_TARGET="adreno"
 export TVM_NDK_CC="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android28-clang"
 
 env PYTHONPATH=python python3 -m tvm.exec.rpc_tracker --host "${TVM_TRACKER_HOST}" --port "${TVM_TRACKER_PORT}" &
@@ -96,7 +96,7 @@ find . -type f -path "*.pyc" | xargs rm -f
 python3 -m pip install --target=python -v ./3rdparty/tvm-ffi/
 
 # Relax test
-pytest tests/python/relax/backend/adreno
+run_pytest -s tests/python/relax/backend/adreno
 
 kill ${TRACKER_PID} || true
 kill ${DEVICE_PID} || true

@@ -80,7 +80,7 @@ def conv2d(  # Conv2d inputs
                 name="kernel_scale",
             )
         else:
-            oc_idx = tvm.tir.layout(data_layout).index_of("C")
+            oc_idx = tvm.s_tir.layout(data_layout).index_of("C")
             out = te.compute(
                 out.shape,
                 lambda *indices: tvm.tir.multiply(

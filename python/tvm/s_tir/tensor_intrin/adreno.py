@@ -37,11 +37,11 @@ def get_dotprod_intrin(in_dtype, out_dtype):
         B = T.match_buffer(b, (4,), align=4, dtype="int8", offset_factor=1, scope="local")
         C = T.match_buffer(c, (1,), align=1, dtype="int32", offset_factor=1, scope="local")
 
-        with T.block("root"):
+        with T.sblock("root"):
             T.reads(C[0], A[0:4], B[0:4])
             T.writes(C[0])
             for lj in range(4):
-                with T.block("dp4a_update"):
+                with T.sblock("dp4a_update"):
                     j = T.axis.reduce(4, lj)
                     C[0] = C[0] + T.Cast("int32", A[j]) * T.Cast("int32", B[j])
 
@@ -51,7 +51,7 @@ def get_dotprod_intrin(in_dtype, out_dtype):
         B = T.match_buffer(b, (4,), align=4, dtype="int8", offset_factor=1, scope="local")
         C = T.match_buffer(c, (1,), align=1, dtype="int32", offset_factor=1, scope="local")
 
-        with T.block("dp4a_update"):
+        with T.sblock("dp4a_update"):
             T.reads(C[0], A[0:4], B[0:4])
             T.writes(C[0])
             C[0] = T.dp4a(A[0:4], B[0:4], C[0])
@@ -98,11 +98,11 @@ def get_wmma_fill_intrin(
             offset_factor=offset_factor,
             scope="wmma.accumulator",
         )
-        with T.block("root"):
+        with T.sblock("root"):
             T.reads()
             T.writes(C[0:m_dim, 0:n_dim])
             for i, j in T.grid(m_dim, n_dim):
-                with T.block("init"):
+                with T.sblock("init"):
                     vii, vjj = T.axis.remap("SS", [i, j])
                     C[vii, vjj] = zero
 
@@ -119,7 +119,7 @@ def get_wmma_fill_intrin(
             scope="wmma.accumulator",
             strides=[d1, d0],
         )
-        with T.block("root"):
+        with T.sblock("root"):
             T.reads()
             T.writes(C[0:m_dim, 0:n_dim])
             T.evaluate(
@@ -168,11 +168,11 @@ def get_wmma_load_intrin(
             offset_factor=offset_factor,
             scope=wmma_fragment_scope,
         )
-        with T.block("root"):
+        with T.sblock("root"):
             T.reads(A[0:frag_m, 0:frag_n])
             T.writes(C[0:frag_m, 0:frag_n])
             for i, j in T.grid(frag_m, frag_n):
-                with T.block("load"):
+                with T.sblock("load"):
                     vii, vjj = T.axis.remap("SS", [i, j])
                     C[vii, vjj] = A[vii, vjj]
 
@@ -200,7 +200,7 @@ def get_wmma_load_intrin(
             scope=wmma_fragment_scope,
             strides=[d1, d0],
         )
-        with T.block("root"):
+        with T.sblock("root"):
             T.reads(A[0:frag_m, 0:frag_n])
             T.writes(C[0:frag_m, 0:frag_n])
             T.evaluate(
@@ -239,11 +239,11 @@ def get_wmma_store_intrin(
         C = T.match_buffer(
             c, (m_dim, n_dim), dtype, align=64, offset_factor=offset_factor, scope=scope
         )
-        with T.block("root"):
+        with T.sblock("root"):
             T.reads(A[0:m_dim, 0:n_dim])
             T.writes(C[0:m_dim, 0:n_dim])
             for i, j in T.grid(m_dim, n_dim):
-                with T.block("store"):
+                with T.sblock("store"):
                     vii, vjj = T.axis.remap("SS", [i, j])
                     C[vii, vjj] = A[vii, vjj]
 
@@ -271,7 +271,7 @@ def get_wmma_store_intrin(
             scope=scope,
             strides=[s1, s0],
         )
-        with T.block("root"):
+        with T.sblock("root"):
             T.reads(A[0:m_dim, 0:n_dim])
             T.writes(C[0:m_dim, 0:n_dim])
             T.evaluate(
@@ -339,11 +339,11 @@ def get_wmma_sync_intrin(
             scope="wmma.accumulator",
         )
 
-        with T.block("root"):
+        with T.sblock("root"):
             T.reads(C[0:m_dim, 0:n_dim], A[0:m_dim, 0:k_dim], B[0:b_shape_0, 0:b_shape_1])
             T.writes(C[0:m_dim, 0:n_dim])
             for i, j, k in T.grid(m_dim, n_dim, k_dim):
-                with T.block(""):
+                with T.sblock(""):
                     vii, vjj, vkk = T.axis.remap("SSR", [i, j, k])
                     B_index_0, B_index_1 = T.meta_var(maybe_swap(vkk, vjj))
                     C[vii, vjj] = C[vii, vjj] + maybe_cast(A[vii, vkk]) * maybe_cast(
@@ -387,7 +387,7 @@ def get_wmma_sync_intrin(
             strides=[c1, c0],
         )
 
-        with T.block("root"):
+        with T.sblock("root"):
             T.reads(C[0:m_dim, 0:n_dim], A[0:m_dim, 0:k_dim], B[0:b_shape_0, 0:b_shape_1])
             T.writes(C[0:m_dim, 0:n_dim])
             T.evaluate(
@@ -439,11 +439,11 @@ def get_wmma_qcom_intrin(
             offset_factor=offset_factor,
             scope=scope_c,
         )
-        with T.block("root"):
+        with T.sblock("root"):
             T.reads(A[0:frag_n])
             T.writes(C[0:frag_n])
             for j in T.grid(frag_n):
-                with T.block("load"):
+                with T.sblock("load"):
                     vjj = T.axis.remap("S", [j])
                     C[vjj] = A[vjj]
 
@@ -467,7 +467,7 @@ def get_wmma_qcom_intrin(
             offset_factor=offset_factor,
             scope=scope_c,
         )
-        with T.block("root"):
+        with T.sblock("root"):
             T.reads(A[0:frag_n])
             T.writes(C[0:frag_n])
             T.evaluate(

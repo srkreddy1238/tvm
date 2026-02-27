@@ -423,7 +423,7 @@ spirv::Value CodeGenSPIRV::VisitExpr_(const CallNode* op) {
     if (!spirv_support_.supports_qcom_cooperative_matrix_conversion) {
       LOG(FATAL) << "Target doesn't Support QCOM cooperative matrix conversion";
     }
-    ICHECK_EQ(op->args.size(), 5U);
+    TVM_FFI_ICHECK_EQ(op->args.size(), 5U);
     bool is_construct = op->op.same_as(builtin::tvm_construct_coopmat_qcom());
 
     /* Extract Fragment Node Ptr from Struct */

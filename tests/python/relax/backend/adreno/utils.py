@@ -16,7 +16,6 @@
 # under the License.
 
 import os
-import copy
 import tempfile
 import numpy as np
 
@@ -29,6 +28,90 @@ from tvm import relax
 from tvm.contrib import utils, ndk, dlpack as dl
 from tvm.script.parser import ir as I, relax as R, tir as T
 from tvm.relax.transform.legalize_ops import adreno as legalize_adreno
+
+
+# Test Infra
+
+
+class run_time_check:
+    def __init__(self, device):
+        self.device = device
+
+    def check(self):
+        # Ensure adreno specific tests
+        if self.device == "real":
+            return "ADRENO_TARGET" in os.environ
+
+        # Adreno CI
+        if "ADRENO_TARGET" in os.environ:
+            return True
+
+        # Tests that can run on generic targets too
+        elif self.device == "opencl":
+            return tvm.opencl().exist
+        elif self.device == "vulkan":
+            return tvm.vulkan().exist
+        elif self.device == "any":
+            return tvm.opencl().exist or tvm.vulkan().exist
+        else:
+            return False
+
+    def __call__(self):
+        return self.check
+
+
+# OpenCL or Vulkan
+requires_adreno_opencl_vulkan = tvm.testing.Feature(
+    "adreno_opencl_vulkan",
+    "Adreno Vulkan Or OpenCL",
+    run_time_check=run_time_check("any")(),
+    parent_features="gpu" if "ADRENO_TARGET" not in os.environ else "rpc",
+)
+
+# Any Vulkan
+requires_adreno_vulkan = tvm.testing.Feature(
+    "adreno_vulkan",
+    "Adreno Vulkan",
+    cmake_flag="USE_VULKAN",
+    target_kind_enabled="vulkan",
+    run_time_check=run_time_check("vulkan")(),
+    parent_features="gpu" if "ADRENO_TARGET" not in os.environ else "rpc",
+)
+
+# Any OpenCL
+requires_adreno_opencl = tvm.testing.Feature(
+    "adreno_opencl",
+    "Adreno OpenCL",
+    cmake_flag="USE_OPENCL",
+    target_kind_enabled="opencl",
+    run_time_check=run_time_check("opencl")(),
+    parent_features="gpu" if "ADRENO_TARGET" not in os.environ else "rpc",
+)
+
+# Real Adreno GPU OpenCL Target
+requires_adreno_opencl_real = tvm.testing.Feature(
+    "adreno_opencl_real",
+    "Adreno OpenCL Real",
+    cmake_flag="USE_OPENCL",
+    target_kind_enabled="opencl",
+    run_time_check=run_time_check("real")(),
+    parent_features="rpc",
+)
+
+# CLML Codegen
+requires_adreno_clml = tvm.testing.Feature(
+    "adreno_clml",
+    "Adreno OpenCLML",
+    cmake_flag="USE_CLML",
+    target_kind_enabled="opencl",
+    parent_features="opencl" if "ADRENO_TARGET" not in os.environ else "rpc",
+)
+
+
+def is_target_available(target):
+    if "clml" in target.attrs.get("keys", []) and "ADRENO_TARGET" not in os.environ:
+        return False
+    return True
 
 
 class SessionManager:
@@ -65,8 +148,8 @@ class SessionManager:
             rexec = self.rpc.load_module(file_name)
         return rexec
 
-    def device(self, backend: str):
-        return self.rpc.device(backend)
+    def device(self, device: str):
+        return self.rpc.device(device)
 
     @staticmethod
     def is_target_rpc():
@@ -77,10 +160,10 @@ class SessionManager:
         -------
         bool: True if RPC_TARGET is set, False otherwise
         """
-        return os.environ.get("RPC_TARGET") == "adreno"
+        return os.environ.get("ADRENO_TARGET") == "adreno"
 
 
-def run_cpu(mod, inputs, save_lib=False):
+def run_local(mod, inputs, target):
     """
     Run the Relax module on the local CPU for verification.
 
@@ -98,10 +181,7 @@ def run_cpu(mod, inputs, save_lib=False):
     tvm.runtime.NDArray or tuple of tvm.runtime.NDArray
         The output from the module execution.
     """
-    target = tvm.target.Target("llvm")
     ex = relax.build(mod, target)
-    if save_lib:
-        ex.export_library("mod.so")
     dev = tvm.cpu()
     vm = relax.VirtualMachine(ex, dev)
     inputs = [tvm.runtime.tensor(inp, dev) for inp in inputs]
@@ -115,12 +195,11 @@ def run_cpu(mod, inputs, save_lib=False):
     return tvm_output
 
 
-def build_and_run(mod, inputs, backend: Literal["opencl", "vulkan", "llvm"], cfg, opts):
-    tgt = tvm.target.adreno(backend=backend, cfg=cfg, options=opts)
+def build_and_run(mod, inputs, tgt):
     if SessionManager.is_target_rpc():
-        tgt = tvm.target.Target(tgt, host="llvm -mtriple=aarch64-linux-gnu")
+        tgt = tvm.target.Target(tgt, host={"kind": "llvm", "mtriple": "aarch64-linux-gnu"})
     else:
-        tgt = tvm.target.Target(tgt, host="llvm -march=native")
+        tgt = tvm.target.Target(tgt, host={"kind": "llvm"})
 
     relax_pipeline = relax.pipeline.get_default_pipeline(tgt)
     tir_pipeline = tvm.tir.get_default_tir_pipeline(tgt)
@@ -130,13 +209,12 @@ def build_and_run(mod, inputs, backend: Literal["opencl", "vulkan", "llvm"], cfg
 
     with SessionManager() as sess:
         rexec = sess.load_module(ex)
-        dev = sess.device(backend)
+        dev = sess.device(tgt.kind.name)
 
         if "vdevice" in mod.global_infos:
             device_arr = [dev for ii in range(len(mod.global_infos["vdevice"]))]
         else:
             device_arr = [dev]
-
         vm = relax.VirtualMachine(rexec, device_arr)
         inputs = [tvm.runtime.tensor(ip, dev) for ip in inputs]
         vm.set_input("main", *inputs)
@@ -152,26 +230,25 @@ def build_and_run(mod, inputs, backend: Literal["opencl", "vulkan", "llvm"], cfg
     return tvm_output
 
 
-def verify_results(mod, backend, cfg, opts, use_cpu: bool = False):
-    if not tvm.testing.adreno_target_exists():
+def verify_results(mod, target, ref_target):
+    if not is_target_available(target):
         print("Skipping Eval Tests", flush=True)
         return
-
-    backend = backend.split()[0]
-    if backend not in ["opencl", "vulkan"]:
-        raise ValueError(f"Unsupported API: {backend}. Must be 'opencl' or 'vulkan'.")
 
     inputs = []
     for arg in mod["main"].params:
         shape = tuple(shape_val.value for shape_val in arg.struct_info.shape.values)
         inputs.append(np.random.uniform(0, 1, size=shape).astype(arg.struct_info.dtype))
 
-    mod_org, mod_ref = mod, copy.deepcopy(mod)
-    rs_org = build_and_run(mod_org, inputs, backend, cfg, opts)
-    if use_cpu:
-        rs_ref = run_cpu(mod_ref, inputs)
+    mod_org, mod_ref = mod, mod.clone()
+
+    mod_ref = tvm.relax.transform.DecomposeOpsForInference()(mod_ref)
+    if ref_target.kind.name == "llvm":
+        rs_ref = run_local(mod_ref, inputs, ref_target)
     else:
-        rs_ref = build_and_run(mod_ref, inputs, backend, "", "")
+        rs_ref = build_and_run(mod_ref, inputs, ref_target)
+
+    rs_org = build_and_run(mod_org, inputs, target)
 
     for vl_org, vl_ref in zip(rs_org, rs_ref):
         tvm.testing.assert_allclose(vl_org, vl_ref, rtol=1e-3, atol=1e-3)

@@ -696,10 +696,7 @@ void CodeGenOpenCL::SetTextureScope(
   }
 }
 
-bool CodeGenOpenCL::TargetContainsKey(std::string key) {
-  return std::find(target->GetKeys().begin(), target->GetKeys().end(), key) !=
-         target->GetKeys().end();
-}
+bool CodeGenOpenCL::TargetContainsKey(std::string key) { return target->HasKey(key); }
 
 ffi::Module BuildOpenCL(IRModule mod, Target target) {
 #if TVM_ENABLE_SPIRV

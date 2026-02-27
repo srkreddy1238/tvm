@@ -21,8 +21,7 @@ set -euxo pipefail
 export PYTEST_ADDOPTS="-m gpu ${PYTEST_ADDOPTS:-}"
 
 # Test most of the enabled runtimes here.
-# TODO: disabled opencl tests due to segmentation fault. need to re-land "opencl" and "{"kind":"opencl","device":"mali"}"
-export TVM_TEST_TARGETS='cuda;metal;rocm;nvptx'
+export TVM_TEST_TARGETS='cuda;metal;rocm;nvptx;opencl;{"kind":"opencl","device":"mali"}'
 export TVM_UNITTEST_TESTSUITE_NAME=python-unittest-gpu
 
 ./tests/scripts/task_python_unittest.sh
@@ -38,10 +37,9 @@ run_pytest ${TVM_UNITTEST_TESTSUITE_NAME}-1 tests/python/codegen/test_target_cod
 
 # Adreno : A comprehensive Texture tests on Nvidia GPU and clml codegen tests.
 export PYTEST_ADDOPTS=""
-export TVM_TEST_TARGETS="opencl -device=adreno"
-export TVM_UNITTEST_TESTSUITE_NAME=python-codegen-clml-texture
+export TVM_TEST_TARGETS='{"kind":"opencl", "device":"adreno"}'
+export TVM_UNITTEST_TESTSUITE_NAME=python-codegen-vulkan-texture
 
 source tests/scripts/setup-pytest-env.sh
 
-run_pytest ${TVM_UNITTEST_TESTSUITE_NAME}-1 -k "clml" tests/python/relax/backend/adreno/
-run_pytest ${TVM_UNITTEST_TESTSUITE_NAME}-1 -k "texture" tests/python/relax/backend/adreno/
+run_pytest ${TVM_UNITTEST_TESTSUITE_NAME}-1 tests/python/relax/backend/adreno/

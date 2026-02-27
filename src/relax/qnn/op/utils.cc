@@ -24,8 +24,7 @@ namespace relax {
 namespace qnn {
 
 void CheckIntegerInputDtype(const Call& call, const BlockBuilder& ctx,
-                            const TensorStructInfo& data_sinfo,
-                            const std::string& op_name) {
+                            const TensorStructInfo& data_sinfo, const std::string& op_name) {
   if (!data_sinfo->IsUnknownDtype() && !data_sinfo->dtype.is_int() &&
       !data_sinfo->dtype.is_uint()) {
     ctx->ReportFatal(Diagnostic::Error(call)
@@ -34,9 +33,8 @@ void CheckIntegerInputDtype(const Call& call, const BlockBuilder& ctx,
   }
 }
 
-void CheckScaleDtype(const Call& call, const BlockBuilder& ctx,
-                     const TensorStructInfo& sinfo, const std::string& op_name,
-                     const char* name) {
+void CheckScaleDtype(const Call& call, const BlockBuilder& ctx, const TensorStructInfo& sinfo,
+                     const std::string& op_name, const char* name) {
   if (!sinfo->IsUnknownDtype() && !sinfo->dtype.is_float()) {
     ctx->ReportFatal(Diagnostic::Error(call)
                      << op_name << ": " << name
@@ -45,9 +43,8 @@ void CheckScaleDtype(const Call& call, const BlockBuilder& ctx,
   }
 }
 
-void CheckZeroPointDtype(const Call& call, const BlockBuilder& ctx,
-                         const TensorStructInfo& sinfo, const std::string& op_name,
-                         const char* name) {
+void CheckZeroPointDtype(const Call& call, const BlockBuilder& ctx, const TensorStructInfo& sinfo,
+                         const std::string& op_name, const char* name) {
   if (!sinfo->IsUnknownDtype() && !sinfo->dtype.is_int() && !sinfo->dtype.is_uint()) {
     ctx->ReportFatal(Diagnostic::Error(call)
                      << op_name << ": " << name

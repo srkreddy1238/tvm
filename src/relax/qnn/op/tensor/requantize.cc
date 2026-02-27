@@ -24,10 +24,9 @@
 
 #include "./requantize.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdlib>
-
-#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -42,8 +41,7 @@ Expr requantize(Expr data, Expr input_scale, Expr input_zero_point, Expr output_
   attrs->out_dtype = out_dtype;
 
   static const Op& op = Op::Get("relax.qnn.requantize");
-  return Call(op,
-              {data, input_scale, input_zero_point, output_scale, output_zero_point},
+  return Call(op, {data, input_scale, input_zero_point, output_scale, output_zero_point},
               Attrs(attrs));
 }
 
@@ -64,8 +62,7 @@ StructInfo InferStructInfoRequantize(const Call& call, const BlockBuilder& ctx) 
   // Attributes check
   const auto* attrs = call->attrs.as<QuantizeAttrs>();
   if (attrs == nullptr) {
-    ctx->ReportFatal(Diagnostic::Error(call)
-                     << "qnn.requantize is missing QuantizeAttrs.");
+    ctx->ReportFatal(Diagnostic::Error(call) << "qnn.requantize is missing QuantizeAttrs.");
   }
   auto args = GetInputTensorStructInfo(call, ctx);
   TensorStructInfo data_sinfo = args[0];
@@ -150,7 +147,7 @@ InferLayoutOutput InferLayoutRequantize(
     const Call& call, const ffi::Map<ffi::String, ffi::Array<ffi::String>>& desired_layouts,
     const VarLayoutMap& var_layout_map) {
   // No special desired layout for this op
-  ICHECK(NoDesiredLayout(call, desired_layouts));
+  TVM_FFI_ICHECK(NoDesiredLayout(call, desired_layouts));
   LayoutDecision data_layout = GetLayoutDecision(var_layout_map, call->args[0]);
 
   // Requantize is elementwise: output layout == input data layout

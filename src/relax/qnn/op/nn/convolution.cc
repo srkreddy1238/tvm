@@ -42,7 +42,7 @@ namespace relax {
 /* relax.qnn.conv2d */
 Expr conv2d(Expr data, Expr weight, Expr input_zero_pt, Expr weight_zero_pt,
             ffi::Optional<Expr> input_scale, ffi::Optional<Expr> weight_scale,
-            ffi::Array<IntImm> strides, ffi::Array<IntImm> padding, ffi::Array<IntImm> dilation,
+            ffi::Array<int64_t> strides, ffi::Array<int64_t> padding, ffi::Array<int64_t> dilation,
             int groups, ffi::String data_layout, ffi::String kernel_layout,
             ffi::Optional<ffi::String> out_layout, DataType out_dtype) {
   padding = GetCompletePadding2D(std::move(padding));
@@ -53,12 +53,13 @@ Expr conv2d(Expr data, Expr weight, Expr input_zero_pt, Expr weight_zero_pt,
     dilation.push_back(dilation[0]);
   }
 
-  CHECK_GT(groups, 0) << "The number of groups in convolution is expected to be positive. However, "
-                         "the given number of groups is "
-                      << groups;
-  CHECK_EQ(strides.size(), 2)
+  TVM_FFI_CHECK_GT(groups, 0, ValueError)
+      << "The number of groups in convolution is expected to be positive. However, "
+         "the given number of groups is "
+      << groups;
+  TVM_FFI_CHECK_EQ(strides.size(), 2, ValueError)
       << "The input strides length is expected to be 2. However, the given strides is " << strides;
-  CHECK_EQ(dilation.size(), 2)
+  TVM_FFI_CHECK_EQ(dilation.size(), 2, ValueError)
       << "The input dilation length is expected to be 2. However, the given dilation is "
       << dilation;
 
@@ -81,7 +82,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
 
 StructInfo InferStructInfoQnnConv2d(const Call& call, const BlockBuilder& ctx) {
   size_t num_args = call->args.size();
-  ICHECK(num_args == 4 || num_args == 6)
+  TVM_FFI_ICHECK(num_args == 4 || num_args == 6)
       << "Expected Number of Argument to be 4 or 6 arguments but found " << num_args;
 
   bool has_scale = num_args == 6;
@@ -112,21 +113,23 @@ StructInfo InferStructInfoQnnConv2d(const Call& call, const BlockBuilder& ctx) {
   ffi::Optional<ShapeExpr> weight_shape =
       CheckNdimPerLayoutAndGetShape(call, ctx, weight_sinfo, weight_layout);
 
-  ICHECK(GetElementDType(data_sinfo) == GetElementDType(weight_sinfo) ||
-         !attrs->out_dtype.is_void())
+  TVM_FFI_ICHECK(GetElementDType(data_sinfo) == GetElementDType(weight_sinfo) ||
+                 !attrs->out_dtype.is_void())
       << "Cannot Infer Output Datatype";
-  ICHECK(GetElementDType(data_zero_pt_sinfo) == GetElementDType(weight_zero_pt_sinfo))
+  TVM_FFI_ICHECK(GetElementDType(data_zero_pt_sinfo) == GetElementDType(weight_zero_pt_sinfo))
       << "Mismatch between Data Zero Point and Weight Zero Point DataType";
-  ICHECK(data_zero_pt_sinfo.as<TensorStructInfoNode>()->ndim == 0)
+  TVM_FFI_ICHECK(data_zero_pt_sinfo.as<TensorStructInfoNode>()->ndim == 0)
       << "Data Zero Point Must be a Scalar";
-  ICHECK(weight_zero_pt_sinfo.as<TensorStructInfoNode>()->ndim == 0)
+  TVM_FFI_ICHECK(weight_zero_pt_sinfo.as<TensorStructInfoNode>()->ndim == 0)
       << "Weight Zero Point Must be a Scalar";
   if (has_scale) {
-    ICHECK(GetElementDType(data_scale_sinfo.value()) == GetElementDType(weight_scale_sinfo.value()))
+    TVM_FFI_ICHECK(GetElementDType(data_scale_sinfo.value()) ==
+                   GetElementDType(weight_scale_sinfo.value()))
         << "Mismatch between Input and Weight DataType";
-    ICHECK(data_scale_sinfo.as<TensorStructInfoNode>()->ndim == 0) << "Data Scale Must be a Scalar";
-    ICHECK(weight_scale_sinfo.as<TensorStructInfoNode>()->ndim == 0 ||
-           weight_scale_sinfo.as<TensorStructInfoNode>()->ndim == 1)
+    TVM_FFI_ICHECK(data_scale_sinfo.as<TensorStructInfoNode>()->ndim == 0)
+        << "Data Scale Must be a Scalar";
+    TVM_FFI_ICHECK(weight_scale_sinfo.as<TensorStructInfoNode>()->ndim == 0 ||
+                   weight_scale_sinfo.as<TensorStructInfoNode>()->ndim == 1)
         << "Weight Scale Point Must be a Scalar/1-D Tensor";
   }
 
@@ -181,16 +184,16 @@ StructInfo InferStructInfoQnnConv2d(const Call& call, const BlockBuilder& ctx) {
   PrimExpr input_w = data_NCHW_shape[3];
   PrimExpr kernel_h = weight_OIHW_shape[2];
   PrimExpr kernel_w = weight_OIHW_shape[3];
-  PrimExpr padding_h = attrs->padding[0] + attrs->padding[2];
-  PrimExpr padding_w = attrs->padding[1] + attrs->padding[3];
+  PrimExpr padding_h = Integer(attrs->padding[0] + attrs->padding[2]);
+  PrimExpr padding_w = Integer(attrs->padding[1] + attrs->padding[3]);
 
   std::vector<PrimExpr> out_NCHW_shape;
   out_NCHW_shape.resize(4);
   out_NCHW_shape[0] = data_NCHW_shape[0];
   out_NCHW_shape[1] = weight_OIHW_shape[0];
 
-  PrimExpr numerator_h = input_h + padding_h - attrs->dilation[0] * (kernel_h - 1) - 1;
-  PrimExpr numerator_w = input_w + padding_w - attrs->dilation[1] * (kernel_w - 1) - 1;
+  PrimExpr numerator_h = input_h + padding_h - Integer(attrs->dilation[0]) * (kernel_h - 1) - 1;
+  PrimExpr numerator_w = input_w + padding_w - Integer(attrs->dilation[1]) * (kernel_w - 1) - 1;
   out_NCHW_shape[2] = analyzer->Simplify(floordiv(numerator_h, attrs->strides[0]) + 1);
   out_NCHW_shape[3] = analyzer->Simplify(floordiv(numerator_w, attrs->strides[1]) + 1);
 
@@ -203,7 +206,7 @@ InferLayoutOutput InferLayoutQnnConv2d(
     const VarLayoutMap& var_layout_map) {
   const auto& it = desired_layouts.find("relax.qnn.conv2d_part");
   const auto* attrs = call->attrs.as<Conv2DAttrs>();
-  ICHECK(attrs) << "Invalid Call";
+  TVM_FFI_ICHECK(attrs) << "Invalid Call";
 
   LayoutDecision data_layout, weight_layout, output_layout;
   data_layout = GetLayoutDecision(var_layout_map, call->args[0]);

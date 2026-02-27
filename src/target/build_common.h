@@ -49,6 +49,7 @@ inline ffi::Map<ffi::String, runtime::FunctionInfo> ExtractFuncInfo(const IRModu
 
     ffi::Array<DLDataType> arg_types;
     ffi::Array<runtime::ArgExtraTags> arg_extra_tags;
+    ffi::Array<ffi::String> memory_scopes;
     for (size_t i = 0; i < f->params.size(); ++i) {
       arg_types.push_back(f->params[i].dtype());
       auto is_tensormap = [](const tir::Var& var) -> bool {
@@ -71,7 +72,8 @@ inline ffi::Map<ffi::String, runtime::FunctionInfo> ExtractFuncInfo(const IRModu
     if (global_symbol) {
       fmap.Set(global_symbol.value(),
                runtime::FunctionInfo(global_symbol.value(), std::move(arg_types),
-                                     std::move(launch_param_tags), std::move(arg_extra_tags)));
+                                     std::move(launch_param_tags), std::move(memory_scopes),
+                                     std::move(arg_extra_tags)));
     }
   }
   return fmap;

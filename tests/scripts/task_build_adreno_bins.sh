@@ -65,4 +65,4 @@ cmake -DANDROID_ABI=arm64-v8a \
       -DCMAKE_C_COMPILER="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android28-clang" \
       -DMACHINE_NAME="aarch64-linux-gnu" ..
 
-make -j$(nproc) tvm_rpc opencl-cpptest vulkan-cpptest
+make -j$(nproc) tvm_rpc opencl-cpptest

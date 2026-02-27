@@ -19,7 +19,6 @@
 
 // utils.h (qnn needed helper functions)
 
-
 #ifndef TVM_RELAX_QNN_OP_UTILS_H_
 #define TVM_RELAX_QNN_OP_UTILS_H_
 
@@ -30,7 +29,6 @@
 #include "../../op/op_common.h"
 #include "../../transform/utils.h"
 
-
 namespace tvm {
 namespace relax {
 namespace qnn {
@@ -38,18 +36,15 @@ namespace qnn {
 // Checks that data has integer dtype (int or uint).
 // Reports a fatal error on mismatch.
 void CheckIntegerInputDtype(const Call& call, const BlockBuilder& ctx,
-                            const TensorStructInfo& data_sinfo,
-                            const std::string& op_name);
+                            const TensorStructInfo& data_sinfo, const std::string& op_name);
 
 // Checks that scale is float (or unknown), otherwise fatal.
-void CheckScaleDtype(const Call& call, const BlockBuilder& ctx,
-                     const TensorStructInfo& sinfo, const std::string& op_name,
-                     const char* name);
+void CheckScaleDtype(const Call& call, const BlockBuilder& ctx, const TensorStructInfo& sinfo,
+                     const std::string& op_name, const char* name);
 
 // Checks that zero point is int/uint (or unknown), otherwise fatal.
-void CheckZeroPointDtype(const Call& call, const BlockBuilder& ctx,
-                         const TensorStructInfo& sinfo, const std::string& op_name,
-                         const char* name);
+void CheckZeroPointDtype(const Call& call, const BlockBuilder& ctx, const TensorStructInfo& sinfo,
+                         const std::string& op_name, const char* name);
 
 }  // namespace qnn
 }  // namespace relax

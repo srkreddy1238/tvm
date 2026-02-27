@@ -269,7 +269,7 @@ runtime::FunctionInfo CodeGenWebGPU::AddFunction(const PrimFunc& f, bool skip_re
   this->PrintIndent();
   this->stream << "}\n\n";
   return runtime::FunctionInfo(std::move(func_name), std::move(func_arg_types),
-                               std::move(func_launch_param_tags), {});
+                               std::move(func_launch_param_tags), {}, {});
 }
 
 void CodeGenWebGPU::BindThreadIndex(const IterVar& iv) {

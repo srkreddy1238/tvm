@@ -58,7 +58,7 @@ def get_ref_impl(
         if isinstance(weight_scale, float):
             scale_reshape = [1, 1, 1, 1]
         else:
-            out_idx = tvm.tir.layout(out_layout).index_of("C")
+            out_idx = tvm.s_tir.layout(out_layout).index_of("C")
             scale_reshape = [1, 1, 1]
             scale_reshape.insert(out_idx, weight_scale.shape[0])
 
@@ -191,7 +191,7 @@ def test_qnn_conv2d(
     out_layout = "NCHW"
 
     out_channel = int(
-        tvm.tir.bijective_layout(weight_layout, "OIHW").forward_shape(weight_shape)[0]
+        tvm.s_tir.bijective_layout(weight_layout, "OIHW").forward_shape(weight_shape)[0]
     )
     data_zp, weight_zp = (
         np.random.randint(low=0, high=128, size=1)[0],

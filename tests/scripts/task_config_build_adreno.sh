@@ -1,3 +1,4 @@
+#!/bin/bash
 # Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
 # distributed with this work for additional information
@@ -14,11 +15,22 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-"""
-Adreno schedule rules.
-"""
-from .convolution import Conv2d
-from .layout_transform import LayoutTransform
-from .matmul import MatmulTensorization
-from .fallback import Fallback
-from .pool import Pool2D
+
+set -euxo pipefail
+
+BUILD_DIR=$1
+mkdir -p "$BUILD_DIR"
+cd "$BUILD_DIR"
+cp ../cmake/config.cmake .
+
+echo set\(USE_OPENCL_GTEST /googletest\) >> config.cmake
+#echo set\(USE_VULKAN_GTEST /googletest\) >> config.cmake
+
+if [ -f "${ADRENO_OPENCL}/CL/cl_qcom_ml_ops.h" ] ; then
+echo set\(USE_CLML ${ADRENO_OPENCL}\) >> config.cmake
+fi
+echo set\(USE_OPENCL ON\) >> config.cmake
+echo set\(USE_RPC ON\) >> config.cmake
+echo set\(USE_LIBBACKTRACE AUTO\) >> config.cmake
+echo set\(USE_LLVM ON\) >> config.cmake
+echo set\(USE_VULKAN ON\) >> config.cmake

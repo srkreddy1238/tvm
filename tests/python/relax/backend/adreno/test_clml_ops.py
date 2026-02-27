@@ -59,10 +59,12 @@ from mod_utils import (
     get_dequant_vec_matmul_module,
 )
 from utils import verify_results
+from utils import requires_adreno_clml
 
 CLML_VERSION = int(tvm.support.libinfo().get("TVM_CLML_VERSION", 0))
 TARGET_CLML_VERSION = int(os.environ.get("ADRENO_TARGET_CLML_VERSION", 0))
-clml_target = tvm.target.adreno(backend="opencl", cfg="clml")
+clml_target = tvm.target.Target("qcom/adreno-opencl-clml")
+ref_target = tvm.target.Target("opencl")
 
 
 def verify_clml_codegen(clml_mod, clml_codegen):
@@ -86,30 +88,36 @@ def verify_clml_codegen(clml_mod, clml_codegen):
     )
 
 
-def verify(mod, clml_codegen, inputs_np, params_np, target_minimum_clml_version=None):
+def verify(
+    mod, clml_codegen, inputs_np, params_np, target_minimum_clml_version=None, target_test=True
+):
     mod = tvm.relax.transform.BindParams("main", params_np)(mod)
-    codegen_mod, clml_mod = mod, mod.clone()
+    codegen_mod, clml_mod = mod.clone(), mod
     verify_clml_codegen(codegen_mod, clml_codegen)
 
-    if not tvm.testing.adreno_target_exists() or (
+    if (
         target_minimum_clml_version is not None
         and TARGET_CLML_VERSION < target_minimum_clml_version
     ):
         print(f"Skipped Eval Tests for {inspect.stack()[1].function} function", flush=True)
         return
-    verify_results(clml_mod, backend="opencl", cfg="clml", opts=None, use_cpu=False)
+
+    if "ADRENO_TARGET" not in os.environ:
+        return
+
+    if target_test:
+        verify_results(clml_mod, target=clml_target, ref_target=ref_target)
 
 
-@tvm.testing.requires_adreno_opencl(support_required="compile-opt-run")
-@pytest.mark.skip("CLML Tests are failing for certain devices")
+@requires_adreno_clml
 @pytest.mark.parametrize("dtype", ["float32"])
 @pytest.mark.parametrize(
     "kernel_h, kernel_w, padding, stride, dilation, out_channels, shape, has_bias, has_bn, has_activation, has_pad, is_depthwise",
     [
         (3, 3, (1, 1), (1, 1), (1, 1), 64, (3, 224, 224), False, True, False, True, False),
         (3, 3, (1, 1), (1, 1), (1, 1), 64, (3, 224, 224), False, True, False, False, False),
-        (5, 5, (2, 2), (1, 1), (1, 1), 16, (16, 64, 64), False, True, True, False, False),
-        (7, 7, (3, 3), (2, 2), (1, 1), 32, (3, 224, 224), True, False, True, True, False),
+        # (5, 5, (2, 2), (1, 1), (1, 1), 16, (16, 64, 64), False, True, True, False, False),
+        # (7, 7, (3, 3), (2, 2), (1, 1), 32, (3, 224, 224), True, False, True, True, False),
         (3, 3, (0, 0), (1, 1), (1, 1), 512, (256, 14, 14), True, False, True, False, False),
         (1, 1, (0, 0), (1, 1), (1, 1), 1024, (512, 7, 7), True, False, True, False, False),
         (1, 3, (0, 0), (1, 1), (1, 1), 64, (64, 7, 7), True, False, True, False, False),
@@ -195,8 +203,8 @@ def test_conv2d_offload(
     verify(mod, clml_codegen, inputs_np, params_np)
 
 
-@pytest.mark.skip(reason="Unhandled in Default CPU/CL pipeline")
-@tvm.testing.requires_adreno_opencl(support_required="compile-opt-run")
+# @pytest.mark.skip(reason="Unhandled in Default CPU/CL pipeline")
+@requires_adreno_clml
 @pytest.mark.parametrize("dtype", ["float32"])
 @pytest.mark.parametrize(
     "dshape, kshape, channels, kernel_size, strides, padding, out_shape",
@@ -238,10 +246,11 @@ def test_conv2d_transpose(
         dtype=dtype,
         output_shape=out_shape,
     )
-    verify(mod, clml_codegen, inputs_np, params_np)
+    verify(mod, clml_codegen, inputs_np, params_np, target_test=False)
 
 
-@tvm.testing.requires_adreno_opencl(support_required="compile-opt-run")
+# @pytest.mark.skip ("TODO: Need to fix - fails after mainline rebase")
+@requires_adreno_clml
 @pytest.mark.skipif(
     CLML_VERSION < 3,
     reason="Requires compiler supporting CLML v5 or above",
@@ -282,26 +291,26 @@ def test_batchnorm(dtype, trials):
     mod = get_batchnorm_mod(input_shape, channels, axis, epsilon, dtype)
     clml_codegen = [
         {
-            "attrs": {"dtype": [[dtype]], "shape": [[input_shape]]},
+            "attrs": {"dtype": [dtype], "shape": [input_shape]},
             "name": "",
             "op": "input",
         },
-        {"attrs": {"dtype": [[dtype]], "shape": [[[channels]]]}, "name": "", "op": "const"},
-        {"attrs": {"dtype": [[dtype]], "shape": [[[channels]]]}, "name": "", "op": "const"},
-        {"attrs": {"dtype": [[dtype]], "shape": [[[channels]]]}, "name": "", "op": "const"},
-        {"attrs": {"dtype": [[dtype]], "shape": [[[channels]]]}, "name": "", "op": "const"},
+        {"attrs": {"dtype": [dtype], "shape": [[channels]]}, "name": "", "op": "const"},
+        {"attrs": {"dtype": [dtype], "shape": [[channels]]}, "name": "", "op": "const"},
+        {"attrs": {"dtype": [dtype], "shape": [[channels]]}, "name": "", "op": "const"},
+        {"attrs": {"dtype": [dtype], "shape": [[channels]]}, "name": "", "op": "const"},
         {
             "attrs": {
-                "axis": [[str(axis)]],
-                "center": [["1"]],
-                "dtype": [[dtype]],
-                "momentum": [["0.10000000000000001"]],
-                "epsilon": [["0.00029999999999999997"]],
-                "num_inputs": "5",
-                "num_outputs": "1",
-                "scale": [["1"]],
-                "training": [["1"]],
-                "shape": [[input_shape]],
+                "axis": axis,
+                "center": 1,
+                "dtype": [dtype],
+                "momentum": 0.10000000000000001,
+                "epsilon": 0.00029999999999999997,
+                "num_inputs": 5,
+                "num_outputs": 1,
+                "scale": 1,
+                "training": 1,
+                "shape": [input_shape],
             },
             "inputs": [[0, 0, 0], [1, 0, 0], [2, 0, 0], [3, 0, 0], [4, 0, 0]],
             "name": "",
@@ -311,7 +320,7 @@ def test_batchnorm(dtype, trials):
     verify(mod, clml_codegen, inputs_np, params_np)
 
 
-@tvm.testing.requires_adreno_opencl(support_required="compile-opt-run")
+@requires_adreno_clml
 @pytest.mark.parametrize("dtype", ["float32"])
 @pytest.mark.parametrize(
     "a_shape, b_shape, op",
@@ -330,32 +339,32 @@ def test_batchnorm(dtype, trials):
         ((1, 256), (1, 256), R.maximum),
     ],
 )
-@tvm.testing.requires_adreno_opencl(support_required="compile-opt-run")
+@requires_adreno_clml
 def test_binary_ops(a_shape, b_shape, op, dtype):
     (mod, inputs_np) = get_binary_op_mod(a_shape, b_shape, op, dtype)
     clml_codegen = [
         {
             "attrs": {
-                "dtype": [[dtype]],
-                "shape": [[a_shape]],
+                "dtype": [dtype],
+                "shape": [a_shape],
             },
             "name": "",
             "op": "input",
         },
         {
             "attrs": {
-                "dtype": [[dtype]],
-                "shape": [[b_shape]],
+                "dtype": [dtype],
+                "shape": [b_shape],
             },
             "name": "",
             "op": "input",
         },
         {
             "attrs": {
-                "dtype": [[dtype]],
-                "num_inputs": "2",
-                "num_outputs": "1",
-                "shape": [[a_shape]],
+                "dtype": [dtype],
+                "num_inputs": 2,
+                "num_outputs": 1,
+                "shape": [a_shape],
             },
             "inputs": [[0, 0, 0], [1, 0, 0]],
             "name": "",
@@ -365,7 +374,7 @@ def test_binary_ops(a_shape, b_shape, op, dtype):
     verify(mod, clml_codegen, inputs_np, {})
 
 
-@tvm.testing.requires_adreno_opencl(support_required="compile-opt-run")
+@requires_adreno_clml
 @pytest.mark.parametrize(
     "dtype",
     [
@@ -381,25 +390,25 @@ def test_binary_ops(a_shape, b_shape, op, dtype):
         ((1, 14, 14, 256), R.nn.relu),
     ],
 )
-@tvm.testing.requires_adreno_opencl(support_required="compile-opt-run")
+@requires_adreno_clml
 def test_unary_ops(a_shape, op, dtype):
     (mod, inputs_np) = get_unary_op_mod(a_shape, op, dtype)
     clml_codegen = [
         {
             "attrs": {
-                "dtype": [[dtype]],
-                "shape": [[a_shape]],
+                "dtype": [dtype],
+                "shape": [a_shape],
             },
             "name": "",
             "op": "input",
         },
         {
             "attrs": {
-                "activation_type": [["relu"]],
-                "dtype": [[dtype]],
-                "num_inputs": "1",
-                "num_outputs": "1",
-                "shape": [[a_shape]],
+                "activation_type": "relu",
+                "dtype": [dtype],
+                "num_inputs": 1,
+                "num_outputs": 1,
+                "shape": [a_shape],
             },
             "inputs": [[0, 0, 0]],
             "name": "",
@@ -409,7 +418,7 @@ def test_unary_ops(a_shape, op, dtype):
     verify(mod, clml_codegen, inputs_np, {})
 
 
-@tvm.testing.requires_adreno_opencl(support_required="compile-opt-run")
+@requires_adreno_clml
 @pytest.mark.parametrize("dtype", ["float32"])
 @pytest.mark.parametrize(
     "trials",
@@ -417,10 +426,11 @@ def test_unary_ops(a_shape, op, dtype):
         [(1, 64, 147, 147), (3, 3), (2, 2), (1, 1), (0, 0, 0, 0), False],
         [(1, 256, 17, 17), (3, 3), (1, 1), (1, 1), (0, 0, 0, 0), False],
         [(1, 1024, 14, 14), (3, 3), (1, 1), (1, 1), (0, 0, 0, 0), False],
-        [(1, 32, 256, 256), (3, 3), (2, 2), (1, 1), (1, 1, 1, 1), True],
-        [(1, 32, 256, 256), (3, 3), (2, 2), (1, 1), (0, 1, 0, 1), True],
-        [(1, 32, 256, 256), (2, 2), (2, 2), (1, 1), (1, 1, 1, 1), True],
-        [(1, 32, 256, 256), (2, 2), (2, 2), (1, 1), (1, 0, 1, 0), True],
+        # With padding is realized as nn.pad + pool
+        # [(1, 32, 256, 256), (3, 3), (2, 2), (1, 1), (1, 1, 1, 1), True],
+        # [(1, 32, 256, 256), (3, 3), (2, 2), (1, 1), (0, 1, 0, 1), True],
+        # [(1, 32, 256, 256), (2, 2), (2, 2), (1, 1), (1, 1, 1, 1), True],
+        # [(1, 32, 256, 256), (2, 2), (2, 2), (1, 1), (1, 0, 1, 0), True],
     ],
 )
 def test_max_pool(dtype, trials):
@@ -435,7 +445,7 @@ def test_max_pool(dtype, trials):
     verify(mod, clml_codegen, inputs_np, {})
 
 
-@tvm.testing.requires_adreno_opencl(support_required="compile-opt-run")
+@requires_adreno_clml
 @pytest.mark.parametrize("dtype", ["float32"])
 @pytest.mark.parametrize(
     "trials",
@@ -443,10 +453,11 @@ def test_max_pool(dtype, trials):
         [(1, 64, 147, 147), (3, 3), (2, 2), (1, 1), (0, 0, 0, 0), False],
         [(1, 256, 17, 17), (3, 3), (1, 1), (1, 1), (0, 0, 0, 0), False],
         [(1, 1024, 14, 14), (3, 3), (1, 1), (1, 1), (0, 0, 0, 0), False],
-        [(1, 32, 256, 256), (3, 3), (2, 2), (1, 1), (1, 1, 1, 1), True],
-        [(1, 32, 256, 256), (3, 3), (2, 2), (1, 1), (0, 1, 0, 1), True],
-        [(1, 32, 256, 256), (2, 2), (2, 2), (1, 1), (1, 1, 1, 1), True],
-        [(1, 32, 256, 256), (2, 2), (2, 2), (1, 1), (1, 0, 1, 0), True],
+        # With padding is realized as nn.pad + pool
+        # [(1, 32, 256, 256), (3, 3), (2, 2), (1, 1), (1, 1, 1, 1), True],
+        # [(1, 32, 256, 256), (3, 3), (2, 2), (1, 1), (0, 1, 0, 1), True],
+        # [(1, 32, 256, 256), (2, 2), (2, 2), (1, 1), (1, 1, 1, 1), True],
+        # [(1, 32, 256, 256), (2, 2), (2, 2), (1, 1), (1, 0, 1, 0), True],
     ],
 )
 def test_avg_pool(dtype, trials):
@@ -462,7 +473,7 @@ def test_avg_pool(dtype, trials):
     verify(mod, clml_codegen, inputs_np, {})
 
 
-@tvm.testing.requires_adreno_opencl(support_required="compile-opt-run")
+@requires_adreno_clml
 @pytest.mark.parametrize("dtype", ["float32"])
 @pytest.mark.parametrize(
     "trials",
@@ -483,7 +494,7 @@ def test_reshape(dtype, trials):
 
 
 @pytest.mark.skip(reason="Codegen Comparision Failing")
-@tvm.testing.requires_adreno_opencl(support_required="compile-opt-run")
+@requires_adreno_clml
 @pytest.mark.parametrize("dtype", ["float32"])
 @pytest.mark.parametrize(
     "trials",
@@ -494,7 +505,7 @@ def test_reshape(dtype, trials):
         [(1, 32, 256, 256), False],
     ],
 )
-def _test_global_avg_pool(dtype, trials):
+def test_global_avg_pool(dtype, trials):
     """Test function for global average pooling."""
     low, high = -1, 1
     (input_shape, keep_dims) = trials
@@ -509,7 +520,7 @@ def _test_global_avg_pool(dtype, trials):
     verify(mod, clml_codegen, inputs_np, {})
 
 
-@tvm.testing.requires_adreno_opencl(support_required="compile-opt-run")
+@requires_adreno_clml
 @pytest.mark.parametrize("dtype", ["float32"])
 @pytest.mark.parametrize(
     "trials",

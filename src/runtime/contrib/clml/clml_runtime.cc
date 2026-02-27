@@ -398,7 +398,8 @@ class CLMLRuntime : public JSONRuntimeBase {
             }
             std::unordered_map<std::string, ffi::Any> metrics;
             std::string shape_str;
-            std::vector<int64_t> shape = nodes_[nid].GetOpShape()[0];
+            std::vector<int64_t> shape(nodes_[nid].GetOpShape()[0].begin(),
+                                       nodes_[nid].GetOpShape()[0].end());
             DLDataType tvm_dtype = nodes_[nid].GetOpDataType()[0];
             shape_str.append(profiling::ShapeString(shape, tvm_dtype));
             metrics["Argument Shapes"] = ffi::String(shape_str);
@@ -490,7 +491,8 @@ class CLMLRuntime : public JSONRuntimeBase {
 
           std::unordered_map<std::string, ffi::Any> metrics;
           std::string shape_str;
-          std::vector<int64_t> shape = nodes_[eid].GetOpShape()[0];
+          std::vector<int64_t> shape(nodes_[eid].GetOpShape()[0].begin(),
+                                     nodes_[eid].GetOpShape()[0].end());
           DLDataType tvm_dtype = nodes_[eid].GetOpDataType()[0];
           shape_str.append(profiling::ShapeString(shape, tvm_dtype));
           metrics["Argument Shapes"] = ffi::String(shape_str);
@@ -501,23 +503,8 @@ class CLMLRuntime : public JSONRuntimeBase {
                     layer_.out_placeholder[i]->memory, 0, nullptr, evt);
           prof->StopCall();
         }
-
-        std::unordered_map<std::string, ffi::Any> metrics;
-        std::string shape_str;
-        auto shape_arr = nodes_[eid].GetOpShape()[0];
-        std::vector<int64_t> shape(shape_arr.begin(), shape_arr.end());
-        DLDataType tvm_dtype = nodes_[eid].GetOpDataType()[0];
-        shape_str.append(profiling::ShapeString(shape, tvm_dtype));
-        metrics["Argument Shapes"] = ffi::String(shape_str);
-
-        prof->StartCall("CopyOut", cws->tentry->device, metrics);
-        CLML_CALL(clEnqueueCopyMLTensorDataQCOM, queue, layer_.outputs[i]->tensor,
-                  layer_.outputs[i]->memory, layer_.out_placeholder[i]->tensor,
-                  layer_.out_placeholder[i]->memory, 0, nullptr, evt);
-        prof->StopCall();
       }
     }
-
     return;
   }
 
@@ -941,6 +928,7 @@ class CLMLRuntime : public JSONRuntimeBase {
    * per engine.
    */
   void BuildEngine() {
+    LOG_CLML << "CLML : BuildEngine - Start";
     size_t nid;
     // Create tensors for the operators which has distinct layout format
     // other than CL_TENSOR_LAYOUT_OPTIMAL_QCOM.
@@ -958,6 +946,7 @@ class CLMLRuntime : public JSONRuntimeBase {
         // Layers may request for different layout. Differ the input allocation.
       } else if (node.GetOpType() == "kernel") {
         auto op_name = node.GetOpName();
+        LOG_CLML << "CLML : BuildEngine : Op:" << op_name;
         if (PatternMatch(op_name, "nn.conv2d") || PatternMatch(op_name, "nn.pad_conv2d"))
           CreateConvolution2DLayer(&layer_, node, CL_CONVOLUTION_MODE_CONVOLUTION_QCOM, nid);
         else if (PatternMatch(op_name, "nn.depthwise_conv2d"))
@@ -1074,8 +1063,9 @@ class CLMLRuntime : public JSONRuntimeBase {
         tensor_desc->memory = AllocateDDRTensorMemory(mem_size);
         alloc_ddr += mem_size;
       } else if (!(it->second.is_dynamic_tensor)) {
-        TVM_FFI_THROW(InternalError) << "Mem allocation not found on DDR as well as On-Chip nid: " << it->first
-                   << " Type:" << node.GetOpType();
+        TVM_FFI_THROW(InternalError)
+            << "Mem allocation not found on DDR as well as On-Chip nid: " << it->first
+            << " Type:" << node.GetOpType();
       }
 
       if (node.GetOpType() == "const") {
@@ -1862,7 +1852,7 @@ class CLMLRuntime : public JSONRuntimeBase {
       CLML_CALL(clCreateMLOpFullyConnectedQCOM, CLML_CTX, NULL,
                 (cl_ml_op_fully_connected_desc_qcom*)&fullyConnDesc,  // Cast into original struct
                 input->tensor, weight->tensor, bias->tensor, output->tensor, &op, NULL);
-      ICHECK(op) << "FC layer Error";
+      TVM_FFI_ICHECK(op) << "FC layer Error";
       layer->function.push_back({op, node.GetOpName(), op_props});
     } else {
       cl_ml_tensor_desc_qcom desc = {};
@@ -1870,12 +1860,12 @@ class CLMLRuntime : public JSONRuntimeBase {
       desc.num_dimensions = CL_TENSOR_UNUSED_QCOM;
       CLML_CALL_clCreateMLTensorQCOM(CLML_CTX, nullptr, &desc, CL_TENSOR_USAGE_UNUSED_QCOM,
                                      &unusedTensor);
-      ICHECK(unusedTensor) << "clCreateMLTensorQCOM: unusedTensor";
+      TVM_FFI_ICHECK(unusedTensor) << "clCreateMLTensorQCOM: unusedTensor";
 
       CLML_CALL(clCreateMLOpFullyConnectedQCOM, CLML_CTX, NULL,
                 (cl_ml_op_fully_connected_desc_qcom*)&fullyConnDesc,  // Cast into original struct
                 input->tensor, weight->tensor, unusedTensor, output->tensor, &op, NULL);
-      ICHECK(op) << "FC layer Error";
+      TVM_FFI_ICHECK(op) << "FC layer Error";
       layer->function.push_back({op, node.GetOpName(), op_props});
     }
 

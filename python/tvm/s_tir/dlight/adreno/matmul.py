@@ -18,10 +18,10 @@
 # pylint: disable=missing-docstring
 from typing import Optional, Tuple, List
 
-from tvm import tir
+from tvm import tir, s_tir
 from tvm.target import Target
 from tvm.tir import IterVar
-from tvm.tir.schedule.schedule import BlockRV
+from tvm.s_tir.schedule.schedule import SBlockRV
 
 from .base import AdrenoScheduleRule
 from .. import analysis
@@ -57,12 +57,12 @@ def extract_shapes_and_dtypes(func: tir.PrimFunc) -> Tuple[List[List[tir.PrimExp
 
 def get_reduction_blocks(sch, blocks) -> bool:
     # Get the main computation block
-    def is_reduction(block: BlockRV) -> bool:
+    def is_reduction(block: SBlockRV) -> bool:
         block_stmt = sch.get(block)
         iter_types = {iter_var.iter_type for iter_var in block_stmt.iter_vars}
         return iter_types == {IterVar.CommReduce, IterVar.DataPar}
 
-    def is_spatial(block: BlockRV) -> bool:
+    def is_spatial(block: SBlockRV) -> bool:
         block_stmt = sch.get(block)
         iter_types = {iter_var.iter_type for iter_var in block_stmt.iter_vars}
         return iter_types == {IterVar.DataPar}
@@ -114,7 +114,7 @@ class MatmulTensorization(AdrenoScheduleRule):
         func: tir.PrimFunc,
         target: Target,
         _: bool,
-    ) -> Optional[tir.Schedule]:
+    ) -> Optional[s_tir.Schedule]:
         # pylint: disable=invalid-name
 
         # skip openCl as of now
@@ -125,14 +125,14 @@ class MatmulTensorization(AdrenoScheduleRule):
         if "vulkan" in target.kind.name and "supports_khr_cooperative_matrix" not in target.attrs:
             return None
 
-        from tvm.tir.tensor_intrin.adreno import (  # pylint: disable=import-outside-toplevel
+        from tvm.s_tir.tensor_intrin.adreno import (  # pylint: disable=import-outside-toplevel
             get_adreno_wmma_intrin_group,
         )
 
         if not isinstance(func, tir.PrimFunc):
             return None
 
-        sch = tir.Schedule(func)
+        sch = s_tir.Schedule(func)
         root = sch.get_block(name="root", func_name="main")
         blocks = sch.get_child_blocks(root)
         reduction_blocks = get_reduction_blocks(sch, blocks)

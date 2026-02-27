@@ -51,10 +51,8 @@ MARKERS = {
     "tensorcore": "mark a test as requiring a tensorcore",
     "cuda": "mark a test as requiring CUDA",
     "opencl": "mark a test as requiring opencl",
-    "opencl -device=adreno": "mark a test as requiring adreno opencl",
     "rocm": "mark a test as requiring rocm",
     "vulkan": "mark a test as requiring vulkan",
-    "vulkan -device=adreno": "mark a test as requiring adreno vulkan",
     "metal": "mark a test as requiring metal",
     "llvm": "mark a test as requiring llvm",
     "hexagon": "mark a test as requiring hexagon",
@@ -148,7 +146,7 @@ def _auto_parametrize_target(metafunc):
                 [
                     t["target"]
                     for t in utils._get_targets()
-                    if t["target"] not in excluded_targets and t["is_runnable"]
+                    if t["target_kind"] not in excluded_targets
                 ],
                 scope="session",
             )
@@ -306,16 +304,12 @@ def _target_to_requirement(target):
     if target.kind.name == "rocm":
         return utils.requires_rocm.marks()
     if target.kind.name == "vulkan":
-        if "adreno" == target.attrs.get("device", ""):
-            return utils.requires_adreno_vulkan.marks()
         return utils.requires_vulkan.marks()
     if target.kind.name == "nvptx":
         return utils.requires_nvptx.marks()
     if target.kind.name == "metal":
         return utils.requires_metal.marks()
     if target.kind.name == "opencl":
-        if "adreno" == target.attrs.get("device", ""):
-            return utils.requires_adreno_opencl.marks()
         return utils.requires_opencl.marks()
     if target.kind.name == "llvm":
         return utils.requires_llvm.marks()

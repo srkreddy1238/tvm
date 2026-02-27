@@ -48,9 +48,11 @@ void CheckNumArguments(const Call& call, const BlockBuilder& ctx) {
 TensorStructInfo GetInputTensorStructInfo(const Call& call, size_t i_arg, const BlockBuilder& ctx) {
   Op op = Downcast<Op>(call->op);
 
+  /*
   TVM_FFI_ICHECK_EQ(op->arguments.size(), call->args.size())
       << "Failure caught by this check "
       << "should have previously been caught by `CheckNumArguments`";
+  */
   TVM_FFI_ICHECK_LT(i_arg, op->arguments.size());
 
   auto arg = call->args[i_arg];

@@ -39,7 +39,9 @@ from tvm.relax.transform.legalize_ops import adreno as legalize_adreno
 
 from utils import verify_results
 
-TARGETS = ["opencl -device=adreno", "vulkan -device=adreno"]
+TARGETS = [tvm.target.Target("qcom/adreno-opencl-texture")]
+
+
 @tvm.testing.parametrize_targets(*TARGETS)
 def test_network_resnet(target):
     @I.ir_module
@@ -800,7 +802,7 @@ def test_network_resnet(target):
                 R.output(gv)
             return gv
 
-    verify_results(Resnet, backend=target, cfg="texture", opts=None, use_cpu=True)
+    verify_results(Resnet, target, tvm.target.Target("llvm"))
 
 
 if __name__ == "__main__":

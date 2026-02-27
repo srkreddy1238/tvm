@@ -17,7 +17,7 @@
 # pylint: disable=invalid-name,unused-argument,unused-import
 """Default legalization function for quantized neural network operators."""
 import logging
-from tvm import tir, topi
+from tvm import tir, s_tir, topi
 from ....block_builder import BlockBuilder
 from ....expr import Call, Expr
 from ..common import register_legalize
@@ -38,8 +38,8 @@ def _qnn_conv2d(bb: BlockBuilder, call: Call) -> Expr:
         )
         return call
     if call.attrs.groups != 1:
-        data_layout = tir.layout(call.attrs.data_layout)
-        kernel_layout = tir.layout(call.attrs.kernel_layout)
+        data_layout = s_tir.layout(call.attrs.data_layout)
+        kernel_layout = s_tir.layout(call.attrs.kernel_layout)
         ic = call.args[0].struct_info.shape.values[data_layout.index_of("C")]
         oc = call.args[1].struct_info.shape.values[kernel_layout.index_of("O")]
         if not isinstance(ic, tir.IntImm) or not isinstance(oc, tir.IntImm):

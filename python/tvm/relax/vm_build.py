@@ -241,8 +241,9 @@ def build(
         constants = attrs.get("const_name_to_constant", {})
         return ext_libs, constants
 
-    if isinstance(target, str):
+    if isinstance(target, (dict, str)):
         target = tvm.target.Target(target)
+
     if not params:
         params = {}
 

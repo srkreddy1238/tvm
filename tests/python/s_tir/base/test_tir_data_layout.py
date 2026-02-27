@@ -53,9 +53,9 @@ def test_layout():
     assert layout[3] == "W"
     assert layout[4] == "16c"
 
-    layout = tvm.tir.layout("OIHW[4o4i]")
+    layout = tvm.s_tir.layout("OIHW[4o4i]")
     assert layout is not None
-    assert isinstance(layout, tvm.tir.Layout)
+    assert isinstance(layout, tvm.s_tir.Layout)
 
     assert layout.factor_of("o") == 4
     assert layout.factor_of("i") == 4
@@ -86,15 +86,15 @@ def test_layout():
     assert layout[4] == "4o4i"
 
     with pytest.raises(InternalError):
-        layout = tvm.tir.layout("[N4o]C")
+        layout = tvm.s_tir.layout("[N4o]C")
     with pytest.raises(InternalError):
-        layout = tvm.tir.layout("[O4o]")
+        layout = tvm.s_tir.layout("[O4o]")
     with pytest.raises(InternalError):
-        layout = tvm.tir.layout("C4o")
+        layout = tvm.s_tir.layout("C4o")
     with pytest.raises(InternalError):
-        layout = tvm.tir.layout("OI[4o4i][]")
+        layout = tvm.s_tir.layout("OI[4o4i][]")
     with pytest.raises(InternalError):
-        layout = tvm.tir.layout("C4c[4c]")
+        layout = tvm.s_tir.layout("C4c[4c]")
 
 
 def test_layout_dtype():
@@ -145,7 +145,7 @@ def test_bilayout_shape():
     src_shape = bilayout.backward_shape(dst_shape)
     assert get_const_tuple(src_shape) == (1, 32, 7, 7)
 
-    bilayout = tvm.tir.bijective_layout("OIHW", "OIHW[4o4i]")
+    bilayout = tvm.s_tir.bijective_layout("OIHW", "OIHW[4o4i]")
 
     dst_shape = bilayout.forward_shape((64, 28, 7, 7))
     assert get_const_tuple(dst_shape) == (16, 7, 7, 7, 16)
@@ -163,7 +163,7 @@ def test_bilayout_index():
     src_index = bilayout.backward_index([0, 1, 6, 6, 2])
     assert get_const_tuple(src_index) == (0, 18, 6, 6)
 
-    bilayout = tvm.tir.bijective_layout("OIHW", "OIHW[4o4i]")
+    bilayout = tvm.s_tir.bijective_layout("OIHW", "OIHW[4o4i]")
 
     dst_index = bilayout.forward_index((63, 29, 7, 7))
     assert get_const_tuple(dst_index) == (15, 7, 7, 7, 13)

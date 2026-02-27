@@ -46,6 +46,15 @@ register_tag(
 )
 
 register_tag(
+    "qcom/adreno-opencl-texture-clml",
+    {
+        "kind": "opencl",
+        "device": "adreno",
+        "keys": ["adreno", "opencl", "gpu", "texture", "clml"],
+    },
+)
+
+register_tag(
     "qcom/adreno-vulkan",
     {
         "kind": "vulkan",

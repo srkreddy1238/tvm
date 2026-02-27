@@ -51,7 +51,7 @@ class OpenCLWrappedFunc {
     launch_param_config_.Init(arg_size.size(), launch_param_tags);
   }
 
-#ifdef PROFILE_SHADER_DUMP
+#if 0   // PROFILE_SHADER_DUMP
   void dump_trace(const ThreadWorkLoad& wl, int work_dim, const ffi::PackedArgs& args) const {
     std::string dump_path(getenv("PROFILE_SHADER_DUMP_PATH"));
     static int trace_count = 0;
@@ -63,12 +63,11 @@ class OpenCLWrappedFunc {
       l_vec.push_back(wl.work_size[i + 3]);
     }
 
-    std::ostringstream os;
-    dmlc::JSONWriter writer(&os);
-    writer.BeginObject();
-    writer.WriteObjectKeyValue("api", func_name_);
-    writer.WriteObjectKeyValue("global", g_vec);
-    writer.WriteObjectKeyValue("local", l_vec);
+    json::Object obj;
+
+    obj.Set(ffi::String("api"), ffi::String(func_name_));
+    obj.Set(ffi::String("global"), ffi::String(g_vec));
+    obj.Set(ffi::String("local"), ffi::String(l_vec));
 
     class DumpArg {
      public:
@@ -148,7 +147,7 @@ class OpenCLWrappedFunc {
     }
     ThreadWorkLoad wl = launch_param_config_.Extract(args);
     cl_uint work_dim = static_cast<cl_uint>(launch_param_config_.work_dim());
-#ifdef PROFILE_SHADER_DUMP
+#if 0   // def PROFILE_SHADER_DUMP
     if (getenv("PROFILE_SHADER_DUMP_PATH")) {
       dump_trace(wl, work_dim, args);
     }

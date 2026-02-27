@@ -86,7 +86,7 @@ class FrontendTestModule(Module):
             self.entry_name = entry_name
 
     def add_function(self, name, func):
-        self.get_function("__add_function")(name, func)
+        self.get_function("__add_function")(name, func)  # pylint: disable=not-callable
 
     def __setitem__(self, key, value):
         self.add_function(key, value)

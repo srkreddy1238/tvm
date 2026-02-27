@@ -39,11 +39,13 @@ namespace runtime {
 
 FunctionInfo::FunctionInfo(ffi::String name, ffi::Array<DLDataType> arg_types,
                            ffi::Array<ffi::String> launch_param_tags,
+                           ffi::Array<ffi::String> storage_scopes,
                            ffi::Array<ArgExtraTags> arg_extra_tags) {
   auto n = ffi::make_object<FunctionInfoObj>();
   n->name = std::move(name);
   n->arg_types = std::move(arg_types);
   n->launch_param_tags = std::move(launch_param_tags);
+  n->storage_scopes = std::move(storage_scopes);
   n->arg_extra_tags = std::move(arg_extra_tags);
   data_ = std::move(n);
 }
@@ -80,6 +82,13 @@ void FunctionInfoObj::LoadFromJSON(ffi::json::Object src) {
   arg_types = ffi::Array<DLDataType>();
   for (size_t i = 0; i < sarg_types_arr.size(); ++i) {
     arg_types.push_back(StringToDLDataType(std::string(sarg_types_arr[i].cast<ffi::String>())));
+  }
+  // storage_scopes
+  auto scopes = src.find("storage_scopes");
+  if (scopes != src.end()) {
+    auto arr = (*scopes).second.cast<json::Array>();
+    storage_scopes = ffi::Array<ffi::String>();
+    for (const auto& elem : arr) storage_scopes.push_back(elem.cast<ffi::String>());
   }
   // launch_param_tags (optional, also support legacy "thread_axis_tags")
   auto lt = src.find("launch_param_tags");

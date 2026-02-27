@@ -228,13 +228,14 @@ bool VulkanModuleNode::PreCompiledVulkanPipeline() {
   int device_id = VulkanDeviceAPI::Global()->GetActiveDeviceID();
   for (const auto& pair : smap_) {
     const std::string func_name = pair.first;
-    auto it = fmap_.find(func_name);
-    if (it == fmap_.end()) return false;
-    const FunctionInfo& info = it->second;
+    auto opt_info = fmap_.Get(func_name);
+    if (!opt_info.has_value()) return false;
+    const FunctionInfo info = opt_info.value();
+    ;
     VulkanWrappedFunc f;
-    size_t num_buffer_args = NumBufferArgs(info.arg_types);
-    auto pe = this->GetPipeline(device_id, func_name, info.arg_types.size() - num_buffer_args);
-    ICHECK(pe);
+    size_t num_buffer_args = NumBufferArgs(info->arg_types);
+    auto pe = this->GetPipeline(device_id, func_name, info->arg_types.size() - num_buffer_args);
+    TVM_FFI_ICHECK(pe);
   }
   return true;
 }

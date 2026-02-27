@@ -78,7 +78,7 @@ import platform
 import shutil
 import sys
 import time
-from collections.abc import Callable
+from collections.abc import Callable, List, Optional, Tuple, Union
 from pathlib import Path
 
 import numpy as np
@@ -192,7 +192,8 @@ def check_numerical_grads(
     for x_name, grad in grad_values.items():
         if grad.shape != input_values[x_name].shape:
             raise AssertionError(
-                f"Gradient wrt '{x_name}' has unexpected shape {grad.shape}, expected {input_values[x_name].shape} "
+                f"Gradient wrt '{x_name}' has unexpected shape {grad.shape},"
+                f" expected {input_values[x_name].shape} "
             )
 
         ngrad = np.zeros_like(grad)
@@ -243,8 +244,8 @@ def check_numerical_grads(
             raise AssertionError(
                 f"Analytical and numerical grads wrt '{x_name}' differ too much\n"
                 f"analytical grad = {grad}\n numerical grad = {ngrad}\n"
-                f"{wrong_percentage}% of elements differ, first 10 of wrong positions: {wrong_positions[:10]}\n"
-                "distance > atol*sqrt(n) + rtol*grad_norm\n"
+                f"{wrong_percentage}% of elements differ, first 10 of wrong positions: "
+                f"{wrong_positions[:10]}\n distance > atol*sqrt(n) + rtol*grad_norm\n"
                 f"distance {dist} > {atol}*{sqrt_n} + {rtol}*{grad_norm}"
             )
 
@@ -392,11 +393,6 @@ def _get_targets(target_names=None):
     if not target_names:
         target_names = DEFAULT_TEST_TARGETS
 
-    def _check_lib_support(cmake_opts: Union[str, List[str]]):
-        if isinstance(cmake_opts, str):
-            cmake_opts = [cmake_opts]
-        return all(tvm.support.libinfo()[opt].lower() not in ["off", "OFF"] for opt in cmake_opts)
-
     targets = []
     for target in target_names:
         if isinstance(target, dict):
@@ -405,18 +401,12 @@ def _get_targets(target_names=None):
             target_kind = target.split()[0]
 
         if target_kind == "cuda" and "cudnn" in tvm.target.Target(target).attrs.get("libs", []):
-            is_enabled = _check_lib_support("USE_CUDNN")
+            is_enabled = tvm.support.libinfo()["USE_CUDNN"].lower() in ["on", "true", "1"]
             is_runnable = is_enabled and cudnn.exists()
         elif target_kind == "hexagon":
-            is_enabled = _check_lib_support("USE_HEXAGON")
+            is_enabled = tvm.support.libinfo()["USE_HEXAGON"].lower() in ["on", "true", "1"]
             # If Hexagon has compile-time support, we can always fall back
             is_runnable = is_enabled and "ANDROID_SERIAL_NUMBER" in os.environ
-        elif target_kind == "opencl" and device_type == "adreno":
-            is_enabled = _check_lib_support(["USE_OPENCL", "USE_CLML", "USE_RPC"])
-            is_runnable = is_enabled and adreno_target_exists()
-        elif target_kind == "vulkan" and device_type == "adreno":
-            is_enabled = _check_lib_support(["USE_VULKAN", "USE_RPC"])
-            is_runnable = is_enabled and adreno_target_exists()
         else:
             is_enabled = tvm.runtime.enabled(target_kind)
             is_runnable = is_enabled and tvm.device(target_kind).exist
@@ -452,19 +442,10 @@ DEFAULT_TEST_TARGETS = [
     "llvm",
     "cuda",
     "nvptx",
-<<<<<<< HEAD
     {"kind": "vulkan", "from_device": 0},
     "opencl",
     {"kind": "opencl", "device": "mali"},
     {"kind": "opencl", "device": "intel_graphics"},
-=======
-    "vulkan -from_device=0",
-    "vulkan -device=adreno",
-    "opencl",
-    "opencl -device=mali",
-    "opencl -device=intel_graphics",
-    "opencl -device=adreno",
->>>>>>> 96fe39a8a ([ADRENO] Unified Tests for CLML, CoopMat, Texture (#185))
     "metal",
     "rocm",
     "hexagon",
@@ -583,7 +564,6 @@ class Feature:
         If None, no additional check is performed.
 
     target_kind_hardware: Optional[str]
-
 
         The target kind that must have available hardware in order to
         run tests using this feature.  This is checked using
@@ -725,19 +705,14 @@ class Feature:
 
             See Feature.__call__ for details.
         """
-        if support_required not in [
-            "compile-and-run",
-            "compile-only",
-            "compile-opt-run",
-            "optional",
-        ]:
+        if support_required not in ["compile-and-run", "compile-only", "optional"]:
             raise ValueError(f"Unknown feature support type: {support_required}")
 
         if support_required == "compile-and-run":
             marks = itertools.chain(
                 self._run_only_marks(), self._compile_only_marks(), self._uses_marks()
             )
-        elif support_required == "compile-only" or support_required == "compile-opt-run":
+        elif support_required == "compile-only":
             marks = itertools.chain(self._compile_only_marks(), self._uses_marks())
         elif support_required == "optional":
             marks = self._uses_marks()
@@ -772,11 +747,6 @@ class Feature:
             feature, and is skipped if the environment lacks
             compile-time support.
 
-            If "compile-opt-run", provides functionality as "compile-only"
-            with the difference being a test case can opt to run device tests,
-            if the target is available. Test must check the environment
-            for appropriate device.
-
             If "optional", the test case is marked as using the
             feature, but isn't skipped.  This is kept for backwards
             compatibility for tests that use `enabled_targets()`, and
@@ -798,12 +768,7 @@ class Feature:
 
         """
 
-        if support_required not in [
-            "compile-and-run",
-            "compile-only",
-            "compile-opt-run",
-            "optional",
-        ]:
+        if support_required not in ["compile-and-run", "compile-only", "optional"]:
             raise ValueError(f"Unknown feature support type: {support_required}")
 
         def wrapper(func):
@@ -868,10 +833,6 @@ def _multi_gpu_exists():
         or (tvm.metal(0).exist and tvm.metal(1).exist)
         or (tvm.vulkan(0).exist and tvm.vulkan(1).exist)
     )
-
-def adreno_target_exists():
-    # TODO: Better Check for Local Adreno Device
-    return os.environ.get("RPC_TARGET", "") == "adreno"
 
 
 # Mark a test as requiring llvm to run
@@ -960,8 +921,8 @@ requires_opencl = Feature(
     "OpenCL",
     cmake_flag="USE_OPENCL",
     target_kind_enabled="opencl",
-    target_kind_hardware="opencl" if "RPC_TARGET" not in os.environ else None,
-    parent_features="gpu" if "RPC_TARGET" not in os.environ else "rpc",
+    target_kind_hardware="opencl",
+    parent_features="gpu",
 )
 
 # Mark a test as requiring the rocm runtime
@@ -1004,15 +965,6 @@ requires_vulkan = Feature(
     target_kind_hardware="vulkan",
     parent_features="gpu",
 )
-
-# Mark a test as requiring Adreno support in build.
-requires_adreno_opencl = Feature(
-    "adreno_opencl",
-    "Adreno OpenCL",
-    target_kind_enabled="opencl -device=adreno",
-    run_time_check=adreno_target_exists,
-)
-
 
 # Mark a test as requiring NNAPI support in build.
 requires_nnapi = Feature(

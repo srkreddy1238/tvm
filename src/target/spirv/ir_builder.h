@@ -617,6 +617,27 @@ class IRBuilder {
    */
   Value GetSpecConst(const SType& dtype, uint64_t value);
 
+  Value MakeComposite(const SType& composite_type, const std::vector<Value>& constituents) {
+    // Create a new SSA value for the composite type
+    Value composite_value = NewValue(composite_type, kNormal);
+
+    // Begin the OpCompositeConstruct instruction
+    ib_.Begin(spv::OpCompositeConstruct)
+        .Add(composite_type)    // The type of the composite
+        .Add(composite_value);  // The resulting value
+
+    // Add each constituent value
+    for (const Value& val : constituents) {
+      ib_.Add(val);
+    }
+
+    // Commit the instruction to the function segment
+    ib_.Commit(&function_);
+
+    // Return the composite value
+    return composite_value;
+  }
+
  private:
   /*!
    * \brief Create new value

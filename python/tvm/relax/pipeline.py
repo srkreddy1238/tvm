@@ -271,7 +271,7 @@ def library_dispatch_passes(target: tvm.target.Target):
         return backend.cpu_generic.library_dispatch_passes(target)
     if (
         (target.kind.name == "opencl") or (target.kind.name == "vulkan")
-    ) and "adreno" in target.device_name:
+    ) and "adreno" in target.keys:
         return backend.adreno.library_dispatch_passes(target)
     if BackendDispatcher.is_gpu_target(target):
         return backend.gpu_generic.library_dispatch_passes(target)
@@ -290,7 +290,7 @@ def legalize_passes(target: tvm.target.Target):
         return backend.cpu_generic.legalize_passes(target)
     if (
         (target.kind.name == "opencl") or (target.kind.name == "vulkan")
-    ) and "adreno" in target.device_name:
+    ) and "adreno" in target.keys:
         return backend.adreno.legalize_passes(target)
     if BackendDispatcher.is_gpu_target(target):
         return backend.gpu_generic.legalize_passes(target)
@@ -309,7 +309,7 @@ def dataflow_lower_passes(target: tvm.target.Target):
         return backend.cpu_generic.dataflow_lower_passes(target)
     if (
         (target.kind.name == "opencl") or (target.kind.name == "vulkan")
-    ) and "adreno" in target.device_name:
+    ) and "adreno" in target.keys:
         return backend.adreno.dataflow_lower_passes(target)
     if BackendDispatcher.is_gpu_target(target):
         return backend.gpu_generic.dataflow_lower_passes(target)
@@ -328,7 +328,7 @@ def finalize_passes(target: tvm.target.Target):
         return backend.cpu_generic.finalize_passes(target)
     if (
         (target.kind.name == "opencl") or (target.kind.name == "vulkan")
-    ) and "adreno" in target.device_name:
+    ) and "adreno" in target.keys:
         return backend.adreno.finalize_passes(target)
     if BackendDispatcher.is_gpu_target(target):
         return backend.gpu_generic.finalize_passes(target)

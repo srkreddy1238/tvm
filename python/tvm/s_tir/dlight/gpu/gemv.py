@@ -357,18 +357,14 @@ class GEMV(GPUScheduleRule):
                     TS, TR = 8, 64
             else:
                 TS, TR = 1, 64
-        elif target.kind.name == "opencl" and (
-            ("android" in str(target.host)) or ("adreno" in str(target.device_name))
-        ):
+        elif target.kind.name == "opencl" and "adreno" in target.keys:
             TAG_S, TAG_R = "threadIdx.x", "threadIdx.y"
             VEC_C = 8
             LOAD_V_SHARED = False
             LOAD_V_VEC = -1
             UNROLL = 8
             TS, TR = 2, 32
-        elif target.kind.name == "vulkan" and (
-            ("android" in str(target.host)) or ("adreno" in str(target.device_name))
-        ):
+        elif target.kind.name == "vulkan" and "adreno" in target.keys:
             TAG_S, TAG_R = "threadIdx.x", "threadIdx.y"
             VEC_C = 4
             LOAD_V_SHARED = False
@@ -576,9 +572,7 @@ class GEMV(GPUScheduleRule):
         DEC_PACK = 8
         SCALE_PACK = 4
 
-        if target.kind.name == "opencl" and (
-            ("android" in str(target.host)) or ("adreno" in str(target.device_name))
-        ):
+        if target.kind.name == "opencl" and ("adreno" in target.keys):
             TAG_S, TAG_R = "threadIdx.x", "threadIdx.y"
             VEC_C = 8
             UNROLL = 8
@@ -586,9 +580,7 @@ class GEMV(GPUScheduleRule):
             LOAD_V_SHARED = False
             LOAD_V_VEC = 4
             LOAD_V_TILE = 8
-        elif target.kind.name == "vulkan" and (
-            ("android" in str(target.host)) or ("adreno" in str(target.device_name))
-        ):
+        elif target.kind.name == "vulkan" and ("adreno" in target.keys):
             TAG_S, TAG_R = "threadIdx.x", "threadIdx.y"
             VEC_C = 4
             UNROLL = 8
@@ -660,7 +652,7 @@ class GEMV(GPUScheduleRule):
         # NOTE: Only Android is supported so far
         if not (
             ((target.kind.name == "opencl") or (target.kind.name == "vulkan"))
-            and (("android" in str(target.host)) or ("adreno" in str(target.device_name)))
+            and ("adreno" in target.keys)
         ):
             return None
         batch, s, r, c = sch.get_loops(block)

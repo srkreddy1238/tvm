@@ -106,24 +106,24 @@ class FragmentGetter : public StmtExprVisitor {
       }
     } else if (op->op.same_as(builtin::tvm_construct_coopmat_qcom()) ||
                op->op.same_as(builtin::tvm_deconstruct_coopmat_qcom())) {
-      ICHECK_EQ(op->args.size(), 5U);
+      TVM_FFI_ICHECK_EQ(op->args.size(), 5U);
       const VarNode* buffer_var = op->args[0].as<VarNode>();
-      ICHECK(buffer_var);
+      TVM_FFI_ICHECK(buffer_var);
 
       const IntImmNode* m = op->args[1].as<IntImmNode>();
       const IntImmNode* n = op->args[2].as<IntImmNode>();
       const IntImmNode* k = op->args[3].as<IntImmNode>();
-      ICHECK(m);
-      ICHECK(n);
-      ICHECK(k);
+      TVM_FFI_ICHECK(m);
+      TVM_FFI_ICHECK(n);
+      TVM_FFI_ICHECK(k);
 
       std::string scope = GetPtrStorageScope(ffi::GetRef<Var>(buffer_var));
       if (fragments.count(buffer_var)) {
         FragmentInfo info = fragments[buffer_var];
-        ICHECK_EQ(m->value, info.m);
-        ICHECK_EQ(n->value, info.n);
-        ICHECK_EQ(k->value, info.k);
-        ICHECK_EQ(info.scope, scope);
+        TVM_FFI_ICHECK_EQ(m->value, info.m);
+        TVM_FFI_ICHECK_EQ(n->value, info.n);
+        TVM_FFI_ICHECK_EQ(k->value, info.k);
+        TVM_FFI_ICHECK_EQ(info.scope, scope);
       } else {
         FragmentInfo info;
         if (scope == "wmma.matrix_a" || scope == "wmma.matrix_b" || scope == "wmma.accumulator") {

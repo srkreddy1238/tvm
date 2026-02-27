@@ -18,13 +18,14 @@ import tvm
 import tvm.testing
 
 from tvm import te, tir
+from utils import requires_adreno_opencl
 
-target = "opencl -device=adreno"
+target = {"kind": "opencl", "device": "adreno"}
 
 
-@tvm.testing.requires_adreno_opencl(support_required="compile-only")
+@requires_adreno_opencl
 def test_dp4a_codegen():
-    from tvm.tir import tensor_intrin
+    from tvm.s_tir import tensor_intrin
 
     def reduction():
         n = 512
@@ -41,10 +42,10 @@ def test_dp4a_codegen():
         )
 
         func = te.create_prim_func([A, B, C])
-        sch = tvm.tir.Schedule(func)
-        blk = sch.get_block("C")
+        sch = tvm.s_tir.Schedule(func)
+        blk = sch.get_sblock("C")
 
-        (i, j) = sch.get_loops(sch.get_block("C"))
+        (i, j) = sch.get_loops(sch.get_sblock("C"))
         bx, tx = sch.split(i, [None, 256])
         sch.bind(bx, "blockIdx.x")
         sch.bind(tx, "threadIdx.x")
@@ -79,10 +80,10 @@ def test_dp4a_codegen():
             name="C",
         )
         func = te.create_prim_func([A, B, C])
-        sch = tvm.tir.Schedule(func)
-        blk = sch.get_block("C")
+        sch = tvm.s_tir.Schedule(func)
+        blk = sch.get_sblock("C")
 
-        (i, j, k) = sch.get_loops(sch.get_block("C"))
+        (i, j, k) = sch.get_loops(sch.get_sblock("C"))
         sch.bind(i, "blockIdx.x")
         sch.bind(j, "threadIdx.x")
 
@@ -138,8 +139,8 @@ def test_dp4a_codegen():
             name="conv2d_NCHW",
         )
         func = te.create_prim_func([data, kernel, conv])
-        sch = tvm.tir.Schedule(func)
-        blk = sch.get_block("conv2d_NCHW")
+        sch = tvm.s_tir.Schedule(func)
+        blk = sch.get_sblock("conv2d_NCHW")
 
         (n, c, h, w, icc, kh, kw, icb) = sch.get_loops(blk)
         sch.bind(c, "blockIdx.x")

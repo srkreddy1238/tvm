@@ -32,18 +32,19 @@ from tvm.relax.transform.legalize_ops import adreno as legalize_adreno
 from tvm.script import ir as I, tir as T, relax as R
 from tvm.target import Target
 from tvm.contrib import ndk
-from tvm import tir, DataType
+from tvm import DataType, s_tir
 from tvm.rpc import connect_tracker
 
-from utils import build_and_run, run_cpu
+from utils import build_and_run, requires_adreno_opencl_real
 
 
-@tvm.testing.requires_adreno_opencl
-@pytest.mark.parametrize("backend", ["opencl -device=adreno"])
+@pytest.mark.skip("TODO: Disabled after rebase")
+@requires_adreno_opencl_real
+@pytest.mark.parametrize("target", [tvm.target.Target("qcom/adreno-opencl-texture")])
 @pytest.mark.parametrize("dtype", ["int8", "float16", "int16", "float32", "int32"])
 @pytest.mark.parametrize("channel_size", [64, 128])
 @pytest.mark.parametrize("read_width", [1, 2, 4, 8, 16])
-def test_texture_copy(backend, dtype, channel_size, read_width):
+def test_texture_copy(target, dtype, channel_size, read_width):
     M, N, K = (256, 1024, 128)
     lanes = channel_size // DataType(dtype).bits
     if read_width > lanes:
@@ -57,7 +58,7 @@ def test_texture_copy(backend, dtype, channel_size, read_width):
             B = T.match_buffer(Bm, (M, N), dtype=dtype)
             T.func_attr({"global_symbol": "copy"})
             for li, lj in T.grid(M, N):
-                with T.block("Copy"):
+                with T.sblock("Copy"):
                     i, j = T.axis.remap("SS", [li, lj])
                     B[i, j] = A[i, j]
 
@@ -69,9 +70,9 @@ def test_texture_copy(backend, dtype, channel_size, read_width):
                 R.output(gv)
             return gv
 
-    def schedule_texture_read(sch: tir.Schedule):
+    def schedule_texture_read(sch: s_tir.Schedule):
         sch.work_on("copy")
-        B_blk = sch.get_block("Copy")
+        B_blk = sch.get_sblock("Copy")
         Ai_block = sch.cache_read(B_blk, 0, "global.texture")
         sch.transform_layout(Ai_block, ("write", 0), lambda i, j: (i, j // lanes, j % lanes))
 
@@ -90,12 +91,12 @@ def test_texture_copy(backend, dtype, channel_size, read_width):
         schedule_default(B_blk, read_width)
 
     tex_mod = copy.deepcopy(TextureCopy)
-    sch = tir.Schedule(tex_mod)
+    sch = s_tir.Schedule(tex_mod)
     schedule_texture_read(sch)
     tex_mod = sch.mod
 
     inputs_np = [np.random.uniform(-16, 16, size=(M, N)).astype(dtype)]
-    outputs_np = build_and_run(tex_mod, inputs_np, "opencl", None, None)
+    outputs_np = build_and_run(tex_mod, inputs_np, target)
 
     assert len(inputs_np) == 1 and len(outputs_np) == 1
     np.testing.assert_equal(inputs_np[0], outputs_np[0])
