@@ -17,7 +17,7 @@
 # pylint: disable=redefined-builtin, invalid-name, too-many-arguments
 """Operators used in TIR expression."""
 
-from typing import Any, Optional, Union
+from typing import Any
 
 import tvm_ffi
 

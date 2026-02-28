@@ -19,6 +19,7 @@
 """QNN Requantize operator"""
 
 from tvm import te
+
 from .utils import get_fixed_point_value, get_qnn_param, saturate
 
 
@@ -44,7 +45,6 @@ def requantize(
     """
 
     if isinstance(input_scale, (float)) and isinstance(output_scale, (float)):
-
         scale = input_scale / output_scale
         scale_fixed_point, rsh = get_fixed_point_value(scale)
 
@@ -62,7 +62,6 @@ def requantize(
     else:
         # find the scale fixed point and rsh for each tensor along axis
         def _compute(*indices):
-
             value = data(*indices)
             scale_fixed_point = get_qnn_param(scale_fixed_point_list, indices, axis)
             rsh = get_qnn_param(rsh_list, indices, axis)

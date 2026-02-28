@@ -17,6 +17,7 @@
 
 import numpy as np
 import pytest
+
 import tvm
 import tvm.testing
 from tvm import relax, tir
@@ -193,7 +194,6 @@ def run_on_cpu(mod: tvm.IRModule, x: np.ndarray) -> np.ndarray:
 def test_qnn_concatenate(
     N, C, H, W, in_scales, in_zero_points, out_scale, out_zero_point, axis, inp_dtype, out_dtype
 ):
-
     # 4D input: (N, C, H, W)
     x = np.random.randint(0, 255, (N, C, H, W)).astype(inp_dtype)
     mod = build_module(

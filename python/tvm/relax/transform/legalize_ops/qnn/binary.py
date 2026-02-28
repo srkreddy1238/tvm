@@ -19,6 +19,7 @@
 
 from tvm import topi
 from tvm.topi.qnn.utils import get_int_scale
+
 from ....block_builder import BlockBuilder
 from ....expr import Call, Expr
 from ..common import register_legalize

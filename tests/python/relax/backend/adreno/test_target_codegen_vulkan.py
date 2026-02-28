@@ -15,34 +15,14 @@
 # specific language governing permissions and limitations
 # under the License.
 
-import re
 
-import numpy as np
-import pytest
+from utils import requires_adreno_vulkan
 
 import tvm
 import tvm.testing
-from tvm import te, s_tir
-from tvm.script import tir as T, ir as I
-from tvm.script.ir_builder import IRBuilder
-from tvm.script.ir_builder import ir as I_builder
-from tvm.script.ir_builder import tir as T_builder
-from tvm.s_tir import TensorIntrin
-from tvm.tir import IntImm, Cast
-from tvm.s_tir import Schedule
-from tvm.s_tir.tensor_intrin.cuda import (
-    WMMA_LOAD_16x16x16_F16_A_INTRIN,
-    WMMA_LOAD_16x16x16_F16_B_INTRIN,
-    WMMA_SYNC_16x16x16_f16f16f32_INTRIN,
-    WMMA_FILL_16x16x16_F32_INTRIN,
-    WMMA_STORE_16x16x16_F32_GLOBAL_INTRIN,
-    WMMA_SYNC_16x16x16_f16f16f16_INTRIN,
-    WMMA_FILL_16x16x16_F16_INTRIN,
-    WMMA_STORE_16x16x16_F16_GLOBAL_INTRIN,
-)
+from tvm import s_tir, te
 from tvm.s_tir.tensor_intrin.adreno import get_adreno_wmma_intrin_group
 from tvm.target import Target
-from utils import requires_adreno_vulkan
 
 
 @requires_adreno_vulkan
@@ -135,7 +115,6 @@ def test_coopmat_vec_qcom_extn():
             "supports_16bit_buffer": 1,
             "supports_khr_cooperative_matrix": 1,
             "supports_qcom_cooperative_matrix_conversion": 1,
-            "supports_storage_buffer_storage_class": 1,
         }
     )
 

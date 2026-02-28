@@ -14,11 +14,11 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+from utils import requires_adreno_opencl
+
 import tvm
 import tvm.testing
-
 from tvm import te, tir
-from utils import requires_adreno_opencl
 
 target = {"kind": "opencl", "device": "adreno"}
 
@@ -57,7 +57,6 @@ def test_dp4a_codegen():
         sch.compute_at(B_local, tx)
         sch.reverse_compute_at(C_local, tx)
 
-        init_blk = sch.decompose_reduction(blk, j)
         sch.tensorize(j, tensor_intrin.adreno.ADRENO_DP4A_i8i8i32_INTRIN)
 
         ex = tvm.tir.build(sch.mod, target)
@@ -95,9 +94,6 @@ def test_dp4a_codegen():
         sch.compute_at(B_local, ko)
         sch.reverse_compute_at(C_local, j)
 
-        B_reindex = sch.transform_layout(B_local, ("write", 0), lambda i, j: (j, i))
-
-        init_blk = sch.decompose_reduction(blk, ko)
         sch.tensorize(ki, tensor_intrin.adreno.ADRENO_DP4A_i8i8i32_INTRIN)
 
         ex = tvm.tir.build(sch.mod, target)
@@ -108,7 +104,7 @@ def test_dp4a_codegen():
 
     def convolution():
         N, C, iH, iW, c4 = 1, 256, 56, 56, 4  # NCHW4c
-        O, I, oH, oW, i4 = 64, 32, 3, 3, 4  # OIHW4i
+        O, I, oH, oW, i4 = 64, 32, 3, 3, 4  # OIHW4i  # noqa: E741
 
         data = te.placeholder((N, C, iH, iW, c4), dtype="int8")
         kernel = te.placeholder((O, I, oH, oW, i4), dtype="int8")
@@ -154,7 +150,6 @@ def test_dp4a_codegen():
         sch.compute_at(B_local, kw)
         sch.reverse_compute_at(C_local, w)
 
-        init_blk = sch.decompose_reduction(blk, w)
         sch.tensorize(icb, tensor_intrin.adreno.ADRENO_DP4A_i8i8i32_INTRIN)
 
         ex = tvm.tir.build(sch.mod, target)

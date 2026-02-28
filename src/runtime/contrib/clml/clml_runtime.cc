@@ -350,7 +350,7 @@ class CLMLRuntime : public JSONRuntimeBase {
                                                   shape[3],
                                                   0,
                                                   CL_TENSOR_DIMENSIONS_4D_QCOM,
-                                                  { 0 }};
+                                                  {0}};
     CLML_CALL_clSetMLTensorDimensionsQCOM(&new_tensor_dim_desc,
                                           &layer->storage_map[nid].tensor_desc->tensor);
     CLML_CALL(clGetMLTensorMemorySizeQCOM, CLML_CTX, layer->storage_map[nid].tensor_desc->tensor,

@@ -19,25 +19,21 @@
 import copy
 import json
 
-import copy
-import json
+import numpy as np
 import onnx
 import pytest
-import numpy as np
+from utils import verify_results
 
 import tvm
 import tvm.testing
-
 from tvm import relax
-from tvm.script import relax as R
+from tvm.relax.frontend.onnx import from_onnx
+from tvm.relax.transform.legalize_ops import adreno as legalize_adreno
 from tvm.script import ir as I
+from tvm.script import relax as R
 from tvm.script import tir as T
 from tvm.script.ir_builder import IRBuilder
 from tvm.script.ir_builder import relax as relax_builder
-from tvm.relax.frontend.onnx import from_onnx
-from tvm.relax.transform.legalize_ops import adreno as legalize_adreno
-
-from utils import verify_results
 
 TARGETS = [tvm.target.Target("qcom/adreno-opencl-texture")]
 

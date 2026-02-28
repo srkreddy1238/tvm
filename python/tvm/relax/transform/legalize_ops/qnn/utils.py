@@ -15,8 +15,11 @@
 # specific language governing permissions and limitations
 # under the License.
 """Common functionality for legalization."""
+
 import logging
+
 from tvm import relax
+
 from ....expr import Call, Constant
 
 

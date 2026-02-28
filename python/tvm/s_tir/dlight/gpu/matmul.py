@@ -1111,9 +1111,9 @@ class Matmul(GPUScheduleRule):
         self,
         sch: s_tir.Schedule,
         reduction_block: s_tir.schedule.SBlockRV,
-        blocks: List[s_tir.schedule.SBlockRV],
+        blocks: list[s_tir.schedule.SBlockRV],
         target: Target,
-    ) -> Optional[s_tir.Schedule]:
+    ) -> s_tir.Schedule | None:
         """Get vectorization factor"""
 
         if target.kind.name == "opencl":

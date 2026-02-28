@@ -15,27 +15,18 @@
 # specific language governing permissions and limitations
 # under the License.
 
-import os
 import copy
-import pytest
-import tempfile
+
 import numpy as np
+import pytest
+from utils import build_and_run, requires_adreno_opencl_real
 
 import tvm
 import tvm.testing
-
-from tvm import (
-    relax,
-    IRModule,
-)
-from tvm.relax.transform.legalize_ops import adreno as legalize_adreno
-from tvm.script import ir as I, tir as T, relax as R
-from tvm.target import Target
-from tvm.contrib import ndk
 from tvm import DataType, s_tir
-from tvm.rpc import connect_tracker
-
-from utils import build_and_run, requires_adreno_opencl_real
+from tvm.script import ir as I
+from tvm.script import relax as R
+from tvm.script import tir as T
 
 
 @pytest.mark.skip("TODO: Disabled after rebase")
@@ -45,7 +36,7 @@ from utils import build_and_run, requires_adreno_opencl_real
 @pytest.mark.parametrize("channel_size", [64, 128])
 @pytest.mark.parametrize("read_width", [1, 2, 4, 8, 16])
 def test_texture_copy(target, dtype, channel_size, read_width):
-    M, N, K = (256, 1024, 128)
+    M, N, _ = (256, 1024, 128)
     lanes = channel_size // DataType(dtype).bits
     if read_width > lanes:
         return

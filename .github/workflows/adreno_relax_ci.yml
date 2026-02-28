@@ -35,7 +35,7 @@ concurrency:
 jobs:
   Lint:
     if: ${{ github.repository == 'gpgpu/apache-tvm' }}
-    runs-on: tvm-linux-ci
+    runs-on:  tvm-linux-relax-ci
     steps:
       - uses: actions/checkout@v2
         with:
@@ -43,11 +43,11 @@ jobs:
       - name: Run Lint
         shell: bash -l {0}
         run: |
-          ./tests/scripts/ci.py lint -d tvm.ci_lint
+          ./tests/scripts/ci.py lint -d ci_adreno_gpu_v3
   Adreno-Tests:
     needs: [Lint]
     if: ${{ github.repository == 'gpgpu/apache-tvm' }}
-    runs-on: adreno-runner
+    runs-on:  tvm-linux-relax-ci
     steps:
       - uses: actions/checkout@v2
         with:
@@ -59,7 +59,7 @@ jobs:
            # OpenCL GPU Texture Tests
            USE_SCCACHE=1 \
            SCCACHE_SERVER_PORT=7969 \
-           python ./tests/scripts/ci.py gpu -d ci_adreno_gpu_v2 --adreno
+           python ./tests/scripts/ci.py gpu -d ci_adreno_gpu_v3 --adreno
       - name: Adreno Device Tests Over RPC - V3
         shell: bash -l {0}
         run: |
@@ -70,7 +70,7 @@ jobs:
            USE_SCCACHE=1 \
            SCCACHE_SERVER_PORT=9769 \
            ANDROID_SERIAL=`cat /etc/tvm-ci-device` \
-           python ./tests/scripts/ci.py adreno -d ci_adreno_gpu_v2 -a
+           python ./tests/scripts/ci.py adreno -d ci_adreno_gpu_v3 -a
       - name: Adreno Device Tests Over RPC - V4
         shell: bash -l {0}
         run: |
@@ -81,7 +81,7 @@ jobs:
            USE_SCCACHE=1 \
            SCCACHE_SERVER_PORT=9769 \
            ANDROID_SERIAL=`cat /etc/tvm-ci-device-v4` \
-           python ./tests/scripts/ci.py adreno -d ci_adreno_gpu_v2 -a
+           python ./tests/scripts/ci.py adreno -d ci_adreno_gpu_v3 -a
       - name: Adreno Device Tests Over RPC - CoOp
         shell: bash -l {0}
         run: |
@@ -93,7 +93,7 @@ jobs:
            USE_SCCACHE=1 \
            SCCACHE_SERVER_PORT=9769 \
            ANDROID_SERIAL=`cat /etc/tvm-ci-device-coop` \
-           python ./tests/scripts/ci.py adreno -d ci_adreno_gpu_v2 -a
+           python ./tests/scripts/ci.py adreno -d ci_adreno_gpu_v3 -a
 
   Windows-Build:
     if: ${{ github.repository == 'gpgpu/apache-tvm' }}

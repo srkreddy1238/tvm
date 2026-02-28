@@ -18,18 +18,18 @@
 # pylint: disable=import-outside-toplevel, redefined-builtin
 """TFLite to Relax converter tests"""
 
-import pytest
-import tempfile
-import tensorflow as tf
+import ssl
+
 import numpy as np
+import pytest
+import tensorflow as tf
 import tflite.Model
+
 import tvm
 from tvm import relax
-from tvm.script.parser import ir as I, relax as R, tir as T
-
 from tvm.relax.frontend.tflite import from_tflite
-
-import ssl
+from tvm.script.parser import ir as I
+from tvm.script.parser import relax as R
 
 ssl._create_default_https_context = ssl._create_unverified_context
 
@@ -627,9 +627,9 @@ def test_logical(tf_op, relax_op):
     @I.ir_module
     class Expected:
         @R.function
-        def main(
-            x: R.Tensor((2, 2), dtype="bool"), y: R.Tensor((2, 2), dtype="bool")
-        ) -> R.Tensor((2, 2), dtype="bool"):
+        def main(x: R.Tensor((2, 2), dtype="bool"), y: R.Tensor((2, 2), dtype="bool")) -> R.Tensor(
+            (2, 2), dtype="bool"
+        ):
             R.func_attr({"num_input": 2})
             with R.dataflow():
                 gv: R.Tensor((2, 2), dtype="bool") = relax_op(x, y)

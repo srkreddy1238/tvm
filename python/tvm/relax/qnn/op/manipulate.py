@@ -15,7 +15,9 @@
 # specific language governing permissions and limitations
 # under the License.
 """Relax QNN Manipulate operators"""
+
 from tvm import relax
+
 from . import _ffi_api
 
 
@@ -48,11 +50,11 @@ def concat(data, input_scales, input_zero_points, output_scale, output_zero_poin
         The concatenated quantized tensor.
     """
 
-    if isinstance(data, (list, tuple)):
+    if isinstance(data, list | tuple):
         data = relax.Tuple(list(data))
-    if isinstance(input_scales, (list, tuple)):
+    if isinstance(input_scales, list | tuple):
         input_scales = relax.Tuple(list(input_scales))
-    if isinstance(input_zero_points, (list, tuple)):
+    if isinstance(input_zero_points, list | tuple):
         input_zero_points = relax.Tuple(list(input_zero_points))
 
     return _ffi_api.concat(

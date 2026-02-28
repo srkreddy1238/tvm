@@ -20,10 +20,10 @@
 
 import tvm
 from tvm import te
-
 from tvm.topi.nn import conv
+
 from ..utils import get_const_tuple
-from .utils import subtract_zero_point, is_scalar_tensor
+from .utils import is_scalar_tensor, subtract_zero_point
 
 
 def conv2d(  # Conv2d inputs

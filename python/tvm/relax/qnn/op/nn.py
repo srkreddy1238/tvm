@@ -15,7 +15,6 @@
 # specific language governing permissions and limitations
 # under the License.
 """Relax Neural Network (QNN) operators"""
-from typing import Optional, Tuple, Union
 
 from tvm import DataType
 
@@ -28,16 +27,16 @@ def conv2d(
     weight: Expr,
     data_zero_point: Expr,
     weight_zero_point: Expr,
-    data_scale: Optional[Expr],
-    weight_scale: Optional[Expr],
-    strides: Union[int, Tuple[int, int]] = (1, 1),
-    padding: Union[int, Tuple[int, ...]] = (0, 0),
-    dilation: Union[int, Tuple[int, int]] = (1, 1),
+    data_scale: Expr | None,
+    weight_scale: Expr | None,
+    strides: int | tuple[int, int] = (1, 1),
+    padding: int | tuple[int, ...] = (0, 0),
+    dilation: int | tuple[int, int] = (1, 1),
     groups: int = 1,
     data_layout: str = "NCHW",
     kernel_layout: str = "OIHW",
-    out_layout: Optional[str] = None,
-    out_dtype: Optional[Union[str, DataType]] = None,
+    out_layout: str | None = None,
+    out_dtype: str | DataType | None = None,
 ) -> Expr:
     r"""2D convolution.
 

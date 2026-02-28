@@ -14,17 +14,14 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License
-import os
-import tvm
 import numpy as np
-import tempfile
 import pytest
-import tvm.testing
 
+import tvm
+import tvm.testing
 from tvm import relax
-from tvm.contrib import ndk
-from tvm.target import Target
 from tvm.relax import TensorStructInfo
+
 
 # Helper function to generate the reference module using dequantize -> float_op -> quantize pattern
 def create_ref_module(
@@ -54,7 +51,6 @@ def create_ref_module(
 
     with bb.function("main", [lhs, rhs]):
         with bb.dataflow():
-
             lhs_float = relax.op.dequantize(lhs, lhs_scale, lhs_zero_point)
             rhs_float = relax.op.dequantize(rhs, rhs_scale, rhs_zero_point)
 
@@ -235,9 +231,11 @@ QNN_TEST_PARAMS = [
 
 ######################### Unit Tests #########################
 
+
 # Test QNN Binary Operations
 @pytest.mark.parametrize(
-    "op_name, lhs_shape, rhs_shape, lhs_scale, rhs_scale, lhs_zero_point, rhs_zero_point, out_scale, out_zero_point",
+    "op_name, lhs_shape, rhs_shape, lhs_scale, rhs_scale, \
+    lhs_zero_point, rhs_zero_point, out_scale, out_zero_point",
     QNN_TEST_PARAMS,
 )
 def test_qnn_binary_op(

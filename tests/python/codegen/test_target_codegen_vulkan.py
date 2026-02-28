@@ -25,13 +25,13 @@ import tvm
 import tvm.testing
 from tvm.script import ir as I
 from tvm.script import tir as T
-from tvm import te, s_tir
 from tvm.script.ir_builder import IRBuilder
 from tvm.script.ir_builder import ir as I_builder
 from tvm.script.ir_builder import tir as T_builder
 
 dtype = tvm.testing.parameter("float32", "int32", "float16", "int8")
 fuzz_seed = tvm.testing.parameter(range(25))
+
 
 # Explicitly specify a target, as this test is looking at the
 # generated shader code, and is not running on an actual device.

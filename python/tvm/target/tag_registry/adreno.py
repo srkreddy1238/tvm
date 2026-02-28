@@ -57,6 +57,7 @@ register_tag(
 register_tag(
     "qcom/adreno-vulkan",
     {
+        "from_device": 0,
         "kind": "vulkan",
         "device": "adreno",
         "keys": ["adreno", "vulkan", "gpu"],
@@ -66,6 +67,7 @@ register_tag(
 register_tag(
     "qcom/adreno-vulkan-texture",
     {
+        "from_device": 0,
         "kind": "vulkan",
         "device": "adreno",
         "keys": ["adreno", "vulkan", "gpu", "texture"],

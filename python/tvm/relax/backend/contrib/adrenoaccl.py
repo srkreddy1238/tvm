@@ -16,18 +16,20 @@
 # under the License.
 
 """Pattern table for CLML backend"""
+
 import operator
 from functools import reduce
+
 import tvm
+from tvm import IRModule, relax, tir
 from tvm.relax import transform
+from tvm.relax.backend.pattern_registry import register_patterns
 from tvm.relax.dpl.pattern import (
-    is_op,
-    wildcard,
     GlobalVarPattern,
     TuplePattern,
+    is_op,
+    wildcard,
 )
-from tvm import IRModule, relax, tir
-from tvm.relax.backend.pattern_registry import register_patterns
 
 
 def _shape_1d(shape):

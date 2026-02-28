@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 """Relax QNN Binary operators"""
+
 from ...expr import Expr
 from . import _ffi_api
 

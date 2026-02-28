@@ -16,12 +16,12 @@
 # under the License.
 
 
-""" QNN Neural network topi operators. """
+"""QNN Neural network topi operators."""
 
 # pylint: disable=wildcard-import
 
 from .binary import *
-from .utils import *
-from .nn import *
 from .mainpulate import *
+from .nn import *
 from .requantize import *
+from .utils import *

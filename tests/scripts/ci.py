@@ -177,6 +177,7 @@ def docker(
         "tvm.ci_adreno",
         "tvm.ci_adreno_v2",
         "ci_adreno_gpu_v2",
+        "ci_adreno_gpu_v3",
     }
 
     if image in sccache_images and os.getenv("USE_SCCACHE", "1") == "1":
@@ -380,7 +381,7 @@ def generate_command(
     """
 
     def fn(
-        tests: list[str] | None,
+        tests: list[str] | None = None,
         skip_build: bool = False,
         interactive: bool = False,
         docker_image: str | None = None,
@@ -609,10 +610,13 @@ generated = [
         },
         additional_flags=[
             {"--volume": os.environ.get("VULKAN_SDK", "/tmp/") + ":/adreno-vulkan"},
+            {"--volume": os.environ.get("ADRENO_OPENCL", "/tmp/") + ":/adreno-opencl"},
+            {"--net": "host"},
         ],
         env={
             "LD_LIBRARY_PATH": "/usr/local/cuda/lib64/",
             "VULKAN_SDK": "/adreno-vulkan",
+            "ADRENO_OPENCL": "/adreno-opencl",
         },
     ),
     generate_command(

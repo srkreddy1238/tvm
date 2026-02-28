@@ -20,8 +20,8 @@ import pytest
 
 import tvm
 import tvm.testing
-from tvm.topi.utils import get_const_tuple
 from tvm.error import InternalError
+from tvm.topi.utils import get_const_tuple
 
 
 def test_layout():

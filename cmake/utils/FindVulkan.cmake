@@ -54,7 +54,11 @@ macro(find_vulkan use_vulkan use_khronos_spirv)
   if(CMAKE_SYSTEM_NAME STREQUAL "Android")
     message(STATUS "Detected Android build")
 
-    set(Vulkan_INCLUDE_DIRS "${CMAKE_SYSROOT}/usr/include/vulkan")
+    if(IS_DIRECTORY $ENV{VULKAN_SDK})
+        set(Vulkan_INCLUDE_DIRS "$ENV{VULKAN_SDK}/include")
+    else()
+        set(Vulkan_INCLUDE_DIRS "${CMAKE_SYSROOT}/usr/include/vulkan")
+    endif()
 
     # Map Android ABI to architecture
     set(ANDROID_LIB_ARCH "")

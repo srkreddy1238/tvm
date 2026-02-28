@@ -18,6 +18,7 @@
 
 # pylint: disable=invalid-name
 
+import tvm
 from tvm.ir import IRModule
 from tvm.tir.expr import Var
 from tvm.tir.stmt import PrimExpr

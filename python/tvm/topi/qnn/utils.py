@@ -17,10 +17,11 @@
 
 # pylint: disable=invalid-name, unused-variable, too-many-locals
 # pylint: disable=unused-argument, redefined-
-""" QNN utility functions """
+"""QNN utility functions"""
+
 import math
 import struct
-from typing import Tuple, Union
+
 import tvm
 from tvm import te, tir, topi
 
@@ -40,7 +41,7 @@ def get_qnn_param(param, indices, axis):
 
 def subtract_zero_point(
     tensor: te.Tensor,
-    zero_point: Union[te.Tensor, tvm.tir.IntImm],
+    zero_point: te.Tensor | tvm.tir.IntImm,
     name: str,
 ):
     """
@@ -80,7 +81,7 @@ def saturate(x: te.Tensor, dtype: str):
     return te.max(te.min_value(dtype), te.min(x, te.max_value(dtype)))
 
 
-def get_fixed_point_value(flp: float, dtype: str = "int16") -> Tuple[int, int]:
+def get_fixed_point_value(flp: float, dtype: str = "int16") -> tuple[int, int]:
     """
     Return fixed-point value and the corresponding log2 of the scale factor used to compute
     this value.
@@ -206,7 +207,7 @@ def get_fixed_point_value(flp: float, dtype: str = "int16") -> Tuple[int, int]:
     scale = ((exp_scale_factor + 127) & 0xFF) << 23
     scale_i = struct.pack("I", scale)
     scale_f = struct.unpack("f", scale_i)
-    fixed_point_value = int(round(flp * scale_f[0]))
+    fixed_point_value = round(flp * scale_f[0])
 
     if not within_range(fixed_point_value, dtype):
         # Adjust scale factor to avoid overflow.
@@ -214,7 +215,7 @@ def get_fixed_point_value(flp: float, dtype: str = "int16") -> Tuple[int, int]:
         scale = ((exp_scale_factor + 127) & 0xFF) << 23
         scale_i = struct.pack("I", scale)
         scale_f = struct.unpack("f", scale_i)
-        fixed_point_value = int(round(flp * scale_f[0]))
+        fixed_point_value = round(flp * scale_f[0])
 
     return fixed_point_value, exp_scale_factor
 

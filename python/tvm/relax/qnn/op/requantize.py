@@ -17,6 +17,7 @@
 """Relax Neural Network (QNN) operators"""
 
 from tvm import relax
+
 from ...expr import Expr
 from . import _ffi_api
 
@@ -30,7 +31,6 @@ def requantize(
     axis: int = -1,
     out_dtype: str = "int8",
 ) -> Expr:
-
     r"""Requantize op per channel
     Requantization typically happens after a computation like qnn.conv2d.
     It rescales from one quantized range (input scale/zero point) to another
@@ -67,9 +67,9 @@ def requantize(
         The requantized output tensor.
     """
 
-    if isinstance(input_scale, (list, tuple)):
+    if isinstance(input_scale, list | tuple):
         input_scale = relax.Tuple(list(input_scale))
-    if isinstance(input_zero_point, (list, tuple)):
+    if isinstance(input_zero_point, list | tuple):
         input_zero_point = relax.Tuple(list(input_zero_point))
 
     return _ffi_api.requantize(

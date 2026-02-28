@@ -24,6 +24,7 @@ import tvm.testing
 from tvm import relax, tir
 from tvm.relax import TensorStructInfo
 
+
 # TODO ir_module
 def build_module(
     N: int,
@@ -106,7 +107,6 @@ def run_on_cpu(mod: tvm.IRModule, x1_np: np.ndarray, x2_np: np.ndarray) -> np.nd
     ],
 )
 def test_qnn_concatenate(N, C1, C2, H, in_scales, in_zero_points, out_scale, out_zero_point, axis):
-
     x1_np = np.random.randint(-128, 127, (N, C1, H)).astype("int8")
     x2_np = np.random.randint(-128, 127, (N, C2, H)).astype("int8")
 

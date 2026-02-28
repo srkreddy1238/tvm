@@ -17,8 +17,10 @@
 # pylint: disable=invalid-name, unused-variable, too-many-locals
 # pylint: disable=unused-argument, redefined-builtin
 
-""" QNN Binary operators TOPI implementations. """
+"""QNN Binary operators TOPI implementations."""
+
 from tvm import te
+
 from .utils import broadcast_axis, saturate
 
 

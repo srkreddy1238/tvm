@@ -17,18 +17,17 @@
 # pylint: disable=invalid-name,unused-argument,unused-import
 """Default legalization function for quantized neural network operators."""
 
-from tvm import topi, relax
+from tvm import relax, topi
 
+from .....topi.qnn.utils import get_fixed_point_value
 from ....block_builder import BlockBuilder
 from ....expr import Call, Expr
 from ..common import register_legalize
 from .utils import get_values_from_expr
-from .....topi.qnn.utils import get_fixed_point_value
 
 
 @register_legalize("relax.qnn.requantize")
 def _qnn_requantize(bb: BlockBuilder, call: Call) -> Expr:
-
     # Get the attributes from the call
     args = call.args
     input_scale = args[1]

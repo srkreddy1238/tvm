@@ -14,26 +14,22 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-# ruff: noqa: F401, F841
 
-from adreno_utils import verify
+from utils import requires_adreno_opencl_vulkan, verify_results
 
 import tvm
 import tvm.testing
-from tvm.relax.transform import ConvertLayout, Normalize
-from tvm.relax.transform.legalize_ops import adreno as legalize_adreno
 from tvm.script.parser import ir as I
 from tvm.script.parser import relax as R
-from tvm.script.parser import tir as T
-from utils import verify_results, requires_adreno_opencl
 
 TARGETS = [
     tvm.target.Target("qcom/adreno-opencl-texture"),
+    #    tvm.target.Target("qcom/adreno-vulkan-texture"),
 ]
 ref_target = tvm.target.Target("llvm")
 
 
-@requires_adreno_opencl
+@requires_adreno_opencl_vulkan
 @tvm.testing.parametrize_targets(*TARGETS)
 def test_conv2d(target):
     @I.ir_module
@@ -50,7 +46,7 @@ def test_conv2d(target):
     verify_results(Input, target, ref_target)
 
 
-@requires_adreno_opencl
+@requires_adreno_opencl_vulkan
 @tvm.testing.parametrize_targets(*TARGETS)
 def test_conv2d_relu(target):
     @I.ir_module
@@ -68,7 +64,7 @@ def test_conv2d_relu(target):
     verify_results(Input, target, ref_target)
 
 
-@requires_adreno_opencl
+@requires_adreno_opencl_vulkan
 @tvm.testing.parametrize_targets(*TARGETS)
 def test_relu_conv2d_relu(target):
     @I.ir_module
@@ -87,7 +83,7 @@ def test_relu_conv2d_relu(target):
     verify_results(Input, target, ref_target)
 
 
-@requires_adreno_opencl
+@requires_adreno_opencl_vulkan
 @tvm.testing.parametrize_targets(*TARGETS)
 def test_conv2d_relu_tanh(target):
     @I.ir_module
@@ -106,7 +102,7 @@ def test_conv2d_relu_tanh(target):
     verify_results(Input, target, ref_target)
 
 
-@requires_adreno_opencl
+@requires_adreno_opencl_vulkan
 @tvm.testing.parametrize_targets(*TARGETS)
 def test_conv2d_add(target):
     @I.ir_module
@@ -126,7 +122,7 @@ def test_conv2d_add(target):
     verify_results(Input, target, ref_target)
 
 
-@requires_adreno_opencl
+@requires_adreno_opencl_vulkan
 @tvm.testing.parametrize_targets(*TARGETS)
 def test_conv2d_sum(target):
     @I.ir_module
@@ -144,7 +140,7 @@ def test_conv2d_sum(target):
     verify_results(Input, target, ref_target)
 
 
-@requires_adreno_opencl
+@requires_adreno_opencl_vulkan
 @tvm.testing.parametrize_targets(*TARGETS)
 def test_conv2d_sum_keepdims(target):
     @I.ir_module
@@ -162,7 +158,7 @@ def test_conv2d_sum_keepdims(target):
     verify_results(Input, target, ref_target)
 
 
-@requires_adreno_opencl
+@requires_adreno_opencl_vulkan
 @tvm.testing.parametrize_targets(*TARGETS)
 def test_conv2d_sum_reduce(target):
     @I.ir_module
@@ -180,7 +176,7 @@ def test_conv2d_sum_reduce(target):
     verify_results(Input, target, ref_target)
 
 
-@requires_adreno_opencl
+@requires_adreno_opencl_vulkan
 @tvm.testing.parametrize_targets(*TARGETS)
 def test_conv2d_transpose(target):
     @I.ir_module
@@ -198,7 +194,7 @@ def test_conv2d_transpose(target):
     verify_results(Input, target, ref_target)
 
 
-@requires_adreno_opencl
+@requires_adreno_opencl_vulkan
 @tvm.testing.parametrize_targets(*TARGETS)
 def test_conv2d_expand_dims(target):
     @I.ir_module
@@ -216,7 +212,7 @@ def test_conv2d_expand_dims(target):
     verify_results(Input, target, ref_target)
 
 
-@requires_adreno_opencl
+@requires_adreno_opencl_vulkan
 @tvm.testing.parametrize_targets(*TARGETS)
 def test_conv2d_squeeze(target):
     @I.ir_module
@@ -234,7 +230,7 @@ def test_conv2d_squeeze(target):
     verify_results(Input, target, ref_target)
 
 
-@requires_adreno_opencl
+@requires_adreno_opencl_vulkan
 @tvm.testing.parametrize_targets(*TARGETS)
 def test_conv2d_strided_slice(target):
     @I.ir_module
@@ -254,7 +250,7 @@ def test_conv2d_strided_slice(target):
     verify_results(Input, target, ref_target)
 
 
-@requires_adreno_opencl
+@requires_adreno_opencl_vulkan
 @tvm.testing.parametrize_targets(*TARGETS)
 def test_conv2d_relu_concat(target):
     @I.ir_module
@@ -273,7 +269,7 @@ def test_conv2d_relu_concat(target):
     verify_results(Input, target, ref_target)
 
 
-@requires_adreno_opencl
+@requires_adreno_opencl_vulkan
 @tvm.testing.parametrize_targets(*TARGETS)
 def test_conv2d_relu_concat_split(target):
     @I.ir_module
@@ -293,7 +289,7 @@ def test_conv2d_relu_concat_split(target):
     verify_results(Input, target, ref_target)
 
 
-@requires_adreno_opencl
+@requires_adreno_opencl_vulkan
 @tvm.testing.parametrize_targets(*TARGETS)
 def test_conv2d_relu_concat_split_transpose_concat(target):
     @I.ir_module
@@ -314,7 +310,7 @@ def test_conv2d_relu_concat_split_transpose_concat(target):
     verify_results(Input, target, ref_target)
 
 
-@requires_adreno_opencl
+@requires_adreno_opencl_vulkan
 @tvm.testing.parametrize_targets(*TARGETS)
 def test_conv2d_maxpool2d(target):
     @I.ir_module
@@ -339,7 +335,7 @@ def test_conv2d_maxpool2d(target):
     verify_results(Input, target, ref_target)
 
 
-@requires_adreno_opencl
+@requires_adreno_opencl_vulkan
 @tvm.testing.parametrize_targets(*TARGETS)
 def test_conv2d_avgpool2d(target):
     @I.ir_module
@@ -357,7 +353,7 @@ def test_conv2d_avgpool2d(target):
     verify_results(Input, target, ref_target)
 
 
-@requires_adreno_opencl
+@requires_adreno_opencl_vulkan
 @tvm.testing.parametrize_targets(*TARGETS)
 def test_conv2d_softmax(target):
     @I.ir_module
@@ -375,7 +371,7 @@ def test_conv2d_softmax(target):
     verify_results(Input, target, ref_target)
 
 
-@requires_adreno_opencl
+@requires_adreno_opencl_vulkan
 @tvm.testing.parametrize_targets(*TARGETS)
 def test_conv2d_layernorm(target):
     @I.ir_module
@@ -398,7 +394,7 @@ def test_conv2d_layernorm(target):
     verify_results(Input, target, ref_target)
 
 
-@requires_adreno_opencl
+@requires_adreno_opencl_vulkan
 @tvm.testing.parametrize_targets(*TARGETS)
 def test_binary_broadcast(target):
     @I.ir_module
@@ -418,7 +414,7 @@ def test_binary_broadcast(target):
     verify_results(Input, target, ref_target)
 
 
-@requires_adreno_opencl
+@requires_adreno_opencl_vulkan
 @tvm.testing.parametrize_targets(*TARGETS)
 def test_binary_ewise_scalar(target):
     @I.ir_module
@@ -436,7 +432,7 @@ def test_binary_ewise_scalar(target):
     verify_results(Input, target, ref_target)
 
 
-@requires_adreno_opencl
+@requires_adreno_opencl_vulkan
 @tvm.testing.parametrize_targets(*TARGETS)
 def test_residual_block(target):
     """
@@ -484,7 +480,7 @@ def test_residual_block(target):
     verify_results(Input, target, ref_target)
 
 
-@requires_adreno_opencl
+@requires_adreno_opencl_vulkan
 @tvm.testing.parametrize_targets(*TARGETS)
 def test_conv2d_conv2d_fallback_to_buffer_conv2d(target):
     """
@@ -515,8 +511,6 @@ def test_conv2d_conv2d_fallback_to_buffer_conv2d(target):
                 gv1 = R.add(gv, bias1)
                 gv2 = R.nn.relu(gv1)
                 gv3 = R.nn.conv2d(gv2, w2, strides=[2, 2], out_dtype="float32")
-                gv4 = R.add(gv3, bias2)
-                gv5 = R.nn.relu(gv4)
                 gv6 = R.nn.conv2d(gv2, w3, strides=[2, 2], out_dtype="float32")
                 gv7 = R.concat((gv3, gv6), axis=1)
                 R.output(gv7)
@@ -525,7 +519,7 @@ def test_conv2d_conv2d_fallback_to_buffer_conv2d(target):
     verify_results(Input, target, ref_target)
 
 
-@requires_adreno_opencl
+@requires_adreno_opencl_vulkan
 @tvm.testing.parametrize_targets(*TARGETS)
 def test_conv2d_conv2d_conv2d_concat(target):
     """
@@ -556,8 +550,6 @@ def test_conv2d_conv2d_conv2d_concat(target):
                 gv1 = R.add(gv, bias1)
                 gv2 = R.nn.relu(gv1)
                 gv3 = R.nn.conv2d(gv2, w2, strides=[2, 2], out_dtype="float32")
-                gv4 = R.add(gv3, bias2)
-                gv5 = R.nn.relu(gv4)
                 gv6 = R.nn.conv2d(gv2, w3, strides=[2, 2], out_dtype="float32")
                 gv7 = R.concat((gv3, gv6), axis=1)
                 R.output(gv7)
@@ -566,7 +558,7 @@ def test_conv2d_conv2d_conv2d_concat(target):
     verify_results(Input, target, ref_target)
 
 
-@requires_adreno_opencl
+@requires_adreno_opencl_vulkan
 @tvm.testing.parametrize_targets(*TARGETS)
 def test_pooling_branching_texture_params(target):
     """
@@ -603,15 +595,12 @@ def test_pooling_branching_texture_params(target):
                 gv2 = R.nn.conv2d(
                     gv1, w2, padding=[0, 0, 1, 1], strides=[1, 1], out_dtype="float32"
                 )
-                gv3 = R.add(gv2, bias1)
-                gv4 = R.nn.relu(gv3)
                 gv5 = R.nn.conv2d(
                     gv1, w3, padding=[0, 0, 0, 0], strides=[1, 1], out_dtype="float32"
                 )
                 gv6 = R.nn.conv2d(
                     gv1, w4, padding=[0, 1, 1, 0], strides=[1, 1], out_dtype="float32"
                 )
-                gv7 = R.nn.relu(gv6)
                 gv8 = R.add(gv2, gv5)
                 gv9 = R.add(gv8, gv6)
                 R.output(gv9)
@@ -620,7 +609,7 @@ def test_pooling_branching_texture_params(target):
     verify_results(Input, target, ref_target)
 
 
-@requires_adreno_opencl
+@requires_adreno_opencl_vulkan
 @tvm.testing.parametrize_targets(*TARGETS)
 def test_injective_inputs1(target):
     """
@@ -669,7 +658,7 @@ def test_injective_inputs1(target):
     verify_results(Input, target, ref_target)
 
 
-@requires_adreno_opencl
+@requires_adreno_opencl_vulkan
 @tvm.testing.parametrize_targets(*TARGETS)
 def test_injective_nwo_inputs2(target):
     """

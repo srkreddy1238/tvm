@@ -17,18 +17,13 @@
 
 import os
 import tempfile
-import numpy as np
 
-from typing import Literal
+import numpy as np
 
 import tvm
 import tvm.testing
-
 from tvm import relax
-from tvm.contrib import utils, ndk, dlpack as dl
-from tvm.script.parser import ir as I, relax as R, tir as T
-from tvm.relax.transform.legalize_ops import adreno as legalize_adreno
-
+from tvm.contrib import ndk
 
 # Test Infra
 

@@ -14,13 +14,13 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-import pytest
 import numpy as np
+import pytest
+
 import tvm
 import tvm.testing
-
 from tvm import relax
-from tvm.relax import TensorStructInfo, ShapeExpr
+from tvm.relax import ShapeExpr, TensorStructInfo
 
 
 def get_ref_impl(
@@ -42,15 +42,17 @@ def get_ref_impl(
     out_dtype,
     out_layout,
 ):
-    data, weight = relax.Var("data", TensorStructInfo(shape=data, dtype=dtype)), relax.Var(
-        "weight", TensorStructInfo(shape=weight, dtype=dtype)
+    data, weight = (
+        relax.Var("data", TensorStructInfo(shape=data, dtype=dtype)),
+        relax.Var("weight", TensorStructInfo(shape=weight, dtype=dtype)),
     )
-    data_zero_point, weight_zero_point = relax.const(data_zero_point, dtype=zp_dtype), relax.const(
-        weight_zero_point, dtype=zp_dtype
+    data_zero_point, weight_zero_point = (
+        relax.const(data_zero_point, dtype=zp_dtype),
+        relax.const(weight_zero_point, dtype=zp_dtype),
     )
 
     assert (data_scale is None and weight_scale is None) or (
-        not (data_scale is None) and not (weight_scale is None)
+        data_scale is not None and weight_scale is not None
     ), "Both must be None or a Constant"
     has_scale = data_scale is not None
 
@@ -63,8 +65,9 @@ def get_ref_impl(
             scale_reshape.insert(out_idx, weight_scale.shape[0])
 
         scale_reshape = ShapeExpr(scale_reshape)
-        data_scale, weight_scale = relax.const(data_scale, dtype=scale_dtype), relax.const(
-            weight_scale, dtype=scale_dtype
+        data_scale, weight_scale = (
+            relax.const(data_scale, dtype=scale_dtype),
+            relax.const(weight_scale, dtype=scale_dtype),
         )
 
     bb = relax.BlockBuilder()
@@ -119,21 +122,24 @@ def get_qnn_impl(
     out_dtype,
     out_layout,
 ):
-    data, weight = relax.Var("data", TensorStructInfo(shape=data, dtype=dtype)), relax.Var(
-        "weight", TensorStructInfo(shape=weight, dtype=dtype)
+    data, weight = (
+        relax.Var("data", TensorStructInfo(shape=data, dtype=dtype)),
+        relax.Var("weight", TensorStructInfo(shape=weight, dtype=dtype)),
     )
-    data_zero_point, weight_zero_point = relax.const(data_zero_point, dtype=zp_dtype), relax.const(
-        weight_zero_point, dtype=zp_dtype
+    data_zero_point, weight_zero_point = (
+        relax.const(data_zero_point, dtype=zp_dtype),
+        relax.const(weight_zero_point, dtype=zp_dtype),
     )
 
     assert (data_scale is None and weight_scale is None) or (
-        not (data_scale is None) and not (weight_scale is None)
+        data_scale is not None and weight_scale is not None
     ), "Both must be None or a Constant"
-    has_scale = not (data_scale is None)
+    has_scale = data_scale is not None
 
     if has_scale:
-        data_scale, weight_scale = relax.const(data_scale, dtype=scale_dtype), relax.const(
-            weight_scale, dtype=scale_dtype
+        data_scale, weight_scale = (
+            relax.const(data_scale, dtype=scale_dtype),
+            relax.const(weight_scale, dtype=scale_dtype),
         )
 
     bb = relax.BlockBuilder()
@@ -254,9 +260,10 @@ def test_qnn_conv2d(
         out_layout,
     )
 
-    data, weight = np.random.randint(
-        low=0, high=128, size=data_shape, dtype="int8"
-    ), np.random.randint(low=0, high=128, size=weight_shape, dtype="int8")
+    data, weight = (
+        np.random.randint(low=0, high=128, size=data_shape, dtype="int8"),
+        np.random.randint(low=0, high=128, size=weight_shape, dtype="int8"),
+    )
     inputs = [data, weight]
     ref_ex = relax.build(ref_mod, "llvm")
     qnn_ex = relax.build(qnn_mod, "llvm")

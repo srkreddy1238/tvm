@@ -15,7 +15,8 @@
 # specific language governing permissions and limitations
 # under the License.
 """Quantized Neural network related operators."""
+
 from .binary import *
-from .nn import *
 from .manipulate import *
+from .nn import *
 from .requantize import *

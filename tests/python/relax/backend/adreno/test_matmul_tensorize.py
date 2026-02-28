@@ -18,7 +18,7 @@
 import os
 
 import pytest
-from utils import verify_results, requires_adreno_vulkan
+from utils import requires_adreno_vulkan, verify_results
 
 import tvm.testing
 from tvm.script import ir as I

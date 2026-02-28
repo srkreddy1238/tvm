@@ -26,7 +26,6 @@ from ..common import register_legalize
 
 @register_legalize("relax.qnn.concat")
 def _qnn_concat(bb: BlockBuilder, call: Call) -> Expr:
-
     # Get the attributes from the call
     args = call.args
     output_dtype = args[0].fields[0].struct_info.dtype

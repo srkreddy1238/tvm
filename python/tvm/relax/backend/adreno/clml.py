@@ -18,16 +18,16 @@
 """Pattern table for CLML backend"""
 
 import tvm
-from tvm import relax, IRModule, tir
+from tvm import IRModule, relax, tir
 from tvm.ir.transform import PassContext, module_pass
 from tvm.relax import transform
 from tvm.relax.dpl.pattern import (
+    GlobalVarPattern,
+    TuplePattern,
     is_const,
     is_op,
     is_tuple_get_item,
     wildcard,
-    GlobalVarPattern,
-    TuplePattern,
 )
 from tvm.relax.expr import TupleGetItem, VarBinding
 from tvm.relax.expr_functor import PyExprMutator, mutator

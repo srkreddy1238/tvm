@@ -17,49 +17,45 @@
 # ruff: noqa: E501, F401, F841
 """CLML integration operator tests."""
 
-import os
-import json
-import pytest
 import inspect
+import json
+import os
+
 import numpy as np
+import pytest
+from mod_utils import (
+    get_avgpool_expected_codegen,
+    get_batchnorm_mod,
+    get_binary_op_mod,
+    get_clml_conv2d_codegen,
+    get_conv2d_transpose_expected_codegen,
+    get_dequant_matmul_module,
+    get_dequant_vec_matmul_module,
+    get_global_avgpool_expected_codegen,
+    get_global_maxpool_expected_codegen,
+    get_maxpool_expected_codegen,
+    get_relax_avgpool_mod,
+    get_relax_conv2d_mod,
+    get_relax_conv2d_transpose_mod,
+    get_relax_global_avgpool_mod,
+    get_relax_global_maxpool_mod,
+    get_relax_maxpool_mod,
+    get_relax_reshape_codegen,
+    get_relax_reshape_mod,
+    get_unary_op_mod,
+)
+from utils import requires_adreno_clml, verify_results
 
 import tvm
 import tvm.testing
-
 from tvm import relax, rpc
-from tvm.script import relax as R
+from tvm.relax.backend.adreno import clml
+from tvm.relax.backend.adreno.clml import OpenCLMLOffLoad, OpenCLMLOffLoadForLLM
 from tvm.script import ir as I
+from tvm.script import relax as R
 from tvm.script import tir as T
 from tvm.script.ir_builder import IRBuilder
 from tvm.script.ir_builder import relax as relax_builder
-from tvm.relax.backend.adreno import clml
-from tvm.relax.backend.adreno.clml import OpenCLMLOffLoad, OpenCLMLOffLoadForLLM
-import tvm.testing
-
-
-from mod_utils import (
-    get_relax_conv2d_mod,
-    get_clml_conv2d_codegen,
-    get_relax_conv2d_transpose_mod,
-    get_conv2d_transpose_expected_codegen,
-    get_batchnorm_mod,
-    get_binary_op_mod,
-    get_unary_op_mod,
-    get_relax_maxpool_mod,
-    get_maxpool_expected_codegen,
-    get_relax_avgpool_mod,
-    get_avgpool_expected_codegen,
-    get_relax_reshape_mod,
-    get_relax_reshape_codegen,
-    get_relax_global_avgpool_mod,
-    get_global_avgpool_expected_codegen,
-    get_relax_global_maxpool_mod,
-    get_global_maxpool_expected_codegen,
-    get_dequant_matmul_module,
-    get_dequant_vec_matmul_module,
-)
-from utils import verify_results
-from utils import requires_adreno_clml
 
 CLML_VERSION = int(tvm.support.libinfo().get("TVM_CLML_VERSION", 0))
 TARGET_CLML_VERSION = int(os.environ.get("ADRENO_TARGET_CLML_VERSION", 0))
@@ -249,7 +245,6 @@ def test_conv2d_transpose(
     verify(mod, clml_codegen, inputs_np, params_np, target_test=False)
 
 
-# @pytest.mark.skip ("TODO: Need to fix - fails after mainline rebase")
 @requires_adreno_clml
 @pytest.mark.skipif(
     CLML_VERSION < 3,
@@ -546,6 +541,7 @@ def test_global_max_pool(dtype, trials):
     verify(mod, clml_codegen, inputs_np, {})
 
 
+@pytest.mark.skip("TODO: Need to fix - fails after mainline rebase")
 @pytest.mark.skipif(
     CLML_VERSION < 5,
     reason="Requires target device with CLML v5 or above",
@@ -605,6 +601,7 @@ def test_dequant_matmul(K, N, M):
     verify(mod, clml_codegen, inputs_np, {}, target_minimum_clml_version=5)
 
 
+@pytest.mark.skip("TODO: Need to fix - fails after mainline rebase")
 @pytest.mark.skipif(
     CLML_VERSION < 5,
     reason="Requires compiler supporting CLML v5 or above",

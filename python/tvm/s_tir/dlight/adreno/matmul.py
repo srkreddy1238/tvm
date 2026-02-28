@@ -16,15 +16,14 @@
 # under the License.
 
 # pylint: disable=missing-docstring
-from typing import Optional, Tuple, List
 
-from tvm import tir, s_tir
+from tvm import s_tir, tir
+from tvm.s_tir.schedule.schedule import SBlockRV
 from tvm.target import Target
 from tvm.tir import IterVar
-from tvm.s_tir.schedule.schedule import SBlockRV
 
-from .base import AdrenoScheduleRule
 from .. import analysis
+from .base import AdrenoScheduleRule
 
 # Supported shape profiles
 SUPPORTED_PROFILES = {
@@ -49,7 +48,7 @@ def get_vector_size(dtype: str) -> int:
     return VECTOR_SIZE[dtype]
 
 
-def extract_shapes_and_dtypes(func: tir.PrimFunc) -> Tuple[List[List[tir.PrimExpr]], List[str]]:
+def extract_shapes_and_dtypes(func: tir.PrimFunc) -> tuple[list[list[tir.PrimExpr]], list[str]]:
     shapes = [func.buffer_map[param].shape for param in func.params]
     dtypes = [func.buffer_map[param].dtype for param in func.params]
     return shapes, dtypes
@@ -81,8 +80,8 @@ def get_reduction_blocks(sch, blocks) -> bool:
 
 
 def validate_supported_shape(
-    shapes: List[List[tir.PrimExpr]], dtypes: List[str]
-) -> Optional[Tuple[int, int, int]]:
+    shapes: list[list[tir.PrimExpr]], dtypes: list[str]
+) -> tuple[int, int, int] | None:
     # pylint: disable=invalid-name
     if len(shapes) < 3 or len(dtypes) < 3:
         return None
@@ -114,7 +113,7 @@ class MatmulTensorization(AdrenoScheduleRule):
         func: tir.PrimFunc,
         target: Target,
         _: bool,
-    ) -> Optional[s_tir.Schedule]:
+    ) -> s_tir.Schedule | None:
         # pylint: disable=invalid-name
 
         # skip openCl as of now

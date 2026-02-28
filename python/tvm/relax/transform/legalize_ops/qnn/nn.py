@@ -16,8 +16,11 @@
 # under the License.
 # pylint: disable=invalid-name,unused-argument,unused-import
 """Default legalization function for quantized neural network operators."""
+
 import logging
-from tvm import tir, s_tir, topi
+
+from tvm import s_tir, tir, topi
+
 from ....block_builder import BlockBuilder
 from ....expr import Call, Expr
 from ..common import register_legalize

@@ -14,7 +14,7 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-# ruff: noqa: E501, RUF005, RUF012
+# ruff: noqa: RUF005, RUF012
 
 # pylint: disable=invalid-name,unnecessary-comprehension,redefined-outer-name
 """TVM testing utilities
@@ -78,7 +78,7 @@ import platform
 import shutil
 import sys
 import time
-from collections.abc import Callable, List, Optional, Tuple, Union
+from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np

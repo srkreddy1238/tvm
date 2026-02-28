@@ -17,13 +17,11 @@
 # pylint: disable=invalid-name,missing-function-docstring,unused-variable,unused-import
 """Intrinsics for tensorization on Adreno GPU."""
 
-from typing import Dict, Literal, Optional, Tuple, Union
+from typing import Literal
 
-from tvm.runtime import convert
 from tvm.script import tir as T
 from tvm.tir import Cast, IntImm, TensorIntrin
 from tvm.tir.function import PrimFunc
-from tvm import DataType
 
 ########################### DP4A OP ########################################
 
@@ -83,7 +81,7 @@ def get_wmma_fragment_index(buffer, stride, m_dim, n_dim):
 
 def get_wmma_fill_intrin(
     m_dim: int, n_dim: int, k_dim: int, dtype: str
-) -> Tuple[PrimFunc, PrimFunc]:
+) -> tuple[PrimFunc, PrimFunc]:
     """Generator of wmma_fill intrins"""
     zero = IntImm("int32", 0).astype(dtype)
     offset_factor = n_dim
@@ -145,7 +143,7 @@ def get_wmma_load_intrin(
     shared_scope: str,
     is_b: bool,
     is_col_major: bool,
-) -> Tuple[PrimFunc, PrimFunc]:
+) -> tuple[PrimFunc, PrimFunc]:
     """Generator of wmma_load intrins"""
     wmma_fragment_scope = f"wmma.matrix_{'b' if is_b else 'a'}"
     layout = "col_major" if is_col_major else "row_major"
@@ -222,7 +220,7 @@ def get_wmma_load_intrin(
 
 def get_wmma_store_intrin(
     m_dim: int, n_dim: int, k_dim: int, dtype: str, scope: str
-) -> Tuple[PrimFunc, PrimFunc]:
+) -> tuple[PrimFunc, PrimFunc]:
     """Generator of wmma_store intrins"""
     offset_factor = n_dim
 
@@ -293,7 +291,7 @@ def get_wmma_store_intrin(
 
 def get_wmma_sync_intrin(
     m_dim: int, n_dim: int, k_dim: int, in_dtype: str, out_dtype: str, b_transposed: bool
-) -> Tuple[PrimFunc, PrimFunc]:
+) -> tuple[PrimFunc, PrimFunc]:
     """Generator of wmma_sync intrins"""
 
     def maybe_cast(v):
@@ -409,20 +407,18 @@ def get_wmma_sync_intrin(
 
 def get_wmma_qcom_intrin(
     m_dim: int, n_dim: int, k_dim: int, dtype: str, is_b: bool, is_col_major: bool, is_load: bool
-) -> Tuple[PrimFunc, PrimFunc]:
+) -> tuple[PrimFunc, PrimFunc]:
     """Generator of wmma_load intrins"""
     wmma_fragment_scope = f"wmma.matrix_{'b' if is_b else 'a'}"
-    layout = "col_major" if is_col_major else "row_major"
     if not is_load:
         wmma_fragment_scope = "wmma.accumulator"
     intrin_func = T.tvm_construct_coopmat_qcom if is_load else T.tvm_deconstruct_coopmat_qcom
 
     if is_load:
-        frag_m, frag_n = (n_dim, k_dim) if is_b else (m_dim, k_dim)
+        _, frag_n = (n_dim, k_dim) if is_b else (m_dim, k_dim)
     else:
-        frag_m, frag_n = m_dim, n_dim
+        _, frag_n = m_dim, n_dim
     offset_factor = frag_n
-    bits = DataType(dtype).bits
 
     scope_a, scope_c = (
         "local" if is_load else wmma_fragment_scope,
@@ -449,10 +445,6 @@ def get_wmma_qcom_intrin(
 
     @T.prim_func
     def wmma_load_impl(a: T.handle, c: T.handle) -> None:
-        s1 = T.int32()
-        s0 = T.int32()
-        d1 = T.int32()
-        d0 = T.int32()
         A = T.match_buffer(
             a,
             (frag_n),
@@ -507,7 +499,7 @@ def get_shorthand_dtype(dtype: str) -> str:
         raise ValueError(f"Unsupported dtype: {dtype}")
 
 
-def get_wmma_tile_sizes(in_dtype: str, out_dtype: str) -> Union[Tuple[int, int, int], None]:
+def get_wmma_tile_sizes(in_dtype: str, out_dtype: str) -> tuple[int, int, int] | None:
     return SUPPORTED_PROFILES.get((in_dtype, in_dtype, out_dtype), None)
 
 
@@ -518,13 +510,13 @@ def get_adreno_wmma_intrin_group(
     m: int,
     n: int,
     k: int,
-    load_scope: Union[SCOPE, Tuple[SCOPE, SCOPE]],
+    load_scope: SCOPE | tuple[SCOPE, SCOPE],
     store_scope: SCOPE,
     trans_a: bool,
     trans_b: bool,
     dtype: Literal["int8", "float16", "float32"],
     out_dtype: Literal["int32", "float16", "float32"],
-) -> Dict[str, str]:
+) -> dict[str, str]:
     """Get a group of WMMA intrinsics for tensorization on Adreno GPU.
 
     Parameters
