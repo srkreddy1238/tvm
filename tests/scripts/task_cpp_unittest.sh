@@ -35,4 +35,8 @@ export OMP_NUM_THREADS=1
 pushd "${BUILD_DIR}"
 # run cpp test executable
 ./cpptest
+
+if [ -f ./cpp-compiler-test ]; then
+./cpp-compiler-test
+fi
 popd

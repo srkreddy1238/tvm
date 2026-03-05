@@ -99,7 +99,7 @@ if __name__ == "__main__":
     if verbose:
         ninja_args.append("-v")
 
-    sh.run("cmake --build . -- " + " ".join(ninja_args), cwd=build_dir)
+    sh.run("ninja " + " ".join(ninja_args), cwd=build_dir)
 
     if use_sccache:
         logging.info("===== sccache stats =====")

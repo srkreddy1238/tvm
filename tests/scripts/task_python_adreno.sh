@@ -57,12 +57,7 @@ export RPC_DEVICE_KEY="android"
 export ADRENO_TARGET="adreno"
 export TVM_NDK_CC="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android28-clang"
 
-env PYTHONPATH=python python3 -m tvm.exec.rpc_tracker --host "${TVM_TRACKER_HOST}" --port "${TVM_TRACKER_PORT}" &
-TRACKER_PID=$!
-sleep 5   # Wait for tracker to bind
-
 export ANDROID_SERIAL=$1
-
 TARGET_FOLDER=/data/local/tmp/tvm_ci-${USER}-${TVM_TRACKER_PORT}
 adb shell "mkdir -p ${TARGET_FOLDER}"
 adb push build-adreno-target/tvm_rpc ${TARGET_FOLDER}/tvm_rpc-${USER}-${TVM_TRACKER_PORT}
@@ -72,6 +67,30 @@ CPP_LIB=`find ${ANDROID_NDK_HOME} -name libc++_shared.so | grep aarch64`
 if [ -f ${CPP_LIB} ] ; then
     adb push ${CPP_LIB} ${TARGET_FOLDER}
 fi
+
+# CPP Tests
+
+if [ -f build-adreno-target/opencl-cpptest ] ; then
+  adb push build-adreno-target/opencl-cpptest ${TARGET_FOLDER}
+  adb shell "cd ${TARGET_FOLDER};LD_LIBRARY_PATH=${TARGET_FOLDER}/ ./opencl-cpptest"
+fi
+
+if [ -f build-adreno-target/vulkan-cpptest ] ; then
+  adb push build-adreno-target/vulkan-cpptest ${TARGET_FOLDER}
+  adb shell "cd ${TARGET_FOLDER};LD_LIBRARY_PATH=${TARGET_FOLDER}/ ./vulkan-cpptest"
+fi
+
+if [ -f build-adreno-compiler/cpp-compiler-test ] ; then
+  adb push build-adreno-compiler/libtvm.so ${TARGET_FOLDER}
+  adb push build-adreno-compiler/cpp-compiler-test ${TARGET_FOLDER}
+  adb shell "cd ${TARGET_FOLDER};LD_LIBRARY_PATH=${TARGET_FOLDER}/ ./cpp-compiler-test"
+fi
+
+exit 0
+
+env PYTHONPATH=python python3 -m tvm.exec.rpc_tracker --host "${TVM_TRACKER_HOST}" --port "${TVM_TRACKER_PORT}" &
+TRACKER_PID=$!
+sleep 5   # Wait for tracker to bind
 
 adb reverse tcp:${TVM_TRACKER_PORT} tcp:${TVM_TRACKER_PORT}
 ADB_PORTS_RANGE=4

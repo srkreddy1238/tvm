@@ -44,3 +44,4 @@ echo set\(USE_FLATBUFFERS_PATH \"/flatbuffers\"\) >> config.cmake
 echo set\(USE_CCACHE OFF\) >> config.cmake
 echo set\(SUMMARIZE ON\) >> config.cmake
 echo set\(USE_MSC ON\) >> config.cmake
+echo set\(USE_CPP_COMPILER_TESTS /googletest\) >> config.cmake

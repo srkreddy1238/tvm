@@ -21,7 +21,7 @@ set -u
 set -x
 
 output_directory=$(realpath ${PWD}/build-adreno-target)
-rm -rf ${output_directory}
+# rm -rf ${output_directory}
 
 mkdir -p ${output_directory}
 cd ${output_directory}
@@ -52,7 +52,8 @@ echo set\(USE_VULKAN_GTEST ON\) >> config.cmake
 echo set\(USE_OPENCL_EXTN_QCOM ON\) >> config.cmake
 echo set\(PROFILE_SHADER_DUMP ON\) >> config.cmake
 
-cmake -DANDROID_ABI=arm64-v8a \
+cmake -G Ninja \
+      -DANDROID_ABI=arm64-v8a \
       -DCMAKE_SYSTEM_NAME=Android \
       -DCMAKE_ANDROID_ARCH_ABI="arm64-v8a" \
       -DCMAKE_SYSROOT="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/" \
@@ -65,4 +66,62 @@ cmake -DANDROID_ABI=arm64-v8a \
       -DCMAKE_C_COMPILER="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android28-clang" \
       -DMACHINE_NAME="aarch64-linux-gnu" ..
 
-make -j$(nproc) tvm_rpc opencl-cpptest
+ninja tvm_rpc opencl-cpptest
+
+cd -
+
+
+# TVM Compiler for Android
+
+if [ -f "${ADRENO_LLVM}/bin/llvm-config-native" ] ; then
+  output_directory=$(realpath ${PWD}/build-adreno-compiler)
+  # rm -rf ${output_directory}
+
+  mkdir -p ${output_directory}
+  cd ${output_directory}
+
+  cp ../cmake/config.cmake .
+
+  if [ -f "${ADRENO_OPENCL}/CL/cl_qcom_ml_ops.h" ] ; then
+    echo set\(USE_CLML "${ADRENO_OPENCL}"\) >> config.cmake
+  fi
+  if [ -f "${ADRENO_OPENCL}/CL/cl.h" ] ; then
+    echo set\(USE_OPENCL "${ADRENO_OPENCL}"\) >> config.cmake
+  else
+    echo set\(USE_OPENCL ON\) >> config.cmake
+  fi
+  echo set\(USE_RPC ON\) >> config.cmake
+  echo set\(USE_CPP_RPC ON\) >> config.cmake
+  echo set\(USE_LIBBACKTRACE AUTO\) >> config.cmake
+  echo set\(USE_KALLOC_ALIGNMENT 32\) >> config.cmake
+
+  echo set\(ANDROID_ABI arm64-v8a\) >> config.cmake
+  echo set\(ANDROID_PLATFORM android-28\) >> config.cmake
+  echo set\(MACHINE_NAME aarch64-linux-gnu\) >> config.cmake
+
+  echo set\(USE_OPENCL_EXTN_QCOM ON\) >> config.cmake
+  echo set\(PROFILE_SHADER_DUMP ON\) >> config.cmake
+
+  if [ -f "${ADRENO_LLVM}/bin/llvm-config-native" ] ; then
+    echo set\(USE_LLVM "${ADRENO_LLVM}/bin/llvm-config-native"\) >> config.cmake
+  fi
+  echo set\(USE_CPP_COMPILER_TESTS ON\) >> config.cmake
+
+  cmake -G Ninja \
+      -DANDROID_ABI=arm64-v8a \
+      -DCMAKE_SYSTEM_NAME=Android \
+      -DCMAKE_ANDROID_ARCH_ABI="arm64-v8a" \
+      -DCMAKE_SYSROOT="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/" \
+      -DANDROID_PLATFORM=android-28 \
+      -DCMAKE_SYSTEM_VERSION=1 \
+      -DCMAKE_FIND_ROOT_PATH="${ADRENO_OPENCL}" \
+      -DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=NEVER \
+      -DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY \
+      -DCMAKE_CXX_COMPILER="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android28-clang++" \
+      -DCMAKE_C_COMPILER="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android28-clang" \
+      -DMACHINE_NAME="aarch64-linux-gnu" ..
+
+  ninja tvm cpp-compiler-test
+
+  cd -
+fi

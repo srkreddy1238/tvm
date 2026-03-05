@@ -26,9 +26,9 @@
 #include <tvm/tir/analysis.h>
 #include <tvm/tir/stmt_functor.h>
 
-#include "../../../arith/ir_mutator_with_analyzer.h"
-#include "../../../runtime/texture.h"
-#include "../../../tir/transform/ir_utils.h"
+#include "../../../../arith/ir_mutator_with_analyzer.h"
+#include "../../../../runtime/texture.h"
+#include "../../../../tir/transform/ir_utils.h"
 
 namespace tvm {
 namespace s_tir {

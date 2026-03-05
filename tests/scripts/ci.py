@@ -694,6 +694,7 @@ generated = [
             {"--volume": os.environ.get("ADRENO_OPENCL", "/tmp/") + ":/adreno-opencl"},
             {"--volume": os.environ.get("VULKAN_SDK", "/tmp/") + ":/adreno-vulkan"},
             {"--volume": os.environ.get("CI_TEST_INVENTORY", "/Inventory") + ":/Inventory"},
+            {"--volume": os.environ.get("ADRENO_LLVM", "/tmp/") + ":/adreno-llvm"},
             {"--net": "host"},
         ],
         env={
@@ -702,11 +703,13 @@ generated = [
             "ADRENO_TARGET_CLML_VERSION": os.environ.get("ADRENO_TARGET_CLML_VERSION", "3"),
             "ADRENO_TARGET_COOP": os.environ.get("ADRENO_TARGET_COOP", "NO"),
             "CI_TEST_INVENTORY": "/Inventory",
+            "ADRENO_LLVM": "/adreno-llvm",
         },
         options={
             "adreno": (
                 "Run Adreno RPC tests",
                 [
+                    "./tests/scripts/task_adreno_cpp_unittest.sh {build_dir}",
                     "./tests/scripts/task_python_adreno.sh " + os.environ.get("ANDROID_SERIAL", ""),
                 ],
             ),

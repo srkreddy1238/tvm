@@ -345,17 +345,10 @@ TVM_DLL Pass AnnotateEntryFunc();
 TVM_DLL Pass Filter(ffi::TypedFunction<bool(PrimFunc)> fcond);
 
 /*!
- * \brief Remove the weight layout rewrite block
- * \param skip_tensor_rewrite If True, exact rewrite of Tensor, according to the given index map,
- *  will be skipped. Only the shape of the Tensor is transformed correctly, and the content of
- *  the destination array will be filled with random values.
- *
- *  When this pass is called many times during MetaSchedule tuning, the raw data of Tensor,
- *  before and after rewrite, does not matter. Since Tensor layout rewrite, using IndexMap's
- *  MapTensor, is currently slow, skipping the exact rewrite is sometimes necessary.
- *
+ * \brief Pass to check if memory accesses are legal.
  * \return The pass.
  */
+TVM_DLL Pass VerifyMemory();
 }  // namespace transform
 }  // namespace tir
 }  // namespace tvm

@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 # Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
 # distributed with this work for additional information
@@ -14,4 +15,39 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-"""The TIR Adreno backend passes"""
+
+set -euxo pipefail
+
+if [ $# -gt 0 ]; then
+    BUILD_DIR="$1"
+elif [ -n "${TVM_BUILD_PATH:-}" ]; then
+    # TVM_BUILD_PATH may contain multiple space-separated paths.  If
+    # so, use the first one.
+    BUILD_DIR=$(IFS=" "; set -- $TVM_BUILD_PATH; echo $1)
+else
+    BUILD_DIR=build
+fi
+
+
+# to avoid CI thread throttling.
+export TVM_BIND_THREADS=0
+export OMP_NUM_THREADS=1
+
+pushd "${BUILD_DIR}"
+
+# OpenCL CPP
+if [ -f ./opencl-cpptest ]; then
+  ./opencl-cpptest
+fi
+
+# Vulkan CPP
+if [ -f ./vulkan-cpptest ]; then
+    ./vulkan-cpptest
+fi
+
+# CPP Compiler CPP
+if [ -f ./cpp-compiler-test ]; then
+    ./cpp-compiler-test
+fi
+
+popd
