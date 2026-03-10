@@ -16,6 +16,7 @@
 # under the License.
 """Quantized Neural network related operators."""
 
+from .batch_matmul import *
 from .binary import *
 from .manipulate import *
 from .nn import *

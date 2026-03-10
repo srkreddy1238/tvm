@@ -20,6 +20,7 @@
 
 # pylint: disable=wildcard-import
 
+from .batch_matmul import *
 from .binary import *
 from .mainpulate import *
 from .nn import *

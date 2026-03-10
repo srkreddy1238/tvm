@@ -59,6 +59,8 @@ Expr einsum(Expr operands, ffi::String subscripts);
  */
 Expr outer(Expr x1, Expr x2);
 
+StructInfo InferStructInfoMatmul(const Call& call, const BlockBuilder& ctx);
+
 }  // namespace relax
 }  // namespace tvm
 
