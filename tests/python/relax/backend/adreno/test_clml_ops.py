@@ -199,7 +199,6 @@ def test_conv2d_offload(
     verify(mod, clml_codegen, inputs_np, params_np)
 
 
-# @pytest.mark.skip(reason="Unhandled in Default CPU/CL pipeline")
 @requires_adreno_clml
 @pytest.mark.parametrize("dtype", ["float32"])
 @pytest.mark.parametrize(
@@ -488,7 +487,6 @@ def test_reshape(dtype, trials):
     verify(mod, clml_codegen, inputs_np, {})
 
 
-@pytest.mark.skip(reason="Codegen Comparision Failing")
 @requires_adreno_clml
 @pytest.mark.parametrize("dtype", ["float32"])
 @pytest.mark.parametrize(
@@ -504,12 +502,8 @@ def test_global_avg_pool(dtype, trials):
     """Test function for global average pooling."""
     low, high = -1, 1
     (input_shape, keep_dims) = trials
-    N, C, H, W = input_shape
-    pool_size, stride, padding = (H, W), (1, 1), (0, 0, 0, 0)
     mod = get_relax_global_avgpool_mod(input_shape, keep_dims, dtype)
-    clml_codegen = get_global_maxpool_expected_codegen(
-        input_shape, pool_size, stride, padding, "global_max", dtype
-    )
+    clml_codegen = get_global_avgpool_expected_codegen(input_shape, keep_dims, dtype)
 
     inputs_np = [np.random.uniform(low, high, size=input_shape).astype(dtype)]
     verify(mod, clml_codegen, inputs_np, {})
@@ -541,7 +535,6 @@ def test_global_max_pool(dtype, trials):
     verify(mod, clml_codegen, inputs_np, {})
 
 
-@pytest.mark.skip("TODO: Need to fix - fails after mainline rebase")
 @pytest.mark.skipif(
     CLML_VERSION < 5,
     reason="Requires target device with CLML v5 or above",
@@ -571,28 +564,28 @@ def test_dequant_matmul(K, N, M):
         {
             "op": "input",
             "name": "",
-            "attrs": {"shape": [[[K // 8, N]]], "dtype": [["uint32"]]},
+            "attrs": {"shape": [[K // 8, N]], "dtype": ["uint32"]},
         },
         {
             "op": "input",
             "name": "",
-            "attrs": {"shape": [[[K // 32, N]]], "dtype": [["float16"]]},
+            "attrs": {"shape": [[K // 32, N]], "dtype": ["float16"]},
         },
         {
             "op": "input",
             "name": "",
-            "attrs": {"shape": [[[1, -1, K]]], "dtype": [["float16"]]},
+            "attrs": {"shape": [[1, -1, K]], "dtype": ["float16"]},
         },
         {
             "op": "kernel",
             "name": "",
             "inputs": [[0, 0, 0], [1, 0, 0], [2, 0, 0]],
             "attrs": {
-                "dtype": [["float16"]],
-                "num_inputs": "3",
-                "num_outputs": "1",
-                "out_dtype": [["float16"]],
-                "shape": [[[1, -1, N]]],
+                "dtype": ["float16"],
+                "num_inputs": 3,
+                "num_outputs": 1,
+                "out_dtype": "float16",
+                "shape": [[1, -1, N]],
             },
         },
     ]
@@ -601,7 +594,6 @@ def test_dequant_matmul(K, N, M):
     verify(mod, clml_codegen, inputs_np, {}, target_minimum_clml_version=5)
 
 
-@pytest.mark.skip("TODO: Need to fix - fails after mainline rebase")
 @pytest.mark.skipif(
     CLML_VERSION < 5,
     reason="Requires compiler supporting CLML v5 or above",
@@ -632,28 +624,28 @@ def test_dequant_vec_matmul(K, N):
         {
             "op": "input",
             "name": "",
-            "attrs": {"shape": [[[K // 8, -1]]], "dtype": [["uint32"]]},
+            "attrs": {"shape": [[K // 8, -1]], "dtype": ["uint32"]},
         },
         {
             "op": "input",
             "name": "",
-            "attrs": {"shape": [[[K // 32, -1]]], "dtype": [["float16"]]},
+            "attrs": {"shape": [[K // 32, -1]], "dtype": ["float16"]},
         },
         {
             "op": "input",
             "name": "",
-            "attrs": {"shape": [[[1, 1, K]]], "dtype": [["float16"]]},
+            "attrs": {"shape": [[1, 1, K]], "dtype": ["float16"]},
         },
         {
             "op": "kernel",
             "name": "",
             "inputs": [[0, 0, 0], [1, 0, 0], [2, 0, 0]],
             "attrs": {
-                "dtype": [["float16"]],
-                "num_inputs": "3",
-                "num_outputs": "1",
-                "out_dtype": [["float16"]],
-                "shape": [[[1, 1, -1]]],
+                "dtype": ["float16"],
+                "num_inputs": 3,
+                "num_outputs": 1,
+                "out_dtype": "float16",
+                "shape": [[1, 1, -1]],
             },
         },
     ]

@@ -86,8 +86,6 @@ if [ -f build-adreno-compiler/cpp-compiler-test ] ; then
   adb shell "cd ${TARGET_FOLDER};LD_LIBRARY_PATH=${TARGET_FOLDER}/ ./cpp-compiler-test"
 fi
 
-exit 0
-
 env PYTHONPATH=python python3 -m tvm.exec.rpc_tracker --host "${TVM_TRACKER_HOST}" --port "${TVM_TRACKER_PORT}" &
 TRACKER_PID=$!
 sleep 5   # Wait for tracker to bind

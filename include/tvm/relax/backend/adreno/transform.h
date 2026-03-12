@@ -58,6 +58,19 @@ TVM_DLL Pass AnnotateCustomMemoryScope(Target target);
  */
 TVM_DLL Pass FoldVDeviceScopeChange();
 
+/* \brief Append reshape at end of Batchnorm followed by TupleGetItem to enable proper
+ * patterb natching. This is a work aroung patch to ensure we dont split the graph at TupleGetItem
+ */
+TVM_DLL Pass AppendReshapeToBatchnorm();
+
+/* \brief OpenCLML sub graph offloading based on pattern matching.
+ */
+TVM_DLL Pass OpenCLMLOffLoad();
+
+/* \brief OpenCLML sub graph offloading based on pattern matching.
+ */
+TVM_DLL Pass OpenCLMLOffLoadForLLM();
+
 }  // namespace transform
 }  // namespace adreno
 }  // namespace backend

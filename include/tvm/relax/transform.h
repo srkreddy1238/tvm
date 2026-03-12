@@ -729,6 +729,10 @@ TVM_DLL Pass ComputePrimValue();
  */
 TVM_DLL Pass VMShapeLower(bool emit_err_ctx = true);
 
+/* \brief Fold Batchnorm op into Conv2D weights
+ */
+TVM_DLL Pass FoldBatchnormToConv2D();
+
 }  // namespace transform
 }  // namespace relax
 }  // namespace tvm

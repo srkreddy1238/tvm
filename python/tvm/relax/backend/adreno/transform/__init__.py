@@ -20,4 +20,7 @@
 from .transform import (
     AnnotateCustomMemoryScope,
     FoldVDeviceScopeChange,
+    AppendReshapeToBatchnorm,
+    OpenCLMLOffLoad,
+    OpenCLMLOffLoadForLLM,
 )

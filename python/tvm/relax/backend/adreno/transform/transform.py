@@ -47,3 +47,21 @@ def FoldVDeviceScopeChange() -> tvm.ir.transform.Pass:
         The registered pass for allocating workspace.
     """
     return _ffi_api.FoldVDeviceScopeChange()  # type: ignore
+
+
+def AppendReshapeToBatchnorm() -> tvm.ir.transform.Pass:
+    """This pass appends Reshape as dummy op at en of Batchnorm followed by GetTupleItem
+    to acommodate the fusion by pattern appropriately pick TupleGetItem w/o partetioning
+    as another graph. This is a workaround pass to ensure largest single graph.
+    """
+    return _ffi_api.AppendReshapeToBatchnorm()  # type: ignore
+
+
+def OpenCLMLOffLoad() -> tvm.ir.transform.Pass:
+    """OpenCLML offloading based on pattern matching"""
+    return _ffi_api.OpenCLMLOffLoad()  # type: ignore
+
+
+def OpenCLMLOffLoadForLLM() -> tvm.ir.transform.Pass:
+    """OpenCLML offloading based on pattern matching for LLM use cases"""
+    return _ffi_api.OpenCLMLOffLoadForLLM()  # type: ignore

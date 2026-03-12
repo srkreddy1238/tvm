@@ -1634,6 +1634,17 @@ def SpecializePrimFuncBasedOnCallSite() -> tvm.ir.transform.Pass:
     return _ffi_api.SpecializePrimFuncBasedOnCallSite()  # type: ignore
 
 
+def FoldBatchnormToConv2D() -> tvm.ir.transform.Pass:
+    """This pass folds batchnorm op into Conv2D.
+
+    Returns
+    -------
+    ret: tvm.ir.transform.Pass
+        The registered pass for Batchnorm fusion into Conv2D.
+    """
+    return _ffi_api.FoldBatchnormToConv2D()  # type: ignore
+
+
 def _wrap_class_function_pass(pass_cls, pass_info):
     """Wrap a python class as function pass."""
 

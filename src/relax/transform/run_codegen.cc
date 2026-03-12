@@ -212,8 +212,6 @@ class CodeGenRunner : ExprMutator {
   std::unordered_map<const GlobalVarNode*, Expr> extern_funcs_;
 };
 
-}  // namespace relax
-
 namespace transform {
 Pass RunCodegen(
     ffi::Optional<ffi::Map<ffi::String, ffi::Map<ffi::String, ffi::Any>>> target_options,
@@ -230,4 +228,5 @@ TVM_FFI_STATIC_INIT_BLOCK() {
 }
 
 }  // namespace transform
+}  // namespace relax
 }  // namespace tvm
