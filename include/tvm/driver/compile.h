@@ -54,13 +54,14 @@ namespace driver {
  * \brief tvm IRModule compile function to VM Module
  * \param mod The IRModule to compile
  * \param target The Target as string or Target object
+ * \param params the constants of the mod
  * \param relax_pipeline the relax pipeline to be used like
  *        "cpu_generic", "gpu_generic" or target specific like "adreno"
  * \param tir_pipeline the TIR lowering pipeline to be used.
  *        can be "generic" for default or target specific as registered.
  * \return The compiled VM module.
  */
-TVM_DLL ffi::Module Compile(IRModule mod, ffi::Any target,
+TVM_DLL ffi::Module Compile(IRModule mod, ffi::Any target, ffi::Map<Any, ObjectRef> params = {},
                             ffi::Optional<ffi::String> relax_pipeline = std::nullopt,
                             ffi::Optional<ffi::String> tir_pipeline = std::nullopt);
 

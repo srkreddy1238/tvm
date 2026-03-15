@@ -38,7 +38,7 @@ run_pytest ${TVM_UNITTEST_TESTSUITE_NAME}-1 tests/python/codegen/test_target_cod
 # Adreno : A comprehensive Texture tests on Nvidia GPU and clml codegen tests.
 export PYTEST_ADDOPTS=""
 export TVM_TEST_TARGETS='{"kind":"opencl", "device":"adreno"}'
-export TVM_UNITTEST_TESTSUITE_NAME=python-codegen-vulkan-texture
+export TVM_UNITTEST_TESTSUITE_NAME=python-codegen-opencl-texture
 
 source tests/scripts/setup-pytest-env.sh
 

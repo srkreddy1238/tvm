@@ -19,95 +19,23 @@
 
 // CPP Compiler tests
 
-#include <gtest/gtest.h>
-#include <tvm/driver/compile.h>
+#include "compiler_base.h"
 
-#include <chrono>
-#include <iostream>
-#include <limits>
-#include <string>
-#include <tuple>
-#include <unordered_set>
-
-class CPPCompiler : public ::testing::TestWithParam<std::tuple<DLDeviceType, std::string>> {
+class Simple : public ::testing::TestWithParam<
+                   std::tuple<DLDeviceType, std::string, std::string, std::string>>,
+               public CPPCompilerBase {
   void SetUp() override {
-    std::cout << "Setting up for: " << std::get<0>(GetParam()) << " : " << std::get<1>(GetParam())
-              << std::endl;
+    dl_type = {kDLFloat, 32, 1};
     dtype = runtime::DataType(dl_type);
     dl_dev_type = std::get<0>(GetParam());
     dev_name = std::get<1>(GetParam());
+    relax_pipeline = std::get<2>(GetParam());
+    tir_pipeline = std::get<3>(GetParam());
     device = tvm::Device({dl_dev_type, 0});
   }
-
- public:
-  bool TargetSetup(void) {
-    if (!runtime::DeviceAPI::Get(device, true)) {
-      return false;
-    }
-    tgt = tvm::Target(dev_name);
-    tgt_host = tvm::Target("llvm");
-    tgt = tvm::Target::WithHost(tgt, tgt_host);
-    return true;
-  }
-
-  relax::BlockBuilder BuilderSetup(const ffi::Array<relax::Var>& args) {
-    relax::BlockBuilder ctx_ = relax::BlockBuilder::Create(std::nullopt);
-    ctx_->BeginScope(args);
-    ctx_->BeginDataflowBlock();
-    return ctx_;
-  }
-
-  tvm::IRModule BuilderFinalize(const relax::BlockBuilder& ctx_, const ffi::Array<relax::Var>& args,
-                                const relax::Var& out) {
-    auto bind_block = ctx_->EndBlock();
-    auto body = ctx_->Normalize(out);
-    body = ctx_->Normalize(relax::SeqExpr({bind_block}, body));
-
-    ffi::Map<ffi::String, ffi::Any> fattrs;
-    fattrs.Set(tvm::attr::kGlobalSymbol, ffi::String("main"));
-    auto func = relax::Function(args, body, std::nullopt, true, tvm::DictAttrs(fattrs));
-    ctx_->EndScope();
-    ctx_->AddFunction(func, "main");
-    return ctx_->Finalize();
-  }
-
-  ffi::Module Compile(const tvm::IRModule& mod_) {
-    auto vm_mod =
-        tvm::driver::Compile(mod_, tgt, ffi::String("gpu_generic"), ffi::String("generic"));
-    auto vm_ex = vm_mod.as<runtime::vm::VMExecutable>();
-    LOG(INFO) << "About to Load Executable";
-    auto vm = vm_ex->VMLoadExecutable();
-    vm->GetFunction("vm_initialization")
-        .value()(dl_dev_type, 0, runtime::memory::AllocatorType::kPooled, kDLCPU, 0,
-                 runtime::memory::AllocatorType::kPooled);
-    return vm;
-  }
-
-  runtime::Tensor Run(const ffi::Module& vm, const std::vector<ffi::AnyView>& args) {
-    ffi::Any ret;
-
-    LOG(INFO) << "About to set_input";
-    vm->GetFunction("set_input")
-        .value()
-        .CallPacked(ffi::PackedArgs(args.data(), args.size()), &ret);
-
-    LOG(INFO) << "About to Invoke";
-    vm->GetFunction("invoke_stateful").value()("main");
-
-    LOG(INFO) << "About to Get Output";
-    return vm->GetFunction("get_output").value()("main").cast<runtime::Tensor>();
-  }
-
-  DLDataType dl_type = {kDLFloat, 32, 1};
-  runtime::DataType dtype;
-  DLDeviceType dl_dev_type;
-  std::string dev_name;
-  tvm::Device device;
-  tvm::Target tgt;
-  tvm::Target tgt_host;
 };
 
-TEST_P(CPPCompiler, Binary) {
+TEST_P(Simple, Binary) {
   if (!TargetSetup()) {
     GTEST_SKIP() << "Device not available: " << dev_name;
     return;
@@ -144,10 +72,9 @@ TEST_P(CPPCompiler, Binary) {
   auto result_out = ctx_->EmitOutput(result, "add_out");
 
   auto mod_ = BuilderFinalize(ctx_, tvm_args, result_out);
-  LOG(INFO) << "Mod:" << mod_;
 
   // Compile
-  auto vm = Compile(mod_);
+  auto vm = Compile(mod_, tgt, dl_dev_type, relax_pipeline, tir_pipeline);
 
   // Inputs
   auto input_tensor_a =
@@ -157,12 +84,12 @@ TEST_P(CPPCompiler, Binary) {
   std::vector<ffi::AnyView> packed_args = {ffi::String("main"), input_tensor_a, input_tensor_b,
                                            input_tensor_c};
 
-  // Run
-  auto output = Run(vm, packed_args);
+  // VMRun
+  auto output = VMRun(vm, packed_args);
   LOG(INFO) << "Result:" << output.shape();
 }
 
-TEST_P(CPPCompiler, BinaryScalar) {
+TEST_P(Simple, BinaryScalar) {
   if (!TargetSetup()) {
     GTEST_SKIP() << "Device not available: " << dev_name;
     return;
@@ -198,10 +125,9 @@ TEST_P(CPPCompiler, BinaryScalar) {
   auto result_out = ctx_->EmitOutput(result, "add_out");
 
   auto mod_ = BuilderFinalize(ctx_, tvm_args, result_out);
-  LOG(INFO) << "Mod:" << mod_;
 
   // Compile
-  auto vm = Compile(mod_);
+  auto vm = Compile(mod_, tgt, dl_dev_type, relax_pipeline, tir_pipeline);
 
   // Inputs
   auto input_tensor_a =
@@ -214,11 +140,13 @@ TEST_P(CPPCompiler, BinaryScalar) {
       input_tensor_b,
   };
 
-  // Run
-  auto output = Run(vm, packed_args);
+  // VMRun
+  auto output = VMRun(vm, packed_args);
   LOG(INFO) << "Result:" << output.shape();
 }
 
-INSTANTIATE_TEST_SUITE_P(CPPCompierDevices, CPPCompiler,
-                         ::testing::Values(std::make_tuple(kDLCPU, "llvm"),
-                                           std::make_tuple(kDLOpenCL, "opencl")));
+INSTANTIATE_TEST_SUITE_P(
+    CPPCompier, Simple,
+    ::testing::Values(std::make_tuple(kDLCPU, "llvm", "cpu_generic", "generic"),
+                      std::make_tuple(kDLOpenCL, "opencl", "gpu_generic", "generic"),
+                      std::make_tuple(kDLOpenCL, "qcom/adreno-opencl", "adreno", "adreno")));

@@ -99,11 +99,11 @@ void AppendPatterns(ffi::Array<FusionPattern>* clml_patterns,
 void Conv2DPatterns(ffi::Array<FusionPattern>* clml_patterns) {
   DFPattern data = Wildcard();
   DFPattern weight = Wildcard();
-  DFPattern bias = IsConst();
-  DFPattern bn_scale = IsConst();
-  DFPattern bn_bias = IsConst();
-  DFPattern bn_mean = IsConst();
-  DFPattern bn_variance = IsConst();
+  DFPattern bias = Wildcard();
+  DFPattern bn_scale = Wildcard();
+  DFPattern bn_bias = Wildcard();
+  DFPattern bn_mean = Wildcard();
+  DFPattern bn_variance = Wildcard();
   ffi::Map<ffi::String, ffi::Map<ffi::String, ffi::Any>> patterns;
 
   // Check function
@@ -448,6 +448,12 @@ void BinaryPatterns(ffi::Array<FusionPattern>* clml_patterns) {
 
       if (context->annotated_expr.find("lhs") != context->annotated_expr.end() &&
           context->annotated_expr.find("rhs") != context->annotated_expr.end()) {
+        // Dont support PrimTypes
+        if (GetStructInfo(context->annotated_expr["lhs"]).as<PrimStructInfo>() ||
+            GetStructInfo(context->annotated_expr["rhs"]).as<PrimStructInfo>()) {
+          RET_FALSE
+        }
+
         auto lhs_tsinfo = Downcast<TensorStructInfo>(GetStructInfo(context->annotated_expr["lhs"]));
         auto rhs_tsinfo = Downcast<TensorStructInfo>(GetStructInfo(context->annotated_expr["rhs"]));
         auto lhs_shape = lhs_tsinfo->GetShape().value();
@@ -517,6 +523,9 @@ void UnaryPatterns(ffi::Array<FusionPattern>* clml_patterns) {
       *ret = is_bop;
 
       if (context->annotated_expr.find("lhs") != context->annotated_expr.end()) {
+        if (GetStructInfo(context->annotated_expr["lhs"]).as<PrimStructInfo>()) {
+          RET_FALSE
+        }
         auto lhs_tsinfo = Downcast<TensorStructInfo>(GetStructInfo(context->annotated_expr["lhs"]));
         auto lhs_shape = lhs_tsinfo->GetShape().value();
 
@@ -554,7 +563,6 @@ ffi::Array<FusionPattern> CreatePatterns() {
   }
 
   Conv2DPatterns(&clml_patterns);
-  BatchNormPatterns(&clml_patterns);
   PoolPatterns(&clml_patterns);
   GlobalAvgPatterns(&clml_patterns);
   ReshapePatterns(&clml_patterns);
@@ -562,6 +570,18 @@ ffi::Array<FusionPattern> CreatePatterns() {
   UnaryPatterns(&clml_patterns);
 
   return clml_patterns;
+}
+
+ffi::Array<FusionPattern> CreateBNPatterns() {
+  static ffi::Array<FusionPattern> clml_bn_patterns;
+  if (clml_bn_patterns.size() > 0) {
+    // Initialize only once
+    return clml_bn_patterns;
+  }
+
+  BatchNormPatterns(&clml_bn_patterns);
+
+  return clml_bn_patterns;
 }
 
 // LLM
@@ -661,15 +681,24 @@ namespace transform {
 Pass OpenCLMLOffLoad() {
   auto pass_func = [=](IRModule mod, PassContext pc) {
     ffi::Array<FusionPattern> patterns = CreatePatterns();
+    ffi::Array<FusionPattern> bn_patterns = CreateBNPatterns();
     ffi::Map<ffi::String, ffi::Array<ffi::String>> desired_layouts = {
         {"relax.nn.conv2d", {"NCHW", "OIHW", "NCHW"}},
         {"relax.nn.conv2d_transpose", {"NCHW", "OIHW", "NCHW"}}};
     mod = relax::transform::ConvertLayout(desired_layouts, nullptr)(mod);
     mod = relax::transform::Normalize()(mod);
+
+    // TODO(Siva): To be enabled once we can fold constants
+    // all legalization supported on device.
+#ifndef __ANDROID__
     mod = relax::transform::FoldBatchnormToConv2D()(mod);
-    mod = relax::backend::adreno::transform::AppendReshapeToBatchnorm()(mod);
     mod = relax::transform::FoldConstant()(mod);
+#endif
+
     mod = relax::transform::FuseOpsByPattern(patterns)(mod);
+    // Handle any Batch norms not fused into Conv2D
+    mod = relax::backend::adreno::transform::AppendReshapeToBatchnorm()(mod);
+    mod = relax::transform::FuseOpsByPattern(bn_patterns)(mod);
     mod = relax::transform::MergeCompositeFunctions()(mod);
     mod = relax::transform::RunCodegen(std::nullopt, {})(mod);
     return mod;

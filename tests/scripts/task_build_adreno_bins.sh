@@ -84,7 +84,9 @@ if [ -f "${ADRENO_LLVM}/bin/llvm-config-native" ] ; then
 
   if [ -f "${ADRENO_OPENCL}/CL/cl_qcom_ml_ops.h" ] ; then
     echo set\(USE_CLML "${ADRENO_OPENCL}"\) >> config.cmake
+    echo set\(USE_CLML_GRAPH_EXECUTOR "${ADRENO_OPENCL}"\) >> config.cmake
   fi
+
   if [ -f "${ADRENO_OPENCL}/CL/cl.h" ] ; then
     echo set\(USE_OPENCL "${ADRENO_OPENCL}"\) >> config.cmake
   else

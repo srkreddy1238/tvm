@@ -76,7 +76,8 @@ std::pair<tvm::IRModule, ffi::Map<tvm::Target, tvm::IRModule>> SplitHostDeviceMo
       {host_mod, device_mod_dict});
 }
 
-ffi::Module Compile(IRModule mod, ffi::Any target, ffi::Optional<ffi::String> relax_pipeline,
+ffi::Module Compile(IRModule mod, ffi::Any target, ffi::Map<Any, ObjectRef> params,
+                    ffi::Optional<ffi::String> relax_pipeline,
                     ffi::Optional<ffi::String> tir_pipeline) {
   ObjectPtr<runtime::vm::VMExecutable> executable;
   Target target_;
@@ -120,7 +121,10 @@ ffi::Module Compile(IRModule mod, ffi::Any target, ffi::Optional<ffi::String> re
     tir_pipeline_ = "generic";
   }
 
+  LOG(INFO) << "Relax Pipeline:" << relax_pipeline << " TIR Pipeline:" << tir_pipeline;
+
   // Generic passes
+  mod = relax::transform::BindParams("main", params)(mod);
   mod = relax::transform::Normalize()(mod);
   mod = relax::transform::CanonicalizeBindings()(mod);
 
@@ -134,6 +138,16 @@ ffi::Module Compile(IRModule mod, ffi::Any target, ffi::Optional<ffi::String> re
 
   // Relax Pipeline
   mod = apply_module_pass_(mod, ffi::String("relax.pipeline.") + relax_pipeline_);
+
+  auto ext_mods =
+      mod->GetAttr<ffi::Array<ffi::Module>>("external_mods", ffi::Array<ffi::Module>({})).value();
+  auto constants = mod->GetAttr<ffi::Map<ffi::String, runtime::Tensor>>(
+                          "const_name_to_constant", ffi::Map<ffi::String, runtime::Tensor>({}))
+                       .value();
+
+  for (auto [key, val] : constants) {
+    params.Set(key, val);
+  }
 
   // VM Codegen
   relax::ExecBuilder ex_builder =
@@ -199,10 +213,9 @@ ffi::Module Compile(IRModule mod, ffi::Any target, ffi::Optional<ffi::String> re
   }
 
   // VM Link
-  auto vm_mod = (*ffi::Function::GetGlobal("relax.VMLink"))(
-                    ex_builder, target_, m_host, ffi::Array<ffi::Module>({}),
-                    ffi::Map<ffi::String, runtime::Tensor>({}))
-                    .cast<ffi::Module>();
+  auto vm_mod =
+      (*ffi::Function::GetGlobal("relax.VMLink"))(ex_builder, target_, m_host, ext_mods, params)
+          .cast<ffi::Module>();
   return vm_mod;
 }
 

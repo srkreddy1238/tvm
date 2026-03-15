@@ -372,6 +372,8 @@ TVM_REGISTER_TARGET_KIND("opencl", kDLOpenCL)
     // equals to 128 looks like a reasonable number of kernel arguments.
     .add_attr_option<int64_t>("max_function_args", refl::DefaultValue(128))
     .add_attr_option<int64_t>("image_base_address_alignment", refl::DefaultValue(64))
+    .add_attr_option<ffi::String>("relax_pipeline")
+    .add_attr_option<ffi::String>("tir_pipeline")
     .set_default_keys({"opencl", "gpu"});
 
 // The metal has some limitations on the number of input parameters. This is why attribute
@@ -427,7 +429,9 @@ TVM_REGISTER_TARGET_KIND("vulkan", kDLVulkan)
     .add_attr_option<int64_t>("vulkan_api_version")
     .add_attr_option<int64_t>("max_spirv_version")
     // Tags
-    .set_default_keys({"vulkan", "gpu"});
+    .set_default_keys({"vulkan", "gpu"})
+    .add_attr_option<ffi::String>("relax_pipeline")
+    .add_attr_option<ffi::String>("tir_pipeline");
 
 TVM_REGISTER_TARGET_KIND("webgpu", kDLWebGPU)
     .add_attr_option<int64_t>("max_num_threads", refl::DefaultValue(256))

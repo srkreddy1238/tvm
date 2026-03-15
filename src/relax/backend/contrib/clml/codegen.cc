@@ -221,17 +221,44 @@ class OpenCLMLJSONSerializer : public JSONSerializer {
 
     std::vector<JSONGraphNodeEntry> inputs;
 
-    inputs.push_back(VisitExpr(cn->args[0])[0]);
-    inputs.push_back(VisitExpr(nodes.conv->args[1])[0]);
+    int input_id = 0;
+
+    inputs.push_back(VisitExpr(cn->args[input_id++])[0]);
+
+    if (nodes.conv->args[1].as<ConstantNode>()) {
+      inputs.push_back(VisitExpr(nodes.conv->args[1])[0]);
+    } else {
+      inputs.push_back(VisitExpr(cn->args[input_id++])[0]);
+    }
     if (nodes.bias) {
-      inputs.push_back(VisitExpr(nodes.bias->args[1])[0]);
+      if (nodes.bias->args[1].as<ConstantNode>()) {
+        inputs.push_back(VisitExpr(nodes.bias->args[1])[0]);
+      } else {
+        inputs.push_back(VisitExpr(cn->args[input_id++])[0]);
+      }
     }
     // Deal with Batchnorm Fusing here
     if (nodes.bn) {
-      inputs.push_back(VisitExpr(nodes.bn->args[1])[0]);
-      inputs.push_back(VisitExpr(nodes.bn->args[2])[0]);
-      inputs.push_back(VisitExpr(nodes.bn->args[3])[0]);
-      inputs.push_back(VisitExpr(nodes.bn->args[4])[0]);
+      if (nodes.bn->args[1].as<ConstantNode>()) {
+        inputs.push_back(VisitExpr(nodes.bn->args[1])[0]);
+      } else {
+        inputs.push_back(VisitExpr(cn->args[input_id++])[0]);
+      }
+      if (nodes.bn->args[2].as<ConstantNode>()) {
+        inputs.push_back(VisitExpr(nodes.bn->args[2])[0]);
+      } else {
+        inputs.push_back(VisitExpr(cn->args[input_id++])[0]);
+      }
+      if (nodes.bn->args[3].as<ConstantNode>()) {
+        inputs.push_back(VisitExpr(nodes.bn->args[3])[0]);
+      } else {
+        inputs.push_back(VisitExpr(cn->args[input_id++])[0]);
+      }
+      if (nodes.bn->args[4].as<ConstantNode>()) {
+        inputs.push_back(VisitExpr(nodes.bn->args[4])[0]);
+      } else {
+        inputs.push_back(VisitExpr(cn->args[input_id++])[0]);
+      }
     }
 
     auto json_node = std::make_shared<JSONGraphNode>(name, "kernel", inputs, 1);

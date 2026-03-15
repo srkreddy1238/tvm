@@ -36,7 +36,10 @@ class AdrenoRelaxPipeline : GPURelaxPipeline {
   explicit AdrenoRelaxPipeline(const Target& target) : GPURelaxPipeline(target) {}
 
   IRModule Library(IRModule mod) {
-    // TODO(Siva): CLML Dispatches
+    if (Target::Current(true)->HasKey("clml")) {
+      mod = relax::backend::adreno::transform::OpenCLMLOffLoad()(mod);
+      mod = relax::backend::adreno::transform::OpenCLMLOffLoadForLLM()(mod);
+    }
     return mod;
   }
 

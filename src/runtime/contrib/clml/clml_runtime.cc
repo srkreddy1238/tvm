@@ -185,7 +185,9 @@ class CLMLRuntime : public JSONRuntimeBase {
          it++) {
       CLML_CALL(clReleaseMLTensorQCOM, (*it)->tensor)
     }
-    CLML_CALL(clReleaseMLTensorMemoryDescriptorSetQCOM, layer_.descriptorSet)
+    if (layer_.descriptorSet) {
+      CLML_CALL(clReleaseMLTensorMemoryDescriptorSetQCOM, layer_.descriptorSet)
+    }
 
     if (this->layer_.recordable_queue) {
       clReleaseCommandQueue(this->layer_.recordable_queue);
@@ -1223,13 +1225,13 @@ class CLMLRuntime : public JSONRuntimeBase {
     auto input =
         MakeCLMLTensorFromJSONEntry(inputs[0].id_, {}, CL_TENSOR_LAYOUT_OPTIMAL_QCOM, cl_dtype);
     // Weight
-    auto weight =
-        MakeCLMLTensorFromJSONEntry(inputs[1].id_, {}, CL_TENSOR_LAYOUT_OPTIMAL_QCOM, cl_dtype);
+    auto weight = MakeCLMLTensorFromJSONEntry(inputs[1].id_, {}, CL_TENSOR_LAYOUT_OPTIMAL_QCOM,
+                                              cl_dtype, CL_TENSOR_USAGE_PARAMETER_QCOM);
     // Bias
     auto bias = std::make_shared<cl_ml_tensor_memory_desc_qcom>();
     if (has_bias) {
-      bias =
-          MakeCLMLTensorFromJSONEntry(inputs[2].id_, {}, CL_TENSOR_LAYOUT_OPTIMAL_QCOM, cl_dtype);
+      bias = MakeCLMLTensorFromJSONEntry(inputs[2].id_, {}, CL_TENSOR_LAYOUT_OPTIMAL_QCOM, cl_dtype,
+                                         CL_TENSOR_USAGE_PARAMETER_QCOM);
     } else {
       cl_ml_tensor_desc_qcom desc = {};
       desc.num_dimensions = CL_TENSOR_UNUSED_QCOM;
@@ -1278,14 +1280,18 @@ class CLMLRuntime : public JSONRuntimeBase {
       auto bn_var = std::make_shared<cl_ml_tensor_memory_desc_qcom>();
       auto bn_scale = std::make_shared<cl_ml_tensor_memory_desc_qcom>();
       auto bn_bias = std::make_shared<cl_ml_tensor_memory_desc_qcom>();
-      bn_scale = MakeCLMLTensorFromJSONEntry(inputs[bn_index].id_, bn_shape,
-                                             CL_TENSOR_LAYOUT_OPTIMAL_QCOM, cl_dtype);
+      bn_scale =
+          MakeCLMLTensorFromJSONEntry(inputs[bn_index].id_, bn_shape, CL_TENSOR_LAYOUT_OPTIMAL_QCOM,
+                                      cl_dtype, CL_TENSOR_USAGE_PARAMETER_QCOM);
       bn_bias = MakeCLMLTensorFromJSONEntry(inputs[bn_index + 1].id_, bn_shape,
-                                            CL_TENSOR_LAYOUT_OPTIMAL_QCOM, cl_dtype);
+                                            CL_TENSOR_LAYOUT_OPTIMAL_QCOM, cl_dtype,
+                                            CL_TENSOR_USAGE_PARAMETER_QCOM);
       bn_mean = MakeCLMLTensorFromJSONEntry(inputs[bn_index + 2].id_, bn_shape,
-                                            CL_TENSOR_LAYOUT_OPTIMAL_QCOM, cl_dtype);
+                                            CL_TENSOR_LAYOUT_OPTIMAL_QCOM, cl_dtype,
+                                            CL_TENSOR_USAGE_PARAMETER_QCOM);
       bn_var = MakeCLMLTensorFromJSONEntry(inputs[bn_index + 3].id_, bn_shape,
-                                           CL_TENSOR_LAYOUT_OPTIMAL_QCOM, cl_dtype);
+                                           CL_TENSOR_LAYOUT_OPTIMAL_QCOM, cl_dtype,
+                                           CL_TENSOR_USAGE_PARAMETER_QCOM);
 
       cl_ml_op_batchnorm_desc_qcom bn_desc = {CL_BATCHNORM_MODE_SPATIAL_QCOM, cl_arithmetic_mode};
       if (!has_act) {
@@ -1369,13 +1375,17 @@ class CLMLRuntime : public JSONRuntimeBase {
     auto bn_scale = std::make_shared<cl_ml_tensor_memory_desc_qcom>();
     auto bn_bias = std::make_shared<cl_ml_tensor_memory_desc_qcom>();
     bn_scale = MakeCLMLTensorFromJSONEntry(node.GetInputs()[1].id_, bn_shape,
-                                           CL_TENSOR_LAYOUT_OPTIMAL_QCOM, cl_dtype);
+                                           CL_TENSOR_LAYOUT_OPTIMAL_QCOM, cl_dtype,
+                                           CL_TENSOR_USAGE_PARAMETER_QCOM);
     bn_bias = MakeCLMLTensorFromJSONEntry(node.GetInputs()[2].id_, bn_shape,
-                                          CL_TENSOR_LAYOUT_OPTIMAL_QCOM, cl_dtype);
+                                          CL_TENSOR_LAYOUT_OPTIMAL_QCOM, cl_dtype,
+                                          CL_TENSOR_USAGE_PARAMETER_QCOM);
     bn_mean = MakeCLMLTensorFromJSONEntry(node.GetInputs()[3].id_, bn_shape,
-                                          CL_TENSOR_LAYOUT_OPTIMAL_QCOM, cl_dtype);
+                                          CL_TENSOR_LAYOUT_OPTIMAL_QCOM, cl_dtype,
+                                          CL_TENSOR_USAGE_PARAMETER_QCOM);
     bn_var = MakeCLMLTensorFromJSONEntry(node.GetInputs()[4].id_, bn_shape,
-                                         CL_TENSOR_LAYOUT_OPTIMAL_QCOM, cl_dtype);
+                                         CL_TENSOR_LAYOUT_OPTIMAL_QCOM, cl_dtype,
+                                         CL_TENSOR_USAGE_PARAMETER_QCOM);
 
     auto output = MakeCLMLTensorFromJSONEntry(nid, {}, CL_TENSOR_LAYOUT_OPTIMAL_QCOM, cl_dtype);
 
@@ -1701,7 +1711,7 @@ class CLMLRuntime : public JSONRuntimeBase {
     auto input = MakeCLMLTensorFromJSONEntry(node.GetInputs()[0].id_, {}, layout, cl_dtype);
     auto wt_dims = GetTensorDims(nodes_[node.GetInputs()[1].id_]);
     auto weight = MakeCLMLTensorFromJSONEntry(node.GetInputs()[1].id_, {1, 1, wt_dims.n, wt_dims.c},
-                                              layout, cl_dtype);
+                                              layout, cl_dtype, CL_TENSOR_USAGE_PARAMETER_QCOM);
     auto output = MakeCLMLTensorFromJSONEntry(nid, {}, layout, cl_dtype);
 
     auto bias = std::make_shared<cl_ml_tensor_memory_desc_qcom>();
@@ -1778,7 +1788,7 @@ class CLMLRuntime : public JSONRuntimeBase {
     auto input = MakeCLMLTensorFromJSONEntry(node.GetInputs()[0].id_, {}, layout, cl_dtype);
     auto wt_dims = GetTensorDims(nodes_[node.GetInputs()[1].id_]);
     auto weight = MakeCLMLTensorFromJSONEntry(node.GetInputs()[1].id_, {1, 1, wt_dims.n, wt_dims.c},
-                                              layout, cl_dtype);
+                                              layout, cl_dtype, CL_TENSOR_USAGE_PARAMETER_QCOM);
     auto output = MakeCLMLTensorFromJSONEntry(nid, {}, layout, cl_dtype);
 
     return;
@@ -1891,7 +1901,8 @@ class CLMLRuntime : public JSONRuntimeBase {
                                              CL_TENSOR_LAYOUT_NCHW_QCOM, cl_dtype);
     auto wt_dims = GetTensorDims(nodes_[node.GetInputs()[1].id_]);
     auto weight = MakeCLMLTensorFromJSONEntry(node.GetInputs()[1].id_, {1, 1, wt_dims.c, wt_dims.h},
-                                              CL_TENSOR_LAYOUT_NCHW_QCOM, cl_dtype);
+                                              CL_TENSOR_LAYOUT_NCHW_QCOM, cl_dtype,
+                                              CL_TENSOR_USAGE_PARAMETER_QCOM);
 
     auto out_shape = node.GetOpShape()[0];
     std::vector<size_t> clml_out_shape;
@@ -1941,7 +1952,8 @@ class CLMLRuntime : public JSONRuntimeBase {
                                              CL_TENSOR_LAYOUT_NCHW_QCOM, cl_dtype);
     auto wt_dims = GetTensorDims(nodes_[node.GetInputs()[1].id_]);
     auto weight = MakeCLMLTensorFromJSONEntry(node.GetInputs()[1].id_, {1, 1, wt_dims.c, wt_dims.h},
-                                              CL_TENSOR_LAYOUT_NCHW_QCOM, cl_dtype);
+                                              CL_TENSOR_LAYOUT_NCHW_QCOM, cl_dtype,
+                                              CL_TENSOR_USAGE_PARAMETER_QCOM);
 
     auto out_shape = node.GetOpShape()[0];
     std::vector<size_t> clml_out_shape;
