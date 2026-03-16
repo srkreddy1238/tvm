@@ -33,20 +33,25 @@ def build_modules(
     y_scale,
     x_zero_point,
     y_zero_point,
+    out_scale,
+    out_zero_point,
     out_dtype: str,
 ):
-    """
-    Build (ref_mod, qnn_mod) Relax modules for qnn.batch_matmul.
+    """Build (ref_mod, qnn_mod) Relax modules for qnn.batch_matmul with requant.
 
     ref_mod:
-        cast(x, int32) -> cast(y, int32)
-        -> (x_int32 - x_zero_point) @ (y_int32 - y_zero_point)^T (via matmul)
+        Dequantize x, y to float32 using x_scale, y_scale and zero points.
+        Perform float32 batched matmul, then quantize to out_dtype using
+        out_scale and out_zero_point.
+
     qnn_mod:
         qnn.batch_matmul(x, y, x_zp, y_zp, x_scale, y_scale, out_dtype)
+        followed by qnn.requantize with scale = x_scale * y_scale and zp = 0
+        into (out_scale, out_zero_point, out_dtype).
     """
 
     dtype = "int8"
-    zp_dtype = "int32"  # integer zero-points for reference
+    zp_dtype = "int8"  # integer zero-points for reference
     scale_dtype = "float32"
 
     B_ = tir.IntImm("int64", B)
@@ -68,41 +73,51 @@ def build_modules(
     y_s = relax.const(float(y_scale), dtype=scale_dtype)
     x_z = relax.const(int(x_zero_point), dtype=zp_dtype)
     y_z = relax.const(int(y_zero_point), dtype=zp_dtype)
+    out_s = relax.const(float(out_scale), dtype=scale_dtype)
+    out_z = relax.const(int(out_zero_point), dtype=zp_dtype)
 
-    # Reference module: integer matmul on (x - x_zp) and (y - y_zp)
+    # Reference module: dequantize x, y, matmul in float32, then quantize
     def ref_mod_gen():
         bb = relax.BlockBuilder()
         with bb.function("main", params=[x, y]):
             with bb.dataflow():
-                # Cast inputs to int32
-                x_i32 = relax.op.astype(x, "int32")
-                y_i32 = relax.op.astype(y, "int32")
+                x_deq = relax.op.dequantize(x, x_s, x_z)
+                y_deq = relax.op.dequantize(y, y_s, y_z)
+                mm = relax.op.matmul(x_deq, y_deq, out_dtype="float32")
+                q_out = relax.op.quantize(mm, out_s, out_z, out_dtype=out_dtype)
 
-                # Subtract zero points (both sides int32)
-                x_centered = relax.op.subtract(x_i32, x_z)
-                y_centered = relax.op.subtract(y_i32, y_z)
-
-                # Batched matmul in int32
-                mm = relax.op.matmul(x_centered, y_centered, out_dtype="int32")
-                gv = bb.emit_output(mm)
+                gv = bb.emit_output(q_out)
             bb.emit_func_output(gv)
         return bb.get()
 
-    # QNN module: qnn.batch_matmul
+    # QNN module: qnn.batch_matmul followed by requantize
     def qnn_mod_gen():
         bb = relax.BlockBuilder()
         with bb.function("main", params=[x, y]):
             with bb.dataflow():
-                out = relax.qnn.op.batch_matmul(
+                # First do qnn.batch_matmul into an int32 accumulation
+                mm_int32 = relax.qnn.op.batch_matmul(
                     x,
                     y,
                     x_z,
                     y_z,
                     x_s,
                     y_s,
-                    out_dtype,
+                    "int32",
                 )
-                gv = bb.emit_output(out)
+
+                in_s = relax.const(float(x_scale * y_scale), dtype=scale_dtype)
+                in_z = relax.const(0, dtype=zp_dtype)
+
+                q_out = relax.qnn.op.requantize(
+                    mm_int32,
+                    in_s,
+                    in_z,
+                    out_s,
+                    out_z,
+                    out_dtype=out_dtype,
+                )
+                gv = bb.emit_output(q_out)
             bb.emit_func_output(gv)
         return bb.get()
 
@@ -122,18 +137,18 @@ def run_on_cpu(mod: tvm.IRModule, x_np: np.ndarray, y_np: np.ndarray) -> np.ndar
 
 
 @pytest.mark.parametrize(
-    "B, M, K, N, x_scale, y_scale, x_zero_point, y_zero_point, out_dtype",
+    "B, M, K, N, x_scale, y_scale, x_zp, y_zp, out_scale, out_zp, out_dtype",
     [
-        (1, 4, 8, 3, 0.1, 0.2, 0, 0, "int32"),
-        (32, 64, 128, 64, 0.05, 0.05, 0, 0, "int32"),
-        (1, 256, 128, 256, 0.1, 0.1, 0, 0, "int32"),
-        (1, 16, 512, 16, 0.1, 0.1, 0, 0, "int32"),
-        (16, 128, 256, 128, 0.05, 0.05, 0, 0, "int32"),
-        (8, 64, 128, 64, 0.1, 0.1, 127, -128, "int32"),
-        (8, 64, 128, 64, 0.1, 0.1, -128, 127, "int32"),
-        (4, 64, 128, 64, 1e-5, 1e-5, 0, 0, "int32"),
-        (4, 64, 128, 64, 127.0, 127.0, 0, 0, "int32"),
-        (7, 127, 255, 129, 0.1, 0.2, 3, -3, "int32"),
+        (1, 4, 8, 3, 0.1, 0.2, -128, -128, 0.01, 0, "int8"),
+        (32, 64, 128, 64, 0.05, 0.05, 0, -128, 0.05 * 0.05, 0, "int8"),
+        (1, 256, 128, 256, 0.1, 0.1, -128, 0, 0.01, 10, "int8"),
+        (1, 16, 512, 16, 0.1, 0.1, 0, 0, 0.01, -5, "int8"),
+        (16, 128, 256, 128, 0.05, 0.05, 0, 0, 0.0025, 3, "int8"),
+        (8, 64, 128, 64, 0.1, 0.1, 127, -128, 0.01, 0, "int8"),
+        (8, 64, 128, 64, 0.1, 0.1, -128, 127, 0.01, 0, "int8"),
+        (4, 64, 128, 64, 1e-5, 1e-5, 0, 0, 1e-5, 7, "int8"),
+        (4, 64, 128, 64, 127.0, 127.0, 0, 0, 127.0 * 127.0, -12, "int8"),
+        (7, 127, 255, 129, 0.1, 0.2, 3, -3, 0.02, 4, "int8"),
     ],
 )
 def test_qnn_batch_matmul(
@@ -143,8 +158,10 @@ def test_qnn_batch_matmul(
     N,
     x_scale,
     y_scale,
-    x_zero_point,
-    y_zero_point,
+    x_zp,
+    y_zp,
+    out_scale,
+    out_zp,
     out_dtype,
 ):
     x_shape = (B, M, K)
@@ -160,8 +177,10 @@ def test_qnn_batch_matmul(
         N,
         x_scale,
         y_scale,
-        x_zero_point,
-        y_zero_point,
+        x_zp,
+        y_zp,
+        out_scale,
+        out_zp,
         out_dtype,
     )
     ref_out = run_on_cpu(ref_mod, x_np, y_np)

@@ -36,17 +36,17 @@ def _qnn_batch_matmul(bb: BlockBuilder, call: Call) -> Expr:
     - args[5]: y_scale
     - attrs.out_dtype: output data type
     """
-
     args = call.args
     out_dtype = call.attrs.out_dtype
+    x_zp_val = args[2].data.numpy().item()
+    y_zp_val = args[3].data.numpy().item()
 
-    # Call TOPI qnn.batch_matmul
     return bb.call_te(
         topi.qnn.batch_matmul,
         tensor_x=args[0],
         tensor_y=args[1],
-        x_zero_point=args[2],
-        y_zero_point=args[3],
+        x_zp_val=x_zp_val,
+        y_zp_val=y_zp_val,
         out_dtype=out_dtype,
         primfunc_name_hint="qnn_batch_matmul",
     )
