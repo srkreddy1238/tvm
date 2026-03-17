@@ -602,6 +602,7 @@ generated = [
             "adreno": (
                 "Run Adreno Required GPU Tests",
                 [
+                    "./tests/scripts/task_cpp_compiler.sh {build_dir}",
                     "./tests/scripts/task_opencl_cpp_unittest.sh {build_dir}",
                     "./tests/scripts/task_python_unittest_gpuonly.sh",
                 ],

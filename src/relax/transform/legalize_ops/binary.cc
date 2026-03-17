@@ -27,6 +27,16 @@
 namespace tvm {
 namespace relax {
 
+#define TVM_LEGALIZE_BINARY_OP(OpName, TopiHandler)                                           \
+  Expr MAKE_NAME(BinaryLegalize, OpName)(const BlockBuilder& bb, const Call& call) {          \
+    auto m_te = MakeCallTE(bb, call);                                                         \
+    auto call_ret = m_te.Make(tvm::ffi::Array<tvm::ffi::Any>({call->args[0], call->args[1]}), \
+                              std::string(#TopiHandler), #OpName);                            \
+    return call_ret;                                                                          \
+  }                                                                                           \
+  TVM_REGISTER_OP("relax." #OpName)                                                           \
+      .set_attr<FLegalize>("FLegalize", MAKE_NAME(BinaryLegalize, OpName), 9);
+
 TVM_LEGALIZE_BINARY_OP(add, topi.add);
 TVM_LEGALIZE_BINARY_OP(subtract, topi.subtract);
 TVM_LEGALIZE_BINARY_OP(divide, topi.divide);

@@ -80,10 +80,12 @@ if [ -f build-adreno-target/vulkan-cpptest ] ; then
   adb shell "cd ${TARGET_FOLDER};LD_LIBRARY_PATH=${TARGET_FOLDER}/ ./vulkan-cpptest"
 fi
 
-if [ -f build-adreno-compiler/cpp-compiler-test ] ; then
-  adb push build-adreno-compiler/libtvm.so ${TARGET_FOLDER}
-  adb push build-adreno-compiler/cpp-compiler-test ${TARGET_FOLDER}
-  adb shell "cd ${TARGET_FOLDER};LD_LIBRARY_PATH=${TARGET_FOLDER}/ ./cpp-compiler-test"
+if [ -f "${ADRENO_LLVM}/bin/llvm-config-native" ] ; then # Only if CI is enabled this build for online-compiler build & tests
+  if [ -f build-adreno-compiler/cpp-compiler-test ] ; then
+    adb push build-adreno-compiler/libtvm.so ${TARGET_FOLDER}
+    adb push build-adreno-compiler/cpp-compiler-test ${TARGET_FOLDER}
+    adb shell "cd ${TARGET_FOLDER};LD_LIBRARY_PATH=${TARGET_FOLDER}/ ./cpp-compiler-test"
+  fi
 fi
 
 env PYTHONPATH=python python3 -m tvm.exec.rpc_tracker --host "${TVM_TRACKER_HOST}" --port "${TVM_TRACKER_PORT}" &

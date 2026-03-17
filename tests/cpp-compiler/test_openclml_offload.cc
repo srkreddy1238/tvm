@@ -28,7 +28,12 @@ class CLMLOffLoadConv2D
                                 ffi::Array<int64_t>, ffi::Array<int64_t>, int>,
                      bool, bool, bool, bool, bool>>,
       public CPPCompilerBase {
+ public:
   void SetUp() override {
+    if (!std::getenv("ADRENO_TARGET")) {
+      GTEST_SKIP() << "OpenCLML need Adreno target Env: ADRENO_TARGET";
+      return;
+    }
     // Parent
     dl_type = {kDLFloat, 32, 1};
     dtype = runtime::DataType(dl_type);
@@ -64,9 +69,13 @@ class CLMLOffLoadConv2D
     ref_dl_dev_type = kDLCPU;
     ref_relax_pipe = "gpu_generic";
     ref_tir_pipe = "generic";
+
+    if (!TargetSetup()) {
+      GTEST_SKIP() << "Target setup failed for: " << dev_name;
+      return;
+    }
   }
 
- public:
   // Conv2D Op
   ffi::Array<tvm::PrimExpr> data_shape_prim;
   ffi::Array<tvm::PrimExpr> kernel_shape_prim;
@@ -92,11 +101,6 @@ class CLMLOffLoadConv2D
 };
 
 TEST_P(CLMLOffLoadConv2D, Conv2D) {
-  if (!TargetSetup() || !std::getenv("ADRENO_TARGET")) {
-    GTEST_SKIP() << "Device not available: " << dev_name;
-    return;
-  }
-
   relax::TensorStructInfo data_tsinfo = relax::TensorStructInfo(data_shape, dtype);
   relax::TensorStructInfo kernel_tsinfo = relax::TensorStructInfo(kernel_shape, dtype);
   relax::TensorStructInfo bias_tsinfo =

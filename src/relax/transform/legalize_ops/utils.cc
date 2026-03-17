@@ -103,12 +103,20 @@ tvm::ffi::Any MakeCallTE::ConvertToTE(const tvm::ffi::Any& any) {
     ObjectRef p_val = tvm::tir::Substitute(arg, tir_var_map_);
     extra_tir_args_list_.push_back(p_val);
     return p_val;
+  } else if (any.as<DataType>()) {
+    return any;
+  } else if (any.as<ShapeExpr>()) {
+    tvm::ffi::Array<tvm::ffi::Any> ret;
+    for (auto val : any.as<ShapeExprNode>()->values) {
+      ret.push_back(ConvertToTE(val));
+    }
+    return ret;
   } else {
-    LOG(FATAL) << "Expected an Expr to convert to TE arg";
+    LOG(FATAL) << "Conversion to TE arg not handled:" << any;
   }
 }
 
-ffi::Array<tvm::ffi::Any> MakeCallTE::CallArgsToTE(const tvm::ffi::Array<Expr>& args) {
+ffi::Array<tvm::ffi::Any> MakeCallTE::CallArgsToTE(const tvm::ffi::Array<tvm::ffi::Any>& args) {
   ffi::Array<tvm::ffi::Any> ret;
 
   for (auto arg : args) {
@@ -212,14 +220,14 @@ ffi::Array<ObjectRef> GetUnboundTIRVars(const ffi::Array<ObjectRef>& args,
   return diff;
 }
 
-tvm::relax::Call MakeCallTE::Make(const tvm::ffi::Array<Expr>& args, std::string topi_handler,
-                                  std::string fname) {
+tvm::relax::Call MakeCallTE::Make(const tvm::ffi::Array<tvm::ffi::Any>& args,
+                                  std::string topi_handler, std::string fname) {
   auto te_args = CallArgsToTE(args);
   auto te_outs = CallTEHandler(te_args, topi_handler);
   ffi::Array<ObjectRef> prim_args;
 
   // Inputs
-  for (auto te_in : te_args) {
+  for (auto te_in : create_primfunc_args_) {
     prim_args.push_back(te_in.as<ObjectRef>().value());
   }
 

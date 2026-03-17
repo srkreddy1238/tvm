@@ -139,6 +139,8 @@ ffi::Module Compile(IRModule mod, ffi::Any target, ffi::Map<Any, ObjectRef> para
   // Relax Pipeline
   mod = apply_module_pass_(mod, ffi::String("relax.pipeline.") + relax_pipeline_);
 
+  // LOG(WARNING) << "Relax Mod:" << mod;
+
   auto ext_mods =
       mod->GetAttr<ffi::Array<ffi::Module>>("external_mods", ffi::Array<ffi::Module>({})).value();
   auto constants = mod->GetAttr<ffi::Map<ffi::String, runtime::Tensor>>(

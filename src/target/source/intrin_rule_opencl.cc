@@ -100,6 +100,27 @@ TVM_REGISTER_OP("tir.cos").set_attr<FLowerIntrinsic>("opencl.FLowerIntrinsic",
 TVM_REGISTER_OP("tir.cosh")
     .set_attr<FLowerIntrinsic>("opencl.FLowerIntrinsic", DispatchPureExtern<Direct>);
 
+TVM_REGISTER_OP("tir.acos")
+    .set_attr<FLowerIntrinsic>("opencl.FLowerIntrinsic", DispatchPureExtern<Direct>);
+
+TVM_REGISTER_OP("tir.tan").set_attr<FLowerIntrinsic>("opencl.FLowerIntrinsic",
+                                                     DispatchPureExtern<Direct>);
+
+TVM_REGISTER_OP("tir.acosh")
+    .set_attr<FLowerIntrinsic>("opencl.FLowerIntrinsic", DispatchPureExtern<Direct>);
+
+TVM_REGISTER_OP("tir.asin")
+    .set_attr<FLowerIntrinsic>("opencl.FLowerIntrinsic", DispatchPureExtern<Direct>);
+
+TVM_REGISTER_OP("tir.asinh")
+    .set_attr<FLowerIntrinsic>("opencl.FLowerIntrinsic", DispatchPureExtern<Direct>);
+
+TVM_REGISTER_OP("tir.atan")
+    .set_attr<FLowerIntrinsic>("opencl.FLowerIntrinsic", DispatchPureExtern<Direct>);
+
+TVM_REGISTER_OP("tir.atanh")
+    .set_attr<FLowerIntrinsic>("opencl.FLowerIntrinsic", DispatchPureExtern<Direct>);
+
 // There is no warp shuffle instruction in standard OpenCL
 // When shuffle is used, we assume it is intel's shuffle extension
 static PrimExpr DispatchIntelShuffle(const PrimExpr& e) {

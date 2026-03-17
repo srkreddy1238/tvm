@@ -49,14 +49,14 @@ class MakeCallTE {
   MakeCallTE(const BlockBuilder& bb, const Call& call) : bb_(bb), call_(call) {}
 
   // Convert given args to TE
-  ffi::Array<tvm::ffi::Any> CallArgsToTE(const tvm::ffi::Array<Expr>& args);
+  ffi::Array<tvm::ffi::Any> CallArgsToTE(const tvm::ffi::Array<tvm::ffi::Any>& args);
   tvm::ffi::Any ConvertToTE(const tvm::ffi::Any& any);
 
   /* Construct a TIR call with gien TOPI handler.
    * Legalize handler can inject additional args over relax call args.
    */
 
-  tvm::relax::Call Make(const tvm::ffi::Array<Expr>& topi_args, std::string topi_handler,
+  tvm::relax::Call Make(const tvm::ffi::Array<tvm::ffi::Any>& topi_args, std::string topi_handler,
                         std::string fname);
 
  private:
@@ -72,20 +72,8 @@ class MakeCallTE {
                                             const std::string& topi_handler);
 };
 
-// DLDataType dl_type = {kDLFloat, 32, 1};
-//  runtime::DataType dtype = runtime::DataType(dl_type); FloatImmNode
-
 #define JOIN(x, y) x##y
 #define MAKE_NAME(fn, id) JOIN(fn, id)
-
-#define TVM_LEGALIZE_BINARY_OP(OpName, TopiHandler)                                  \
-  Expr MAKE_NAME(BinaryLegalize, OpName)(const BlockBuilder& bb, const Call& call) { \
-    auto m_te = MakeCallTE(bb, call);                                                \
-    auto call_ret = m_te.Make(call->args, std::string(#TopiHandler), #OpName);       \
-    return call_ret;                                                                 \
-  }                                                                                  \
-  TVM_REGISTER_OP("relax." #OpName)                                                  \
-      .set_attr<FLegalize>("FLegalize", MAKE_NAME(BinaryLegalize, OpName), 9);
 
 }  // namespace relax
 }  // namespace tvm
