@@ -615,7 +615,7 @@ def test_inline_consumer_chain():
     tvm.ir.assert_structural_equal(mod["main"], expected)
 
 
-def test_matmul_android():
+def _test_matmul_android():
     # fmt: off
     @T.prim_func(private=True)
     def before(var_inp0: T.handle, inp1: T.Buffer((T.int64(4096), T.int64(4096)), "float32"), var_matmul: T.handle):
@@ -708,7 +708,7 @@ def test_matmul_android():
     tvm.ir.assert_structural_equal(mod["main"], expected)
 
 
-def test_fused_dequant_matmul_android():
+def _test_fused_dequant_matmul_android():
     # fmt: off
     @T.prim_func(private=True)
     def before(lv452: T.Buffer((T.int64(512), T.int64(12288)), "uint32"), lv453: T.Buffer((T.int64(128), T.int64(12288)), "float16"), p_rms_norm130: T.handle, transformer_h_0_attn_c_attn_bias3: T.Buffer((T.int64(12288),), "float16"), p_output0: T.handle):

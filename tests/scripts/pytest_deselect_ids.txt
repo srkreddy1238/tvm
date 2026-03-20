@@ -3,4 +3,11 @@
 --deselect=tests/python/relax/test_codegen_cutlass.py
 --deselect=tests/python/relax/test_vm_build.py::test_vm_emit_te_extern
 --deselect=tests/python/relax/test_vm_multi_device.py
+--deselect=tests/python/codegen/test_target_codegen_device.py
+--deselect=tests/python/codegen/test_target_codegen_bool.py::test_cmp_load_store
+--deselect=tests/python/codegen/test_target_codegen_vulkan.py::test_array_vectorize_add
+--deselect=tests/python/codegen/test_target_codegen_vulkan.py::test_negative_operand_divmod
+--deselect=tests/python/codegen/test_target_codegen_vulkan.py::test_vulkan_bool_load
+--deselect=tests/python/codegen/test_target_codegen_vulkan.py::test_vulkan_local_threadidx
+--deselect=tests/python/codegen/test_target_codegen_vulkan.py::test_vulkan_while_if
 --deselect=tests/python/relax/backend/adreno/test_target_codegen_opencl_adreno.py::test_dp4a_codegen

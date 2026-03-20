@@ -43,7 +43,7 @@ COPY utils/download-and-verify.sh /usr/local/bin/download-and-verify
 RUN apt-get update && \
     apt-install-and-clear -y wget git sudo make parallel doxygen graphviz curl shellcheck ca-certificates curl gnupg
 
-RUN uv pip install cpplint==1.6.1 pylint==2.17.2 mypy==0.902 black==22.12.0 flake8==3.9.2 blocklint==0.2.3 jinja2==3.0.3
+RUN uv pip install cpplint==1.6.1 pylint==2.17.2 mypy==0.902 black==22.12.0 flake8==3.9.2 blocklint==0.2.3 jinja2==3.0.3 pre-commit
 
 COPY install/ubuntu_install_rat.sh /install/ubuntu_install_rat.sh
 RUN bash /install/ubuntu_install_rat.sh

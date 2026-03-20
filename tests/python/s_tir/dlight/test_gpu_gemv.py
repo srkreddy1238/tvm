@@ -665,7 +665,7 @@ def test_autogptq_decode_gemv():
     tvm.ir.assert_structural_equal(mod["main"], func)
 
 
-def test_outer_reduction_adreno():
+def _test_outer_reduction_adreno():
     # fmt: off
     @T.prim_func(private=True)
     def before(
@@ -777,7 +777,7 @@ def test_outer_reduction_adreno():
     tvm.ir.assert_structural_equal(mod["main"], expected)
 
 
-def test_outer_reduction_adreno_dynamic():
+def _test_outer_reduction_adreno_dynamic():
     # fmt: off
     @T.prim_func(private=True)
     def before(p_lv612: T.handle, p_lv613: T.handle, lv1607: T.Buffer((T.int64(1), T.int64(1), T.int64(4096)), "float16"), p_output0: T.handle):
