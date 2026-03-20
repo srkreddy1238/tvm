@@ -18,7 +18,7 @@
 
 set -euxo pipefail
 
-export TVM_TEST_TARGETS="opencl -device=adreno"
+export TVM_TEST_TARGETS='{"kind":"opencl", "device":"adreno"};{"kind":"vulkan","from_device":0}'
 
 source tests/scripts/setup-pytest-env.sh
 export LD_LIBRARY_PATH="build:${LD_LIBRARY_PATH:-}"
