@@ -46,9 +46,9 @@ def build_module(
 
     x = relax.Var("x", TensorStructInfo(relax.ShapeExpr([N_, C_, H_, W_]), inp_dtype))
     s = relax.const(in_scales, dtype="float32")
-    z = relax.const(in_zero_points, dtype="int32")
+    z = relax.const(in_zero_points, dtype="int8")
     out_s = relax.const(float(out_scale), dtype="float32")
-    out_z = relax.const(int(out_zero_point), dtype="int32")
+    out_z = relax.const(int(out_zero_point), dtype="int8")
 
     # Relax mod gen
     bb = relax.BlockBuilder()
@@ -154,13 +154,13 @@ def run_on_cpu(mod: tvm.IRModule, x: np.ndarray) -> np.ndarray:
 @pytest.mark.parametrize(
     "N, C, H, W, in_scales, in_zero_points, out_scale, out_zero_point, axis, inp_dtype, out_dtype",
     [
-        (64, 2, 256, 32, [0.1039, 0.2075], [10, 5], 0.2599, 0, 1, "int8", "uint8"),
-        (32, 3, 512, 16, [0.0512, 0.3099, 0.0975], [0, 12, 15], 0.1068, -3, 1, "int8", "int8"),
+        (64, 2, 256, 32, [0.1039, 0.2075], [127, 5], 0.2599, -128, 1, "int8", "uint8"),
+        (32, 3, 512, 16, [0.0512, 0.3099, 0.0975], [0, 12, 15], 0.1068, 127, 1, "int8", "int8"),
         (8, 1, 64, 128, [0.2031], [0], 0.1073, 10, 1, "uint8", "int8"),
-        (1, 1, 1, 1, 0.2579, 0, 0.5035, 0, 0, "int8", "int8"),
+        (1, 1, 1, 1, 0.2579, -128, 0.5035, 12, 0, "int8", "int8"),
         (32, 32, 128, 64, 0.0010, -10, 0.0579, 5, 1, "int8", "uint8"),
-        (1, 256, 256, 3, [0.0137, 0.2574, 0.0010], [7, -13, 25], 0.0314, 3, -1, "uint8", "uint8"),
-        (2, 8, 128, 128, 0.5001, 0, 0.0057, 0, 1, "int8", "int8"),
+        (1, 256, 256, 3, [0.0137, 0.2574, 0.0010], [7, -128, 25], 0.0314, 3, -1, "uint8", "uint8"),
+        (2, 8, 128, 128, 0.5001, 0, 0.0057, 0, 1, "uint8", "int8"),
         (8, 8, 128, 64, 0.1012, -33, 0.2035, 57, 1, "int8", "int8"),
         (4, 8, 128, 128, [0.1235] * 8, [0] * 8, 0.1235, 0, 1, "int8", "uint8"),
         (
@@ -186,16 +186,19 @@ def run_on_cpu(mod: tvm.IRModule, x: np.ndarray) -> np.ndarray:
             0.1035,
             0,
             2,
-            "int8",
+            "uint8",
             "int8",
         ),
     ],
 )
-def test_qnn_concatenate(
+def test_qnn_requantize(
     N, C, H, W, in_scales, in_zero_points, out_scale, out_zero_point, axis, inp_dtype, out_dtype
 ):
     # 4D input: (N, C, H, W)
-    x = np.random.randint(0, 255, (N, C, H, W)).astype(inp_dtype)
+    if inp_dtype == "int8":
+        x = np.random.randint(-128, 128, (N, C, H, W)).astype(inp_dtype)
+    elif inp_dtype == "uint8":
+        x = np.random.randint(0, 256, (N, C, H, W)).astype(inp_dtype)
     mod = build_module(
         N,
         C,

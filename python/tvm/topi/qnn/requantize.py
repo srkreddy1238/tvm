@@ -18,21 +18,19 @@
 # pylint: disable=unused-argument, redefined-builtin
 """QNN Requantize operator"""
 
-from tvm import te
+from tvm import te, tir
 
-from .utils import get_fixed_point_value, get_qnn_param, saturate
+from .utils import get_qnn_param, saturate
 
 
 def requantize(
     data: te.Tensor,
     input_scale,
-    input_zp,
+    input_zero_point,
     output_scale,
-    output_zp,
+    output_zero_point,
     axis=-1,
     out_dtype="int8",
-    scale_fixed_point_list=None,
-    rsh_list=None,
 ):
     """Compute for qnn.requantize
      If both input and output scales are constant scalars then we convert scale to fixed point value
@@ -44,33 +42,27 @@ def requantize(
         Q_output = zp_output + round((scale_input)/(scale_output) * (Q_input - zp_input))
     """
 
-    if isinstance(input_scale, (float)) and isinstance(output_scale, (float)):
-        scale = input_scale / output_scale
-        scale_fixed_point, rsh = get_fixed_point_value(scale)
+    if isinstance(input_scale, float) and isinstance(output_scale, float):
 
         def _compute(*indices):
             value = data(*indices)
-            # Subtract input zero point (scalar expr)
-            sub = te.subtract(value, input_zp)
-            # Fixed point multiply + round-to-nearest via bias (1 << (rsh - 1))
-            mul = (sub * scale_fixed_point + (1 << (rsh - 1))) >> rsh
-            # Add output zero point + clip + cast
-            return saturate(te.add(mul, output_zp), out_dtype).astype(out_dtype)
+            sub = te.subtract(value, tir.Cast("int16", input_zero_point))
+            scale = input_scale / output_scale
+            mul = te.multiply(scale, sub)
+            val = te.add(te.round(mul), output_zero_point)
+            return saturate(val, out_dtype).astype(out_dtype)
 
         return te.compute(data.shape, _compute, name="requantize_scalar")
-
     else:
-        # find the scale fixed point and rsh for each tensor along axis
+        # Generic compute def
         def _compute(*indices):
             value = data(*indices)
-            scale_fixed_point = get_qnn_param(scale_fixed_point_list, indices, axis)
-            rsh = get_qnn_param(rsh_list, indices, axis)
-            inp_zp = get_qnn_param(input_zp, indices, axis)
+            iscale = get_qnn_param(input_scale, indices, axis)
+            inp_zp = get_qnn_param(input_zero_point, indices, axis)
+            sub = te.subtract(value, tir.Cast("int16", inp_zp))
+            scale = te.div(iscale, output_scale)
+            mul = te.multiply(scale, sub)
+            val = te.add(te.round(mul), output_zero_point)
+            return saturate(val, out_dtype).astype(out_dtype)
 
-            sub = te.subtract(value, inp_zp)
-            # Fixed point multiply + round-to-nearest via bias (1 << (rsh - 1))
-            mul = (sub * scale_fixed_point + (1 << (rsh - 1))) >> rsh
-            # Add output zero point + clip + cast
-            return saturate(te.add(mul, output_zp), out_dtype).astype(out_dtype)
-
-        return te.compute(data.shape, _compute, name="requantize_vector")
+        return te.compute(data.shape, _compute, name="requantize")
