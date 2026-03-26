@@ -23,13 +23,12 @@ from enum import Enum
 
 from tvm import s_tir, tir
 from tvm.ir import Range
-from tvm.s_tir.schedule.schedule import SBlockRV
 from tvm.script import tir as T
 from tvm.target import Target
-from tvm.tir import IterVar, PrimExpr, Var
+from tvm.tir import PrimExpr, Var
 from tvm.tir.analysis import undefined_vars
 
-from ..analysis import IterInfo, SBlockInfo, get_root_block
+from ..analysis import get_in_out_dtypes, get_reduction_blocks, get_root_block, get_sblock_info
 from .base import GPUScheduleRule
 
 
@@ -273,67 +272,6 @@ def get_index_map(block: tir.SBlock) -> tuple[tir.IndexMap, ...] | None:
         B_index_map,
         C_index_map,
     )
-
-
-def get_sblock_info(sch: s_tir.Schedule, block: s_tir.schedule.SBlockRV) -> SBlockInfo:
-    def _iter_kind(loop: tir.IterVar) -> str:
-        return {tir.IterVar.DataPar: "S", tir.IterVar.CommReduce: "R"}.get(loop.iter_type, "O")
-
-    def _is_reduction_block(block: s_tir.schedule.SBlockRV):
-        for iter_var in sch.get(block).iter_vars:
-            if _iter_kind(iter_var) == "R":
-                return True
-        return False
-
-    return SBlockInfo(
-        name=sch.get(block).name_hint,
-        iters=[
-            IterInfo(
-                kind=_iter_kind(iter_var),
-                var=iter_var.var,
-                dom=iter_var.dom.extent,
-                loop_rv=loop_rv,
-            )
-            for loop_rv, iter_var in zip(sch.get_loops(block), sch.get(block).iter_vars)
-        ],
-        block_rv=block,
-        reduction_block=_is_reduction_block(block),
-    )
-
-
-def get_reduction_blocks(sch, blocks) -> bool:
-    # Get the main computation block
-    def is_reduction(block: SBlockRV) -> bool:
-        block_stmt = sch.get(block)
-        iter_types = {iter_var.iter_type for iter_var in block_stmt.iter_vars}
-        return iter_types == {IterVar.CommReduce, IterVar.DataPar}
-
-    def is_spatial(block: SBlockRV) -> bool:
-        block_stmt = sch.get(block)
-        iter_types = {iter_var.iter_type for iter_var in block_stmt.iter_vars}
-        return iter_types == {IterVar.DataPar}
-
-    # NOTE: We assume there is only one reduction block in the function
-    # all blocks are required to be spatial or reduction
-    if not all([is_reduction(block) or is_spatial(block) for block in blocks]):
-        return None
-
-    # There is only one reduction block
-    reduction_blocks = [block for block in blocks if is_reduction(block)]
-    if len(reduction_blocks) != 1:
-        return None
-
-    return reduction_blocks
-
-
-def get_in_out_dtypes(block: tir.SBlock) -> tuple[str]:
-    """
-    Detect In/Out data types for the given block based on the analysis if read/write buffers.
-    """
-    assert len(block.reads) > 0 and len(block.writes) > 0
-    in_dtype = block.reads[0].buffer.dtype
-    out_dtype = block.writes[0].buffer.dtype
-    return (in_dtype, out_dtype)
 
 
 def check_sm_version(arch: str) -> int:
@@ -1016,9 +954,9 @@ class Matmul(GPUScheduleRule):
                 # Analyze read/write buffers and choose correct tensorizer: int8 or fp16.
                 in_dtype, out_dtype = get_in_out_dtypes(block_stmt)
                 tensorize_sch = None
-                if in_dtype == "int8" and out_dtype == "int32":
+                if in_dtype[0] == "int8" and out_dtype[0] == "int32":
                     tensorize_sch = MatmulInt8Tensorization().apply(func, target, _)
-                elif in_dtype == "float16" and out_dtype in ["float16", "float32"]:
+                elif in_dtype[0] == "float16" and out_dtype[0] in ["float16", "float32"]:
                     tensorize_sch = MatmulTensorization().apply(func, target, _)
                 if tensorize_sch is not None:
                     return tensorize_sch

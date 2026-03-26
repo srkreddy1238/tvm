@@ -27,6 +27,10 @@ from .common_analysis import (
     normalize_prim_func,
     get_root_block,
     get_sblock_info,
+    get_reduction_blocks,
+    get_in_out_dtypes,
+    get_max_threads_per_block,
+    undefined_vars,
 )
 from .gemv import (
     is_gemv,

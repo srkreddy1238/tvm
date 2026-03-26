@@ -201,19 +201,21 @@ def get_wmma_load_intrin(
         with T.sblock("root"):
             T.reads(A[0:frag_m, 0:frag_n])
             T.writes(C[0:frag_m, 0:frag_n])
-            T.evaluate(
-                T.tvm_load_matrix_sync(
-                    C.data,
-                    m_dim,
-                    n_dim,
-                    k_dim,
-                    get_wmma_fragment_index(C, d1, frag_m, frag_n),
-                    A.access_ptr("r"),
-                    s1,
-                    layout,
-                    dtype="handle",
+            # Need empty binding in-case of pure intrinsic only kernels
+            for _ in T.thread_binding(64, "threadIdx.x"):
+                T.evaluate(
+                    T.tvm_load_matrix_sync(
+                        C.data,
+                        m_dim,
+                        n_dim,
+                        k_dim,
+                        get_wmma_fragment_index(C, d1, frag_m, frag_n),
+                        A.access_ptr("r"),
+                        s1,
+                        layout,
+                        dtype="handle",
+                    )
                 )
-            )
 
     return wmma_load_desc, wmma_load_impl
 
@@ -290,7 +292,13 @@ def get_wmma_store_intrin(
 
 
 def get_wmma_sync_intrin(
-    m_dim: int, n_dim: int, k_dim: int, in_dtype: str, out_dtype: str, b_transposed: bool
+    m_dim: int,
+    n_dim: int,
+    k_dim: int,
+    in_dtype: str,
+    out_dtype: str,
+    a_transposed: bool,
+    b_transposed: bool,
 ) -> tuple[PrimFunc, PrimFunc]:
     """Generator of wmma_sync intrins"""
 
@@ -299,12 +307,13 @@ def get_wmma_sync_intrin(
             return Cast(out_dtype, v)
         return v
 
-    def maybe_swap(i, j):
-        if b_transposed:
+    def maybe_swap(i, j, trans):
+        if trans:
             return j, i
         return i, j
 
-    b_shape_0, b_shape_1 = maybe_swap(k_dim, n_dim)
+    a_shape_0, a_shape_1 = maybe_swap(m_dim, k_dim, a_transposed)
+    b_shape_0, b_shape_1 = maybe_swap(k_dim, n_dim, b_transposed)
 
     A_offset_factor = k_dim
     B_offset_factor = b_shape_1
@@ -314,7 +323,7 @@ def get_wmma_sync_intrin(
     def wmma_sync_desc(a: T.handle, b: T.handle, c: T.handle) -> None:
         A = T.match_buffer(
             a,
-            (m_dim, k_dim),
+            maybe_swap(m_dim, k_dim, a_transposed),
             in_dtype,
             align=64,
             offset_factor=A_offset_factor,
@@ -322,7 +331,7 @@ def get_wmma_sync_intrin(
         )
         B = T.match_buffer(
             b,
-            maybe_swap(k_dim, n_dim),
+            maybe_swap(k_dim, n_dim, b_transposed),
             in_dtype,
             align=64,
             offset_factor=B_offset_factor,
@@ -338,13 +347,14 @@ def get_wmma_sync_intrin(
         )
 
         with T.sblock("root"):
-            T.reads(C[0:m_dim, 0:n_dim], A[0:m_dim, 0:k_dim], B[0:b_shape_0, 0:b_shape_1])
+            T.reads(C[0:m_dim, 0:n_dim], A[0:a_shape_0, 0:a_shape_1], B[0:b_shape_0, 0:b_shape_1])
             T.writes(C[0:m_dim, 0:n_dim])
             for i, j, k in T.grid(m_dim, n_dim, k_dim):
                 with T.sblock(""):
                     vii, vjj, vkk = T.axis.remap("SSR", [i, j, k])
-                    B_index_0, B_index_1 = T.meta_var(maybe_swap(vkk, vjj))
-                    C[vii, vjj] = C[vii, vjj] + maybe_cast(A[vii, vkk]) * maybe_cast(
+                    A_index_0, A_index_1 = T.meta_var(maybe_swap(vii, vkk, a_transposed))
+                    B_index_0, B_index_1 = T.meta_var(maybe_swap(vkk, vjj, b_transposed))
+                    C[vii, vjj] = C[vii, vjj] + maybe_cast(A[A_index_0, A_index_1]) * maybe_cast(
                         B[B_index_0, B_index_1]
                     )
 
@@ -359,7 +369,7 @@ def get_wmma_sync_intrin(
 
         A = T.match_buffer(
             a,
-            (m_dim, k_dim),
+            maybe_swap(m_dim, k_dim, a_transposed),
             in_dtype,
             align=64,
             offset_factor=A_offset_factor,
@@ -368,7 +378,7 @@ def get_wmma_sync_intrin(
         )
         B = T.match_buffer(
             b,
-            maybe_swap(k_dim, n_dim),
+            maybe_swap(k_dim, n_dim, b_transposed),
             in_dtype,
             align=64,
             offset_factor=B_offset_factor,
@@ -386,14 +396,14 @@ def get_wmma_sync_intrin(
         )
 
         with T.sblock("root"):
-            T.reads(C[0:m_dim, 0:n_dim], A[0:m_dim, 0:k_dim], B[0:b_shape_0, 0:b_shape_1])
+            T.reads(C[0:m_dim, 0:n_dim], A[0:a_shape_0, 0:a_shape_1], B[0:b_shape_0, 0:b_shape_1])
             T.writes(C[0:m_dim, 0:n_dim])
             T.evaluate(
                 T.tvm_mma_sync(
                     C.data,
                     get_wmma_fragment_index(C, c1, m_dim, n_dim),
                     A.data,
-                    get_wmma_fragment_index(A, a1, m_dim, k_dim),
+                    get_wmma_fragment_index(A, a1, a_shape_0, a_shape_1),
                     B.data,
                     get_wmma_fragment_index(B, b1, b_shape_0, b_shape_1),
                     C.data,
@@ -570,7 +580,9 @@ def get_adreno_wmma_intrin_group(
     shape_str = f"{m}x{n}x{k}"
     load_a_intrin = f"wmma_load_{shape_str}_{dtype_suffix}{a_suffix}_{load_scope[0]}"
     load_b_intrin = f"wmma_load_{shape_str}_{dtype_suffix}{b_suffix}_{load_scope[1]}"
-    compute_intrin = f"wmma_sync_{shape_str}_{dtype_suffix}{dtype_suffix}{out_dtype}"
+    compute_intrin = (
+        f"wmma_sync_{shape_str}_{dtype_suffix}{dtype_suffix}{a_suffix}{b_suffix}_{out_dtype}"
+    )
     init_intrin = f"wmma_fill_{shape_str}_{out_dtype_suffix}"
     store_intrin = f"wmma_store_{shape_str}_{out_dtype_suffix}_{store_scope}"
 
@@ -602,13 +614,13 @@ def get_adreno_wmma_intrin_group(
 
         if not TensorIntrin.get(compute_intrin, allow_missing=True):
             TensorIntrin.register(
-                compute_intrin, *get_wmma_sync_intrin(m, n, k, dtype, out_dtype, trans_b)
+                compute_intrin, *get_wmma_sync_intrin(m, n, k, dtype, out_dtype, trans_a, trans_b)
             )
 
         if not TensorIntrin.get(store_intrin, allow_missing=True):
             if store_scope == "local":
                 TensorIntrin.register(
-                    store_intrin, *get_wmma_qcom_intrin(m, n, k, dtype, False, False, False)
+                    store_intrin, *get_wmma_qcom_intrin(m, n, k, out_dtype, False, False, False)
                 )
             else:
                 TensorIntrin.register(

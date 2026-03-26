@@ -17,4 +17,4 @@
 # under the License.
 """Legalize high-level operator calls in Relax functions to call_tir."""
 
-from .convolution import conv2d_NCHWc_OIHWo
+from .convolution import conv2d_NCHWc_OIHWo, conv2d_matmul, conv2d_convert_layout

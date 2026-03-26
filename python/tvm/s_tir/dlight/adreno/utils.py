@@ -21,6 +21,7 @@
 from tvm import s_tir
 from tvm.target import Target
 
+from .. import analysis
 from ..analysis import SBlockInfo
 
 
@@ -66,6 +67,18 @@ def get_texture_storage(block_info: SBlockInfo):
     return "global"
 
 
+def get_matmul_supported_profile(block_info: SBlockInfo):
+    in_dtype, out_dtype = analysis.get_in_out_dtypes(block_info.block_stmt)
+    assert len(in_dtype) == 2 and in_dtype[0] == in_dtype[1]
+    assert len(out_dtype) == 1
+    in_dtype, out_dtype = in_dtype[0], out_dtype[0]
+
+    from tvm.s_tir.tensor_intrin.adreno import get_wmma_tile_sizes
+
+    PROFILE = get_wmma_tile_sizes(in_dtype, out_dtype)
+    return PROFILE
+
+
 def schedule_inline_blocks(
     sch: s_tir.Schedule, blocks: list[s_tir.schedule.SBlockRV] | None = None
 ):
@@ -76,6 +89,9 @@ def schedule_inline_blocks(
 
 def schedule_default(sch, blocks: list[s_tir.schedule.SBlockRV] | None = None):
     from .fallback import Fallback
+
+    if not isinstance(blocks, list):
+        blocks = [blocks]
 
     ret = []
     for blk in blocks:

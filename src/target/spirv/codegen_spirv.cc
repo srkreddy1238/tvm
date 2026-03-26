@@ -405,12 +405,19 @@ spirv::Value CodeGenSPIRV::VisitExpr_(const CallNode* op) {
     const VarNode* buffer_node = op->args[0].as<VarNode>();
     TVM_FFI_ICHECK(buffer_node && fragment_info_.count(buffer_node));
     DataType ele_dtype = GetElementDataType(buffer_node);
-    TVM_FFI_ICHECK(ele_dtype.is_float()) << "Only floating point fragment accumulator is supported";
     spirv::SType ele_stype = builder_->GetSType(ele_dtype);
     spirv::SType& fragment_type = fragment_info_[buffer_node].stype;
-    double init = static_cast<uint64_t>(Downcast<FloatImm>(op->args[5])->value);
     PrimExpr prim_index = op->args[4];
-    spirv::Value init_val = builder_->GetCompositeConst(ele_stype, fragment_type, init);
+    spirv::Value init_val;
+    if (op->args[5].as<IntImmNode>()) {
+      int64_t init = static_cast<int64_t>(Downcast<IntImm>(op->args[5])->value);
+      init_val = builder_->GetCompositeConst(ele_stype, fragment_type, init);
+    } else if (op->args[5].as<FloatImmNode>()) {
+      double init = static_cast<double>(Downcast<FloatImm>(op->args[5])->value);
+      init_val = builder_->GetCompositeConst(ele_stype, fragment_type, init);
+    } else {
+      LOG(FATAL) << "Unhandled arg case.";
+    }
     spirv::SType ptr_type =
         builder_->GetPointerType(fragment_type, fragment_info_[buffer_node].sclass);
     spirv::Value index = MakeValue(prim_index);
@@ -613,8 +620,21 @@ spirv::Value CodeGenSPIRV::VisitExpr_(const CallNode* op) {
       result = builder_->MakeValue(spv::OpCooperativeMatrixMulAddNV, fragment_type_d, loaded_a,
                                    loaded_b, loaded_c);
     } else if (spirv_support_.supports_khr_cooperative_matrix) {
+      uint32_t sign_mask = spv::CooperativeMatrixOperandsMaskNone;
+      if (fragment_type_a.type.element_of().is_int()) {
+        sign_mask |= spv::CooperativeMatrixOperandsMatrixASignedComponentsKHRMask;
+      }
+      if (fragment_type_b.type.element_of().is_int()) {
+        sign_mask |= spv::CooperativeMatrixOperandsMatrixBSignedComponentsKHRMask;
+      }
+      if (fragment_type_c.type.element_of().is_int()) {
+        sign_mask |= spv::CooperativeMatrixOperandsMatrixCSignedComponentsKHRMask;
+      }
+      if (fragment_type_d.type.element_of().is_int()) {
+        sign_mask |= spv::CooperativeMatrixOperandsMatrixResultSignedComponentsKHRMask;
+      }
       result = builder_->MakeValue(spv::OpCooperativeMatrixMulAddKHR, fragment_type_d, loaded_a,
-                                   loaded_b, loaded_c);
+                                   loaded_b, loaded_c, sign_mask);
     }
     builder_->MakeInst(spv::OpStore, ptr_d, result, spv::MemoryAccessMaskNone);
     return spirv::Value();

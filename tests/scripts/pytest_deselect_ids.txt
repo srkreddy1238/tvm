@@ -11,4 +11,3 @@
 --deselect=tests/python/codegen/test_target_codegen_vulkan.py::test_vulkan_local_threadidx
 --deselect=tests/python/codegen/test_target_codegen_vulkan.py::test_vulkan_while_if
 --deselect=tests/python/relax/backend/adreno/test_target_codegen_opencl_adreno.py::test_dp4a_codegen
---deselect=tests/python/relax/backend/adreno/test_matmul_tensorize.py

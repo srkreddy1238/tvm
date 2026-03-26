@@ -25,10 +25,15 @@ from typing import Literal
 from tvm_ffi import get_global_func
 
 from tvm import ir, s_tir, tir
+from tvm.ir import Range
 from tvm.runtime import DataType
 from tvm.s_tir import Schedule
 from tvm.s_tir.schedule import SBlockRV
+from tvm.s_tir.schedule.schedule import LoopRV
 from tvm.target.target import Target
+from tvm.tir import Var
+from tvm.tir.analysis import undefined_vars
+from tvm.tir.stmt import SBlock
 
 
 class IterInfo:
@@ -103,14 +108,15 @@ class BufferInfo:
                 expr = expr.min
                 dim = None
                 if isinstance(expr, tir.expr.Add) and isinstance(expr.b, tir.expr.Var):
+                    expr_in = expr.a
                     var_add = expr.b
                     if (
-                        isinstance(expr, tir.expr.Mul)
-                        and isinstance(expr.a, tir.expr.Var)
-                        and isinstance(expr.b, tir.expr.IntImm)
+                        isinstance(expr_in, tir.expr.Mul)
+                        and isinstance(expr_in.a, tir.expr.Var)
+                        and isinstance(expr_in.b, tir.expr.IntImm)
                     ):
-                        mul = expr.b
-                        var_mul = expr.a
+                        mul = expr_in.b
+                        var_mul = expr_in.a
                         dim = MergeIndex(var_mul, mul, var_add)
                 elif (
                     isinstance(expr, tir.expr.FloorMod)
@@ -166,39 +172,51 @@ class BufferInfo:
 
 
 class SBlockInfo:
-    """Information about a TIR block."""
+    """Information about a TIR block. Provides useful analysis about the block."""
 
     name: str
     iters: list[IterInfo]
-    block_rv: s_tir.schedule.SBlockRV
-    _reduction_block: bool
+    block_stmt: SBlock
+    block_rv: SBlockRV
+    reads: list[BufferInfo]
+    writes: list[BufferInfo]
+    producers: list[SBlock]
+    consumers: list[SBlock]
 
     def __init__(
         self,
-        name: str,
-        iters: list[IterInfo],
-        block_rv: s_tir.schedule.SBlockRV,
-        reduction_block: bool = False,
+        sch: s_tir.Schedule,
+        block_rv: SBlockRV,
     ):
         """Construct a SBlockInfo object."""
-        self.name = name
+        block_stmt = sch.get(block_rv)
+
+        def _iter_kind(loop: tir.IterVar) -> str:
+            return {tir.IterVar.DataPar: "S", tir.IterVar.CommReduce: "R"}.get(loop.iter_type, "O")
+
+        lps = sch.get_loops(block_rv)
+        iter_vars = block_stmt.iter_vars
+
+        self.name = sch.get(block_rv).name_hint
+        self.iters = [
+            IterInfo(
+                kind=_iter_kind(iter_var),
+                var=iter_var.var,
+                dom=iter_var.dom.extent,
+                loop_rv=loop_rv,
+            )
+            for loop_rv, iter_var in zip(lps, iter_vars)
+        ]
+        self.block_stmt = block_stmt
         self.block_rv = block_rv
-        self.iters = iters
-        self._reduction_block = reduction_block
+        self.read_bufs = [get_buffer_info(sch, block_rv, buf, lps) for buf in block_stmt.reads]
+        self.write_bufs = [get_buffer_info(sch, block_rv, buf, lps) for buf in block_stmt.writes]
+        self.producers = sch.get_producers(block_rv)
+        self.consumers = sch.get_consumers(block_rv)
 
     def dom(self) -> list[int | tir.PrimExpr]:
         """The iteration domain of the block."""
         return [i.dom for i in self.iters]
-
-    def read_bufs(self, sch: s_tir.Schedule) -> list[BufferInfo]:
-        block_stmt = sch.get(self.block_rv)
-        lps = sch.get_loops(self.block_rv)
-        return [BufferInfo(sch, self.block_rv, buf, lps) for buf in block_stmt.reads]
-
-    def write_bufs(self, sch: s_tir.Schedule) -> list[BufferInfo]:
-        block_stmt = sch.get(self.block_rv)
-        lps = sch.get_loops(self.block_rv)
-        return [BufferInfo(sch, self.block_rv, buf, lps) for buf in block_stmt.writes]
 
     def dom_kind(self) -> str:
         """The iteration domain kind of the block, for example, SSSS, SSSR."""
@@ -208,24 +226,33 @@ class SBlockInfo:
         """Whether the SBlock is injective, i.e. all its iteration domains are injective."""
         return all(k == "S" for k in self.dom_kind())
 
-    def is_elementwise(self, sch: s_tir.Schedule) -> bool:
+    def is_elementwise(self) -> bool:
+        """Whether the SBlock is elementwise, i.e. trivial mapping between read/write region"""
+        if not self.is_injective() or len(self.write_bufs) != 1:
+            return False
+
+        w_region = self.write_bufs[0].buf_region.region
+        for read_buf in self.read_bufs:
+            r_region = read_buf.buf_region.region
+            if len(r_region) != len(w_region):
+                return False
+            for r_var, w_var in zip(r_region, w_region):
+                if not r_var == w_var:
+                    return False
+        return True
+
+    def is_broadcast(self) -> bool:
         """Whether the SBlock is elementwise, i.e. trivial mapping between read/write region"""
 
-        def _check_unit_var_range(dom: ir.Range, var: tir.Var) -> bool:
-            return dom.min.same_as(var) and dom.extent == 1
+        if not self.is_injective() or len(self.write_bufs) != 1:
+            return False
 
-        if not self.is_injective():
-            return False
-        block = sch.get(self.block_rv)
-        if len(block.reads) != 1 or len(block.writes) != 1:
-            return False
-        r_region = block.reads[0].region
-        w_region = block.writes[0].region
-        if len(r_region) != len(w_region):
-            return False
-        for var, r_dom, w_dom in zip(block.iter_vars, r_region, w_region):
-            if not _check_unit_var_range(r_dom, var) or not _check_unit_var_range(w_dom, var):
-                return False
+        w_region = self.write_bufs[0].buf_region.region
+        for read_buf in self.read_bufs:
+            r_region = read_buf.buf_region.region
+            for r_var in r_region:
+                if r_var not in w_region:
+                    return False
         return True
 
     def get_loops(self) -> list[s_tir.schedule.LoopRV]:
@@ -233,29 +260,30 @@ class SBlockInfo:
 
     def is_reduction(self) -> bool:
         """Whether the SBlock is a reduction workload."""
-        # TODO(@junrushao): distinguish GEMV and reduction
-        return self._reduction_block
+        return all(k == "S" or k == "R" for k in self.dom_kind()) and any(
+            k == "R" for k in self.dom_kind()
+        )
 
-    def is_layout_transform(self, sch: s_tir.Schedule) -> bool:
+    def is_layout_transform(self) -> bool:
         """Whether the SBlock can be considered having a Layout Transform Pattern"""
         return (
             all(k == "S" for k in self.dom_kind())
-            and len(self.write_bufs(sch)) == 1
-            and len(self.read_bufs(sch)) == 1
-            and not self.is_elementwise(sch)
-            and not get_global_func("s_tir.schedule.HasIfThenElse")(sch.get(self.block_rv))
+            and len(self.write_bufs) == 1
+            and len(self.read_bufs) == 1
+            and not self.is_elementwise()
+            and not get_global_func("s_tir.schedule.HasIfThenElse")(self.block_stmt)
         )
 
-    def is_data_pad(self, sch: s_tir.Schedule) -> bool:
+    def is_data_pad(self) -> bool:
         """Whether the SBlock can be considered having a data pad pattern"""
         return (
             all(k == "S" for k in self.dom_kind())
-            and len(self.write_bufs(sch)) == 1
-            and len(self.read_bufs(sch)) == 1
-            and not self.is_elementwise(sch)
-            and len(self.write_bufs(sch)[0].buf_region.region)
-            == len(self.read_bufs(sch)[0].buf_region.region)
-            and get_global_func("s_tir.schedule.HasIfThenElse")(sch.get(self.block_rv))
+            and len(self.write_bufs) == 1
+            and len(self.read_bufs) == 1
+            and not self.is_elementwise()
+            and len(self.write_bufs[0].buf_region.region)
+            == len(self.read_bufs[0].buf_region.region)
+            and get_global_func("s_tir.schedule.HasIfThenElse")(self.block_stmt)
         )
 
     def is_convolution(self) -> bool:
@@ -272,6 +300,47 @@ class SBlockInfo:
 
     def is_gemm(self) -> bool:
         """Whether the SBlock is a GEMM workload."""
+        if len(self.read_bufs) != 2 or len(self.write_bufs) != 1:
+            return False
+
+        def get_ewise_axes(region: list[Range]) -> set[Var]:
+            axes: set[Var] = set()
+            for r in region:
+                if not (isinstance(r.extent, tir.IntImm) and r.extent.value == 1):
+                    raise ValueError("Not a Elemwise Block Access")
+                axes = axes.union(set(undefined_vars(r.min)))
+            return axes
+
+        try:
+            C_iter_vars = get_ewise_axes(self.write_bufs[0].buf_region.region)
+            A_iter_vars = get_ewise_axes(self.read_bufs[0].buf_region.region)
+            B_iter_vars = get_ewise_axes(self.read_bufs[1].buf_region.region)
+        except ValueError:
+            return False
+
+        conditions = [False for _ in range(3)]
+        iter_vars = [block_iter.var for block_iter in self.iters]
+        for iter_var in iter_vars:
+            if iter_var in A_iter_vars and iter_var in B_iter_vars and iter_var in C_iter_vars:
+                continue
+            elif (
+                iter_var in A_iter_vars and iter_var in B_iter_vars and iter_var not in C_iter_vars
+            ):
+                conditions[0] = True
+            elif (
+                iter_var in A_iter_vars and iter_var not in B_iter_vars and iter_var in C_iter_vars
+            ):
+                conditions[1] = True
+            elif (
+                iter_var not in A_iter_vars and iter_var in B_iter_vars and iter_var in C_iter_vars
+            ):
+                conditions[2] = True
+            else:
+                return False
+
+        return all(conditions)
+
+    def check_op_name(self, name: str):
         raise NotImplementedError
 
     def __str__(self) -> str:
@@ -301,49 +370,29 @@ def normalize_prim_func(sch: s_tir.Schedule) -> list[SBlockInfo] | None:
 
     blocks: list[SBlockInfo] = []
     for block, loops, iters, is_reduction in zip(*result):
-        blocks.append(
-            SBlockInfo(
-                name=sch.get(block).name_hint,
-                iters=[
-                    IterInfo(
-                        kind=_iter_kind(iter),  # type: ignore
-                        var=iter.var,
-                        dom=iter.dom.extent,
-                        loop_rv=loop,
-                    )
-                    for loop, iter in zip(loops, iters)
-                ],
-                block_rv=block,
-                reduction_block=is_reduction,
-            )
-        )
+        blocks.append(get_sblock_info(sch, block))
     return blocks
 
 
-def get_sblock_info(sch: s_tir.Schedule, block: s_tir.schedule.SBlockRV) -> SBlockInfo:
-    def _iter_kind(loop: tir.IterVar) -> str:
-        return {tir.IterVar.DataPar: "S", tir.IterVar.CommReduce: "R"}.get(loop.iter_type, "O")
+# BufferIndex Types
+Index = namedtuple("Index", ["sub"])  # c
+RemIndex = namedtuple("RemIndex", ["sub", "div"])  # c%len
+DivIndex = namedtuple("DivIndex", ["sub", "div"])  # c//len
+MergeIndex = namedtuple("MulIndex", ["dom", "mul", "sub"])  # co*len + cb
+BufIndex = list[Index | RemIndex | DivIndex | MergeIndex | None]
 
-    def _is_reduction_block(block: s_tir.schedule.SBlockRV):
-        for iter_var in sch.get(block).iter_vars:
-            if _iter_kind(iter_var) == "R":
-                return True
-        return False
 
-    return SBlockInfo(
-        name=sch.get(block).name_hint,
-        iters=[
-            IterInfo(
-                kind=_iter_kind(iter_var),
-                var=iter_var.var,
-                dom=iter_var.dom.extent,
-                loop_rv=loop_rv,
-            )
-            for loop_rv, iter_var in zip(sch.get_loops(block), sch.get(block).iter_vars)
-        ],
-        block_rv=block,
-        reduction_block=_is_reduction_block(block),
-    )
+def get_buffer_info(
+    sch: s_tir.Schedule,
+    blk: SBlockRV,
+    buf: tir.BufferRegion,
+    lps: dict[tir.Var, LoopRV],
+) -> BufferInfo:
+    return BufferInfo(sch, blk, buf, lps)
+
+
+def get_sblock_info(sch: Schedule, block: SBlockRV) -> SBlockInfo:
+    return SBlockInfo(sch, block)
 
 
 def _assert_gpu_target(target: Target):
@@ -381,6 +430,40 @@ def get_root_block(sch: Schedule, func_name: str = "main") -> SBlockRV:
             f"{sch.mod[func_name].body}"
         )
     return sch.get_sblock(block.name_hint)
+
+
+def get_reduction_blocks(sch, blocks) -> bool:
+    # Get the main computation block
+    def is_reduction(block: SBlockRV) -> bool:
+        block_stmt = sch.get(block)
+        iter_types = {iter_var.iter_type for iter_var in block_stmt.iter_vars}
+        return iter_types == {tir.IterVar.CommReduce, tir.IterVar.DataPar}
+
+    def is_spatial(block: SBlockRV) -> bool:
+        block_stmt = sch.get(block)
+        iter_types = {iter_var.iter_type for iter_var in block_stmt.iter_vars}
+        return iter_types == {tir.IterVar.DataPar}
+
+    # NOTE: We assume there is only one reduction block in the function
+    # all blocks are required to be spatial or reduction
+    if not all([is_reduction(block) or is_spatial(block) for block in blocks]):
+        return None
+
+    # There is only one reduction block
+    reduction_blocks = [block for block in blocks if is_reduction(block)]
+    if len(reduction_blocks) != 1:
+        return None
+
+    return reduction_blocks
+
+
+def get_in_out_dtypes(block: SBlock) -> tuple[list[str], list[str]]:
+    """
+    Retrieve In/Out dtypes of a given block
+    """
+    in_dtypes = list(str(buf.buffer.dtype) for buf in block.reads)
+    out_dtypes = list(str(buf.buffer.dtype) for buf in block.writes)
+    return (in_dtypes, out_dtypes)
 
 
 def collect_block_iter_vars_used_in_access_region(

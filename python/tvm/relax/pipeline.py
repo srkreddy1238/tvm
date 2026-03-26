@@ -347,6 +347,8 @@ def get_default_pipeline(target: tvm.target.Target):
         return backend.cpu_generic.get_default_pipeline(target)
     if target.kind.name == "opencl" and "adreno" in target.keys:
         return backend.adreno.get_default_pipeline(target)
+    if target.kind.name == "vulkan" and "adreno" in target.keys:
+        return backend.adreno.get_default_pipeline(target)
     if BackendDispatcher.is_gpu_target(target):
         return backend.gpu_generic.get_default_pipeline(target)
     raise ValueError(

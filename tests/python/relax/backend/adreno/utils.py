@@ -16,6 +16,7 @@
 # under the License.
 
 import os
+import sys
 import tempfile
 
 import numpy as np
@@ -24,6 +25,7 @@ import tvm
 import tvm.testing
 from tvm import relax
 from tvm.contrib import ndk
+from tvm.target import Target
 
 # Test Infra
 
@@ -104,7 +106,7 @@ requires_adreno_clml = tvm.testing.Feature(
 
 
 def is_target_available(target):
-    if "clml" in target.attrs.get("keys", []) and "ADRENO_TARGET" not in os.environ:
+    if "ADRENO_TARGET" not in os.environ:
         return False
     return True
 
@@ -225,15 +227,23 @@ def build_and_run(mod, inputs, tgt):
     return tvm_output
 
 
-def verify_results(mod, target, ref_target):
+def verify_results(mod, target, ref_target, atol=1e-3, rtol=1e-3):
+    target = Target(target) if isinstance(target, str | dict) else target
+    ref_target = Target(ref_target) if isinstance(ref_target, str | dict) else ref_target
+
     if not is_target_available(target):
-        print("Skipping Eval Tests", flush=True)
+        print("Skipping Eval Tests", file=sys.stderr, flush=True)
         return
 
     inputs = []
     for arg in mod["main"].params:
         shape = tuple(shape_val.value for shape_val in arg.struct_info.shape.values)
-        inputs.append(np.random.uniform(0, 1, size=shape).astype(arg.struct_info.dtype))
+        if str(arg.struct_info.dtype).startswith("uint"):
+            inputs.append(np.random.randint(0, 8, size=shape).astype(arg.struct_info.dtype))
+        elif str(arg.struct_info.dtype).startswith("int"):
+            inputs.append(np.random.randint(-8, 8, size=shape).astype(arg.struct_info.dtype))
+        else:
+            inputs.append(np.random.uniform(0, 1, size=shape).astype(arg.struct_info.dtype))
 
     mod_org, mod_ref = mod, mod.clone()
 
@@ -246,4 +256,4 @@ def verify_results(mod, target, ref_target):
     rs_org = build_and_run(mod_org, inputs, target)
 
     for vl_org, vl_ref in zip(rs_org, rs_ref):
-        tvm.testing.assert_allclose(vl_org, vl_ref, rtol=1e-3, atol=1e-3)
+        tvm.testing.assert_allclose(vl_org, vl_ref, rtol=rtol, atol=atol)

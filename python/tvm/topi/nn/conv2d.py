@@ -26,7 +26,7 @@ from collections.abc import Sequence
 import numpy as np
 
 import tvm
-from tvm import te
+from tvm import te, tir
 
 from ..utils import get_const_int, get_const_tuple, simplify, tag
 from .pad import pad
@@ -393,6 +393,168 @@ def conv2d_NCHWc(data, kernel, stride, padding, dilation, layout, out_layout, ou
         name="conv2d_NCHWc",
         tag="conv2d_NCHWc",
     )
+
+
+def conv2d_matmul(data, weight, tiles_size, strides, padding, dilation, in_dtype, out_dtype):
+    """GEMM based Convolution for texture layouts
+
+    1. Supports NCHW4c based input/output and OIHW4i based weight
+    2. kernel_channel must be a multiple of K_tile
+    3. M_tile(out_height * out_width) and N_tile(out_channel) are padded based on tiles_size
+
+    Parameters
+    ----------
+    data: tvm.te.Tensor
+        5-D with shape [batch, in_channel_chunk, in_height, in_width, in_channel_block]
+
+    weight: tvm.te.Tensor
+        5-D with shape [num_filter, kernel_channel_chunk, filter_height, filter_width,
+                            kernel_channel_block]
+
+    strides : int or a list/tuple of two ints
+        Stride size, or [stride_height, stride_width]
+
+    tiles_size: list/tuple of three ints
+        Equivalent to [M_tile, N_tile, K_tile]
+
+    padding : int or a list/tuple of 2 or 4 ints
+        padding size, or
+        [pad_height, pad_width] for 2 ints, or
+        [pad_top, pad_left, pad_bottom, pad_right] for 4 ints
+
+    dilation : int or a list/tuple of two ints
+        dilation size, or [dilation_height, dilation_width]
+
+    out_dtype : str
+        The output type. This is used for mixed precision.
+
+    Returns
+    -------
+    Output : tvm.te.Tensor
+        4-D with shape [batch, out_height, out_width, out_channel]
+    """
+    HSTR, WSTR = strides if isinstance(strides, tuple | list) else (strides, strides)
+    dilation_h, dilation_w = (
+        dilation if isinstance(dilation, tuple | list) else (dilation, dilation)
+    )
+
+    M_tile, N_tile, K_tile = tiles_size
+    num_batch, in_channel_chunk, in_height, in_width, in_channel_block = get_const_tuple(
+        data.shape
+    )  # NCHW4c
+    (
+        out_channel,
+        kernel_channel_chunk,
+        kernel_height,
+        kernel_width,
+        kernel_channel_block,
+    ) = get_const_tuple(weight.shape)  # OIHW4i
+
+    assert in_channel_block == kernel_channel_block, (
+        "Compute Doesn't Handle Texture Components of Different Lengths"
+    )
+
+    in_channel, kernel_channel = (
+        in_channel_chunk * in_channel_block,
+        kernel_channel_chunk * kernel_channel_block,
+    )
+    groups, block_size = in_channel // kernel_channel, in_channel_block
+
+    assert in_channel % kernel_channel == 0, (
+        "Compute Doesn't Handle Texture Components of Different Lengths"
+    )
+
+    dilated_kernel_h = (kernel_height - 1) * dilation_h + 1
+    dilated_kernel_w = (kernel_width - 1) * dilation_w + 1
+
+    pad_top, pad_left, pad_down, pad_right = get_pad_tuple(
+        padding, (dilated_kernel_h, dilated_kernel_w)
+    )
+    hpad = pad_top + pad_down
+    wpad = pad_left + pad_right
+
+    # Output Shape
+    out_height = (in_height + hpad - dilated_kernel_h) // HSTR + 1
+    out_width = (in_width + wpad - dilated_kernel_w) // WSTR + 1
+    out_channel_chunk, out_channel_block = out_channel // block_size, block_size
+    oshape = (num_batch, out_channel_chunk, out_height, out_width, out_channel_block)
+
+    pad_before = (0, 0, pad_top, pad_left, 0)
+    pad_after = (0, 0, pad_down, pad_right, 0)
+
+    # dopad
+    dopad = hpad != 0 or wpad != 0
+    if dopad:
+        data_pad = pad(data, pad_before, pad_after, name="data_pad")
+    else:
+        data_pad = data
+
+    out_height_width = out_height * out_width
+    padded_out_hw = ((out_height * out_width + M_tile - 1) // M_tile) * M_tile
+    group_out_channel = out_channel // groups
+    padded_group_outc = ((group_out_channel + N_tile - 1) // N_tile) * N_tile
+
+    # Intermediate Input
+    Data = te.compute(
+        (num_batch, groups, kernel_height, kernel_width, padded_out_hw, kernel_channel),
+        lambda nn, gg, kh, kw, pad_oh_ow, kc: tir.if_then_else(
+            pad_oh_ow < out_height_width,
+            data_pad[
+                nn,
+                gg * kernel_channel_chunk + kc // in_channel_block,
+                (pad_oh_ow // out_width) * HSTR + dilation_h * kh,
+                (pad_oh_ow % out_width) * WSTR + dilation_w * kw,
+                kc % in_channel_block,
+            ],
+            tir.const(0.0, in_dtype),
+        ),
+        name="input_imed",
+    )
+
+    # Intermediate Weight
+    Weight = te.compute(
+        (groups, kernel_height, kernel_width, padded_group_outc, kernel_channel),
+        lambda gg, kh, kw, pad_gg_oc, kc: tir.if_then_else(
+            pad_gg_oc < group_out_channel,
+            weight[
+                gg * group_out_channel + pad_gg_oc,
+                kc // kernel_channel_block,
+                kh,
+                kw,
+                kc % kernel_channel_block,
+            ],
+            tir.const(0.0, in_dtype),
+        ),
+        name="weight_imed",
+    )
+
+    kh = te.reduce_axis((0, kernel_height), name="kh")
+    kw = te.reduce_axis((0, kernel_width), name="kw")
+    kc = te.reduce_axis((0, kernel_channel), name="kc")
+    Mat = te.compute(
+        (num_batch, groups, padded_out_hw, padded_group_outc),
+        lambda nn, gg, pad_oh_ow, pad_gg_oc: te.sum(
+            te.multiply(
+                Data[nn, gg, kh, kw, pad_oh_ow, kc],
+                Weight[gg, kh, kw, pad_gg_oc, kc],
+            ).astype(out_dtype),
+            axis=[kh, kw, kc],
+        ),
+        name="conv_matrix",
+    )
+
+    out = te.compute(
+        (num_batch, out_channel_chunk, out_height, out_width, out_channel_block),
+        lambda nn, occ, oh, ow, ocb: Mat[
+            nn,
+            (occ * out_channel_block + ocb) // group_out_channel,
+            oh * out_width + ow,
+            (occ * out_channel_block + ocb) % group_out_channel,
+        ],
+        name="conv_reinterpret",
+    )
+
+    return out
 
 
 def conv2d_NCHWc_OIHWo(

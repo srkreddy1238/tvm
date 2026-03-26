@@ -34,7 +34,8 @@ def library_dispatch_passes(target: tvm.target.Target):  # pylint: disable=unuse
 
 def legalize_passes(target: tvm.target.Target):  # pylint: disable=unused-argument
     """The default legalization passes for Adreno GPU backend."""
-    desired_layouts = {"relax.nn.conv2d": ["NCHW4c", "OIHW4o", "NCHW4c"]}
+    opt_texture = "texture" in target.attrs.get("keys", [])
+    opt_coopmat = target.attrs.get("supports_khr_cooperative_matrix", False)
     skip_ops = [
         "relax.nn.conv2d",
         "relax.nn.max_pool2d",
@@ -48,10 +49,12 @@ def legalize_passes(target: tvm.target.Target):  # pylint: disable=unused-argume
             relax.transform.DecomposeOpsForInference(),
         ]
     )
-    if "texture" in target.keys:
+    if opt_texture:
         pass_list.extend(
             [
-                relax.transform.ConvertLayout(desired_layouts),
+                relax.transform.ConvertLayout(
+                    {}, legalize_adreno.conv2d_convert_layout(opt_coopmat)
+                ),
                 relax.transform.Normalize(),
                 relax.transform.FoldConstant(),
                 relax.transform.LegalizeOps(skip_ops=skip_ops),
@@ -59,18 +62,20 @@ def legalize_passes(target: tvm.target.Target):  # pylint: disable=unused-argume
                 relax.backend.adreno.transform.AnnotateCustomMemoryScope(target),
             ]
         )
-    pass_list.extend([tvm.relax.transform.LegalizeOps()])
-    if "texture" in target.keys:
-        pass_list.extend(
-            [
+        if opt_coopmat:
+            pass_list.append(
                 relax.transform.LegalizeOps(
-                    {"relax.nn.conv2d": legalize_adreno.conv2d_NCHWc_OIHWo},
+                    {"relax.nn.conv2d": legalize_adreno.conv2d_matmul},
                 )
-            ]
+            )
+        pass_list.append(
+            relax.transform.LegalizeOps(
+                {"relax.nn.conv2d": legalize_adreno.conv2d_NCHWc_OIHWo},
+            )
         )
-
     pass_list.extend(
         [
+            relax.transform.LegalizeOps(),
             relax.transform.AnnotateTIROpPattern(),
             relax.transform.FoldConstant(),
             relax.transform.FuseOps(),
@@ -78,7 +83,7 @@ def legalize_passes(target: tvm.target.Target):  # pylint: disable=unused-argume
             relax.transform.DeadCodeElimination(),
         ]
     )
-    if "texture" in target.keys:
+    if opt_texture:
         pass_list.extend(
             [
                 relax.backend.adreno.transform.FoldVDeviceScopeChange(),
@@ -92,16 +97,17 @@ def legalize_passes(target: tvm.target.Target):  # pylint: disable=unused-argume
     pass_list.extend(
         [
             dl.ApplyDefaultSchedule(
+                # Adreno Schedules
+                dl.adreno.DequantMatmulTensorization(),
+                # TODO(sanjs): Enable after network level tests, and Vulkan Texture integration
+                # dl.adreno.Conv2DTensorization(),
                 dl.adreno.MatmulTensorization(),
-                dl.adreno.Conv2d(),
+                dl.adreno.Conv2D(),
                 dl.adreno.LayoutTransform(),
                 dl.adreno.Pool2D(),
-            )
-        ]
-    )
-    pass_list.extend(
-        [
-            dl.ApplyDefaultSchedule(
+                dl.adreno.Fallback(),
+                # GPU Fallback
+                dl.gpu.Matmul(),
                 dl.gpu.Reduction(),
                 dl.gpu.GeneralReduction(),
                 dl.gpu.Fallback(),

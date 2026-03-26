@@ -19,8 +19,9 @@
 Adreno schedule rules.
 """
 
-from .convolution import Conv2d
-from .layout_transform import LayoutTransform
-from .fallback import Fallback
 from .pool import Pool2D
-from .matmul import MatmulTensorization
+from .convolution import Conv2D, Conv2DTensorization
+from .matmul import DequantMatmulTensorization, MatmulTensorization
+from .layout_transform import LayoutTransform
+
+from .fallback import Fallback
