@@ -105,7 +105,7 @@ class AdrenoACCLRuntime : public JSONRuntimeBase {
    * \param consts The constant params from compiled model.
    */
   void Init(const ffi::Array<Tensor>& consts) override {
-    ICHECK_EQ(consts.size(), const_idx_.size())
+    TVM_FFI_ICHECK_EQ(consts.size(), const_idx_.size())
         << "The number of input constants must match the number of required.";
     SetupConstants(consts);
 
@@ -140,7 +140,7 @@ class AdrenoACCLRuntime : public JSONRuntimeBase {
     unsigned int dy_shape;
     for (size_t i = 0; i < layer_.op_arg_list.size(); ++i) {
       uint32_t eid = EntryID(layer_.op_arg_list[i].first, 0);
-      ICHECK(kDLOpenCL == data_entry_[eid]->device.device_type)
+      TVM_FFI_ICHECK(kDLOpenCL == data_entry_[eid]->device.device_type)
           << "data ptr is not in OPENCL device";
       cl::BufferDescriptor* cl_buf_desc =
           static_cast<cl::BufferDescriptor*>(const_cast<DLTensor*>(data_entry_[eid])->data);
@@ -198,8 +198,10 @@ class AdrenoACCLRuntime : public JSONRuntimeBase {
 
   void CreateDequantQ4F16_0Matmul(CachedLayer* layer_, const JSONGraphNode& node, size_t nid) {
     size_t num_inputs = node.GetInputs().size();
-    std::vector<int64_t> input_shape = nodes_[node.GetInputs()[2].id_].GetOpShape()[0];
-    std::vector<int64_t> weight_shape = nodes_[node.GetInputs()[0].id_].GetOpShape()[0];
+    std::vector<int64_t> input_shape(nodes_[node.GetInputs()[2].id_].GetOpShape()[0].begin(),
+                                     nodes_[node.GetInputs()[2].id_].GetOpShape()[0].end());
+    std::vector<int64_t> weight_shape(nodes_[node.GetInputs()[0].id_].GetOpShape()[0].begin(),
+                                      nodes_[node.GetInputs()[0].id_].GetOpShape()[0].end());
     AdrenoAcCLOpDescriptor matmul_desc;
     bool is_bias = (num_inputs == 4);
 

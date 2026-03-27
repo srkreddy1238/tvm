@@ -88,11 +88,11 @@ class AdrenoACCLJSONSerializer : public JSONSerializer {
   std::vector<JSONGraphNodeEntry> VisitExpr_(const CallNode* call_node) final {
     // The call must be to an inline "Composite" function
     const auto* fn_var = call_node->op.as<VarNode>();
-    ICHECK(fn_var);
+    TVM_FFI_ICHECK(fn_var);
     const auto fn = Downcast<Function>(bindings_[ffi::GetRef<Var>(fn_var)]);
 
     auto opt_composite = fn->GetAttr<ffi::String>(attr::kComposite);
-    ICHECK(opt_composite.has_value());
+    TVM_FFI_ICHECK(opt_composite.has_value());
     std::string name = opt_composite.value();
 
     std::shared_ptr<JSONGraphNode> node;
@@ -159,7 +159,8 @@ ffi::Array<ffi::Module> AdrenoACCLCompiler(ffi::Array<Function> functions,
     VLOG(1) << "AdrenoACCLCompiler JSON:" << std::endl << graph_json;
     auto constant_names = serializer.GetConstantNames();
     const auto pf = tvm::ffi::Function::GetGlobalRequired("runtime.adreno_accl_runtime_create");
-    ICHECK(pf != nullptr) << "Cannot find AdrenoACCLCompiler runtime module create function.";
+    TVM_FFI_ICHECK(pf != nullptr)
+        << "Cannot find AdrenoACCLCompiler runtime module create function.";
     std::string func_name = GetExtSymbol(func);
     VLOG(1) << "Creating AdrenoACCL runtime::Module for '" << func_name << "'";
     compiled_functions.push_back(pf(func_name, graph_json, constant_names).cast<ffi::Module>());

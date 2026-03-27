@@ -28,7 +28,13 @@ from tvm.target import Target
 from tvm.tir import PrimExpr, Var
 from tvm.tir.analysis import undefined_vars
 
-from ..analysis import get_in_out_dtypes, get_reduction_blocks, get_root_block, get_sblock_info
+from ..adreno import DequantMatmulTensorization
+from ..analysis import (
+    get_in_out_dtypes,
+    get_reduction_blocks,
+    get_root_block,
+    get_sblock_info,
+)
 from .base import GPUScheduleRule
 
 
@@ -263,7 +269,8 @@ def get_index_map(block: tir.SBlock) -> tuple[tir.IndexMap, ...] | None:
         C_traits, [IterKind.kIter_S, IterKind.kIter_I, IterKind.kIter_J]
     )
     matmul_index_map = make_iter_fusion_index_map(
-        block_traits, [IterKind.kIter_S, IterKind.kIter_I, IterKind.kIter_J, IterKind.kIter_K]
+        block_traits,
+        [IterKind.kIter_S, IterKind.kIter_I, IterKind.kIter_J, IterKind.kIter_K],
     )
 
     return (
@@ -917,9 +924,17 @@ class Matmul(GPUScheduleRule):
             ((target.kind.name == "opencl") or (target.kind.name == "vulkan"))
             and ("adreno" in target.keys)
         ) and not is_inner_reduction(block_stmt, iter_infos):
-            ret = self.sch_outer_reduction(sch, main_block, blocks, target)
-            if ret is not None:
-                return ret
+            # Tensorize the matmul if target supports.
+            if (target.kind.name == "vulkan") and target.attrs.get(
+                "supports_khr_cooperative_matrix", False
+            ):
+                tensorize_sch = DequantMatmulTensorization().apply(func, target, _)
+                if tensorize_sch is not None:
+                    return tensorize_sch
+            else:
+                ret = self.sch_outer_reduction(sch, main_block, blocks, target)
+                if ret is not None:
+                    return ret
 
         # Step 0. Normalize generic matmul to C[S, I, J] += A[S, I, K] * B[S, J, K]
         # Reindex first and than analyze the index map
@@ -956,7 +971,10 @@ class Matmul(GPUScheduleRule):
                 tensorize_sch = None
                 if in_dtype[0] == "int8" and out_dtype[0] == "int32":
                     tensorize_sch = MatmulInt8Tensorization().apply(func, target, _)
-                elif in_dtype[0] == "float16" and out_dtype[0] in ["float16", "float32"]:
+                elif in_dtype[0] == "float16" and out_dtype[0] in [
+                    "float16",
+                    "float32",
+                ]:
                     tensorize_sch = MatmulTensorization().apply(func, target, _)
                 if tensorize_sch is not None:
                     return tensorize_sch
@@ -1142,7 +1160,7 @@ class Matmul(GPUScheduleRule):
         sch.reorder(bx, by, tx, ty, k1, k2, k3, unr, vec)
         sch.set_scope(matmul_block, 0, "local")
         if dequant_block is not None:
-            sch.compute_at(dequant_block, k3)
+            sch.compute_at(dequant_block, k3, preserve_unit_loops=True)
             sch.set_scope(dequant_block, 0, "local")
         sch.bind(by, "blockIdx.y")
         sch.bind(bx, "blockIdx.x")

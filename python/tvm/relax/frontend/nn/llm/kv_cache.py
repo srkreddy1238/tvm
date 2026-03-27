@@ -618,7 +618,8 @@ class TIRPagedKVCache(PagedKVCache):  # pylint: disable=too-few-public-methods
                 "kv_cache_transpose_append",
             ),
             bb.add_func(
-                _kv_cache_transpose_append_mla(qk_head_dim, dtype), "kv_cache_transpose_append_mla"
+                _kv_cache_transpose_append_mla(qk_head_dim, dtype),
+                "kv_cache_transpose_append_mla",
             ),
             # pylint: enable=line-too-long
         ]
@@ -922,7 +923,13 @@ def _get_seq_offset(pos, seq_id, length_info, sliding_window):
 
 
 def _attention_prefill_cpu(
-    h_kv, h_q, d, dtype, sliding_window: bool, rope_scaling: dict[str, Any], page_size: int = 16
+    h_kv,
+    h_q,
+    d,
+    dtype,
+    sliding_window: bool,
+    rope_scaling: dict[str, Any],
+    page_size: int = 16,
 ):
     global_symbol = "batch_prefill_paged_kv_cpu"
     if sliding_window:
@@ -1105,7 +1112,7 @@ def _get_prefill_kernel_config(h_kv, h_q, d, dtype, target: Target):
         num_warps = 2
 
     if ((target.kind.name == "opencl") or (target.kind.name == "vulkan")) and (
-        ("android" in str(target.host)) or ("adreno" in str(target.device_name))
+        ("android" in str(target.host)) or ("adreno" in str(target.keys))
     ):
         if target.kind.name == "opencl":
             LOAD_VEC = 16 // ((DataType(dtype).bits + 7) // 8)  # 16 bytes
@@ -1703,7 +1710,7 @@ def _attention_decode(
     THREAD_LIMIT = 512
     TILE_SIZE_PER_BDX = 2
     if ((target.kind.name == "opencl") or (target.kind.name == "vulkan")) and (
-        ("android" in str(target.host)) or ("adreno" in str(target.device_name))
+        ("android" in str(target.host)) or ("adreno" in str(target.keys))
     ):
         # Keeping lower thread limit for this kernel on adreno target
         # to avoid register spill
@@ -3034,7 +3041,10 @@ def _copy_single_page_mla(page_size, head_dim, dtype, target: Target):
         num_pages = T.int32()
         pages_elem_offset = T.int64()
         pages = T.match_buffer(
-            var_pages, (num_pages, page_size, head_dim), dtype, elem_offset=pages_elem_offset
+            var_pages,
+            (num_pages, page_size, head_dim),
+            dtype,
+            elem_offset=pages_elem_offset,
         )
 
         for b in T.thread_binding((copy_length * head_dim + tx - 1) // tx, thread="blockIdx.x"):

@@ -257,7 +257,9 @@ class GEMV(GPUScheduleRule):
                 ann_val=unroll_factor,
             )
             sch.annotate(
-                block_or_loop=sch.get_loops(rf)[3], ann_key="pragma_unroll_explicit", ann_val=1
+                block_or_loop=sch.get_loops(rf)[3],
+                ann_key="pragma_unroll_explicit",
+                ann_val=1,
             )
 
             sch.annotate(
@@ -266,7 +268,9 @@ class GEMV(GPUScheduleRule):
                 ann_val=unroll_factor,
             )
             sch.annotate(
-                block_or_loop=sch.get_loops(rf2)[3], ann_key="pragma_unroll_explicit", ann_val=1
+                block_or_loop=sch.get_loops(rf2)[3],
+                ann_key="pragma_unroll_explicit",
+                ann_val=1,
             )
 
             if LOAD_V_SHARED:
@@ -276,7 +280,9 @@ class GEMV(GPUScheduleRule):
                     ann_val=unroll_factor,
                 )
                 sch.annotate(
-                    block_or_loop=sch.get_loops(V_shared)[-4], ann_key="pragma_vectorize", ann_val=1
+                    block_or_loop=sch.get_loops(V_shared)[-4],
+                    ann_key="pragma_vectorize",
+                    ann_val=1,
                 )
 
             # Schedule epilogue
@@ -468,7 +474,9 @@ class GEMV(GPUScheduleRule):
             r = sch.fuse(r, c)
             bx, ts = sch.split(s, factors=[None, TS], preserve_unit_iters=True)
             r, v_tile, tr, tile_r, vec_c = sch.split(
-                r, factors=[None, LOAD_V_TILE, TR, SCALE_PACK, DEC_PACK], preserve_unit_iters=True
+                r,
+                factors=[None, LOAD_V_TILE, TR, SCALE_PACK, DEC_PACK],
+                preserve_unit_iters=True,
             )
             sch.reorder(bx, ts, r, v_tile, tile_r, tr, vec_c)
             tr_vec_c = sch.fuse(tr, vec_c)
@@ -507,7 +515,9 @@ class GEMV(GPUScheduleRule):
                 sch.compute_at(V_shared, r, preserve_unit_loops=True)
                 l = sch.get_loops(block=V_shared)[-1]
                 _, v_tile, ts, tr, vec = sch.split(
-                    l, factors=[None, LOAD_V_TILE, TS, TR, LOAD_V_VEC], preserve_unit_iters=True
+                    l,
+                    factors=[None, LOAD_V_TILE, TS, TR, LOAD_V_VEC],
+                    preserve_unit_iters=True,
                 )
                 sch.bind(tr, TAG_R)
                 sch.bind(ts, TAG_S)
@@ -539,7 +549,9 @@ class GEMV(GPUScheduleRule):
                 ann_val=UNROLL,
             )
             sch.annotate(
-                block_or_loop=sch.get_loops(rf2)[3], ann_key="pragma_unroll_explicit", ann_val=1
+                block_or_loop=sch.get_loops(rf2)[3],
+                ann_key="pragma_unroll_explicit",
+                ann_val=1,
             )
 
             # Schedule epilogue
@@ -602,7 +614,7 @@ class GEMV(GPUScheduleRule):
         if LOAD_V_SHARED is False:
             LOAD_V_TILE = 1
 
-        if not isinstance(len_r, int) or len_r < LOAD_V_TILE * TR * SCALE_PACK * DEC_PACK:
+        if not isinstance(len_r, int) or len_r < LOAD_V_TILE * TR * SCALE_PACK:
             return None
 
         if not isinstance(len_s, int):
@@ -611,6 +623,8 @@ class GEMV(GPUScheduleRule):
 
         if isinstance(len_s, int) and len_s > 96000:
             return None
+
+        TS = min(get_max_factor(len_s, [8, 16, 32, 64]), TS)
 
         _, TILE_R = (
             1,
@@ -666,7 +680,7 @@ class GEMV(GPUScheduleRule):
 
         bx, tx, vec = sch.split(s, factors=[None, tx_len, vec_len])
         r0, r1 = sch.split(r, factors=[None, inner_r])
-        sch.bind(batch, "blockIdx.y")
+        sch.bind(batch, "blockIdx.z")
         sch.bind(bx, "blockIdx.x")
         sch.bind(tx, "threadIdx.x")
         sch.reorder(bx, tx, r0, r1, c, vec)
