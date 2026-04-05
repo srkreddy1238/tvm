@@ -58,7 +58,7 @@ def negative(x):
         The result.
     """
     # pylint: disable=unnecessary-lambda
-    return te.compute(x.shape, lambda *i: -x(*i))
+    return te.compute(x.shape, lambda *i: 0 - x(*i))
 
 
 @tvm.te.tag_scope(tag=tag.ELEMWISE)

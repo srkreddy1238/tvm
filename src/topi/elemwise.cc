@@ -116,8 +116,19 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def_packed(
           "topi.logical_not",
           [](ffi::PackedArgs args, ffi::Any* rv) { *rv = logical_not(args[0].cast<te::Tensor>()); })
-      .def_packed("topi.bitwise_not", [](ffi::PackedArgs args, ffi::Any* rv) {
-        *rv = bitwise_not(args[0].cast<te::Tensor>());
+      .def_packed(
+          "topi.bitwise_not",
+          [](ffi::PackedArgs args, ffi::Any* rv) { *rv = bitwise_not(args[0].cast<te::Tensor>()); })
+      .def_packed("topi.abs",
+                  [](ffi::PackedArgs args, ffi::Any* rv) { *rv = abs(args[0].cast<te::Tensor>()); })
+      .def_packed("topi.ceil", [](ffi::PackedArgs args,
+                                  ffi::Any* rv) { *rv = ceil(args[0].cast<te::Tensor>()); })
+      .def_packed("topi.floor", [](ffi::PackedArgs args,
+                                   ffi::Any* rv) { *rv = floor(args[0].cast<te::Tensor>()); })
+      .def_packed("topi.round", [](ffi::PackedArgs args,
+                                   ffi::Any* rv) { *rv = round(args[0].cast<te::Tensor>()); })
+      .def_packed("topi.trunc", [](ffi::PackedArgs args, ffi::Any* rv) {
+        *rv = trunc(args[0].cast<te::Tensor>());
       });
 }
 

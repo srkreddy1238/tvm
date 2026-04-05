@@ -41,7 +41,8 @@ class CPPCompilerBase {
                       ffi::String tir_pipeline = "generic",
                       ffi::Map<ffi::Any, ffi::ObjectRef> params = {});
 
-  runtime::Tensor VMRun(const ffi::Module& vm, const std::vector<ffi::AnyView>& args);
+  ffi::Array<runtime::Tensor> VMRun(const ffi::Module& vm, const std::vector<ffi::AnyView>& args,
+                                    int ret_count = 1);
 
   std::vector<runtime::Tensor> InitRandomInputs(const tvm::IRModule& mod, const tvm::Device& dev);
 

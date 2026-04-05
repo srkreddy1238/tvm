@@ -16,8 +16,11 @@
 # under the License.
 # ruff: noqa: E501, F841
 
+import pytest
+
 import tvm
 import tvm.testing
+from tvm import relax
 from tvm.ir import Op
 from tvm.relax.transform import LegalizeOps
 from tvm.script import ir as I
@@ -1075,17 +1078,17 @@ def test_matmul_batching_dim_1():
     @tvm.script.ir_module
     class Matmul:
         @R.function
-        def main(x: R.Tensor((1, 1, 4, 5), "float32"), y: R.Tensor((1, 1, 5, 7), "float32")) -> R.Tensor((1, 1, 4, 7), "float32"):
-            gv: R.Tensor((1, 1, 4, 7), "float32") = R.matmul(x, y, out_dtype="float32")
+        def main(x: R.Tensor((2, 2, 4, 5), "float32"), y: R.Tensor((2, 2, 5, 7), "float32")) -> R.Tensor((2, 2, 4, 7), "float32"):
+            gv: R.Tensor((2, 2, 4, 7), "float32") = R.matmul(x, y, out_dtype="float32")
             return gv
 
     @I.ir_module
     class Expected:
         @T.prim_func(private=True)
-        def matmul(A: T.Buffer((T.int64(1), T.int64(1), T.int64(4), T.int64(5)), "float32"), B: T.Buffer((T.int64(1), T.int64(1), T.int64(5), T.int64(7)), "float32"), matmul_1: T.Buffer((T.int64(1), T.int64(1), T.int64(4), T.int64(7)), "float32")):
+        def matmul(A: T.Buffer((T.int64(2), T.int64(2), T.int64(4), T.int64(5)), "float32"), B: T.Buffer((T.int64(2), T.int64(2), T.int64(5), T.int64(7)), "float32"), matmul_1: T.Buffer((T.int64(2), T.int64(2), T.int64(4), T.int64(7)), "float32")):
             T.func_attr({"tir.noalias": True})
             # with T.sblock("root"):
-            for i0, i1, i2, i3, k in T.grid(T.int64(1), T.int64(1), T.int64(4), T.int64(7), T.int64(5)):
+            for i0, i1, i2, i3, k in T.grid(T.int64(2), T.int64(2), T.int64(4), T.int64(7), T.int64(5)):
                 with T.sblock("matmul"):
                     v_i0, v_i1, v_i2, v_i3, v_k = T.axis.remap("SSSSR", [i0, i1, i2, i3, k])
                     T.reads(A[v_i0, v_i1, v_i2, v_k], B[v_i0, v_i1, v_k, v_i3])
@@ -1095,9 +1098,9 @@ def test_matmul_batching_dim_1():
                     matmul_1[v_i0, v_i1, v_i2, v_i3] = matmul_1[v_i0, v_i1, v_i2, v_i3] + A[v_i0, v_i1, v_i2, v_k] * B[v_i0, v_i1, v_k, v_i3]
 
         @R.function
-        def main(x: R.Tensor((1, 1, 4, 5), dtype="float32"), y: R.Tensor((1, 1, 5, 7), dtype="float32")) -> R.Tensor((1, 1, 4, 7), dtype="float32"):
+        def main(x: R.Tensor((2, 2, 4, 5), dtype="float32"), y: R.Tensor((2, 2, 5, 7), dtype="float32")) -> R.Tensor((2, 2, 4, 7), dtype="float32"):
             cls = Expected
-            gv = R.call_tir(cls.matmul, (x, y), out_sinfo=R.Tensor((1, 1, 4, 7), dtype="float32"))
+            gv = R.call_tir(cls.matmul, (x, y), out_sinfo=R.Tensor((2, 2, 4, 7), dtype="float32"))
             return gv
     # fmt: on
 
@@ -1206,6 +1209,236 @@ def test_data_dependent_attribute():
 
     strided_slice_op = Op.get("relax.strided_slice")
     assert strided_slice_op.get_attr("FDataDependent") is None
+
+
+def _out_sinfo(mod):
+    """Return the StructInfo of the first binding in main's first dataflow block."""
+    binding = mod["main"].body.blocks[0].bindings[0]
+    return binding.value.struct_info
+
+
+def test_matmul_1d_x_2d():
+    """a is 1-D [K]: virtual [1,K] prepend; output shape must be [N]."""
+
+    @I.ir_module
+    class Before:
+        @R.function
+        def main(
+            a: R.Tensor((64,), "float32"),
+            b: R.Tensor((64, 32), "float32"),
+        ) -> R.Tensor((32,), "float32"):
+            gv: R.Tensor((32,), "float32") = R.matmul(a, b)
+            return gv
+
+    After = LegalizeOps()(Before)
+    sinfo = _out_sinfo(After)
+    assert sinfo.ndim == 1
+    assert int(sinfo.shape[0]) == 32
+
+
+def test_matmul_2d_x_1d():
+    """b is 1-D [K]: virtual [K,1] append; output shape must be [M]."""
+
+    @I.ir_module
+    class Before:
+        @R.function
+        def main(
+            a: R.Tensor((16, 64), "float32"),
+            b: R.Tensor((64,), "float32"),
+        ) -> R.Tensor((16,), "float32"):
+            gv: R.Tensor((16,), "float32") = R.matmul(a, b)
+            return gv
+
+    After = LegalizeOps()(Before)
+    sinfo = _out_sinfo(After)
+    assert sinfo.ndim == 1
+    assert int(sinfo.shape[0]) == 16
+
+
+def test_matmul_1d_x_1d():
+    """Both inputs 1-D: dot product; output must be scalar (ndim=0)."""
+
+    @I.ir_module
+    class Before:
+        @R.function
+        def main(
+            a: R.Tensor((64,), "float32"),
+            b: R.Tensor((64,), "float32"),
+        ) -> R.Tensor((), "float32"):
+            gv: R.Tensor((), "float32") = R.matmul(a, b)
+            return gv
+
+    After = LegalizeOps()(Before)
+    sinfo = _out_sinfo(After)
+    assert sinfo.ndim == 0
+
+
+def test_matmul_batched_3d():
+    """[B, M, K] x [B, K, N] -> [B, M, N]."""
+
+    @I.ir_module
+    class Before:
+        @R.function
+        def main(
+            a: R.Tensor((4, 16, 64), "float32"),
+            b: R.Tensor((4, 64, 32), "float32"),
+        ) -> R.Tensor((4, 16, 32), "float32"):
+            gv: R.Tensor((4, 16, 32), "float32") = R.matmul(a, b)
+            return gv
+
+    After = LegalizeOps()(Before)
+    sinfo = _out_sinfo(After)
+    assert sinfo.ndim == 3
+    assert [int(d) for d in sinfo.shape] == [4, 16, 32]
+
+
+def test_matmul_broadcast_batch():
+    """Batch dim of a is 1 and must be broadcast against b's batch dim."""
+
+    @I.ir_module
+    class Before:
+        @R.function
+        def main(
+            a: R.Tensor((1, 16, 64), "float32"),
+            b: R.Tensor((8, 64, 32), "float32"),
+        ) -> R.Tensor((8, 16, 32), "float32"):
+            gv: R.Tensor((8, 16, 32), "float32") = R.matmul(a, b)
+            return gv
+
+    After = LegalizeOps()(Before)
+    sinfo = _out_sinfo(After)
+    assert [int(d) for d in sinfo.shape] == [8, 16, 32]
+
+
+def test_matmul_out_dtype_upcast():
+    """out_dtype=float32 with float16 inputs; output dtype must be float32."""
+
+    @I.ir_module
+    class Before:
+        @R.function
+        def main(
+            a: R.Tensor((16, 64), "float16"),
+            b: R.Tensor((64, 32), "float16"),
+        ) -> R.Tensor((16, 32), "float32"):
+            gv: R.Tensor((16, 32), "float32") = R.matmul(a, b, out_dtype="float32")
+            return gv
+
+    After = LegalizeOps()(Before)
+    sinfo = _out_sinfo(After)
+    assert sinfo.dtype == "float32"
+    assert [int(d) for d in sinfo.shape] == [16, 32]
+
+
+def test_matmul_symbolic_batch():
+    """Symbolic batch dim must propagate through FInferStructInfo correctly."""
+
+    @I.ir_module
+    class Before:
+        @R.function
+        def main(
+            a: R.Tensor(("m", 16, 64), "float32"),
+            b: R.Tensor(("n", 64, 32), "float32"),
+        ):
+            gv = R.matmul(a, b)
+            return gv
+
+    After = LegalizeOps()(Before)
+    sinfo = _out_sinfo(After)
+    assert sinfo.ndim == 3
+
+
+def test_matmul_higher_rank_broadcast():
+    """a has more batch dims than b (is_a_larger path)."""
+
+    @I.ir_module
+    class Before:
+        @R.function
+        def main(
+            a: R.Tensor((2, 4, 16, 64), "float32"),
+            b: R.Tensor((4, 64, 32), "float32"),
+        ) -> R.Tensor((2, 4, 16, 32), "float32"):
+            gv: R.Tensor((2, 4, 16, 32), "float32") = R.matmul(a, b)
+            return gv
+
+    After = LegalizeOps()(Before)
+    sinfo = _out_sinfo(After)
+    assert [int(d) for d in sinfo.shape] == [2, 4, 16, 32]
+
+
+def test_matmul_unknown_dtype_raises():
+    """matmul with no dtype annotation must raise InternalError."""
+
+    @I.ir_module
+    class Before:
+        @R.function
+        def main(a: R.Tensor((16, 32)), b: R.Tensor((32, 8))):
+            return R.matmul(a, b)
+
+    with pytest.raises(tvm.error.InternalError):
+        LegalizeOps()(Before)
+
+
+def test_matmul_legalize_idempotent():
+    """Applying LegalizeOps twice must produce the same module."""
+
+    @I.ir_module
+    class Before:
+        @R.function
+        def main(
+            a: R.Tensor((4, 8), "float32"),
+            b: R.Tensor((8, 4), "float32"),
+        ) -> R.Tensor((4, 4), "float32"):
+            gv: R.Tensor((4, 4), "float32") = R.matmul(a, b)
+            return gv
+
+    After1 = LegalizeOps()(Before)
+    After2 = LegalizeOps()(After1)
+    tvm.ir.assert_structural_equal(After1, After2)
+
+
+def test_matmul_no_legalize_unknown_shape():
+    """Without concrete shape info the op cannot be legalized; module unchanged."""
+    x = relax.Var("x", relax.TensorStructInfo(dtype="float32", ndim=2))
+    y = relax.Var("y", relax.TensorStructInfo(dtype="float32", ndim=2))
+    bb = relax.BlockBuilder()
+    with bb.function("main", [x, y]):
+        with bb.dataflow():
+            gv = bb.emit_output(R.add(x, y))
+        bb.emit_func_output(gv)
+    Before = bb.get()
+    After = LegalizeOps()(Before)
+    tvm.ir.assert_structural_equal(After, Before)
+
+
+def test_matmul_separate_primfunc_per_vdevice():
+    """Two functions differing only by vdevice must get distinct PrimFuncs."""
+
+    @I.ir_module
+    class Before:
+        I.module_global_infos({"vdevice": [I.vdevice("llvm")]})
+
+        @R.function
+        def f_default(
+            a: R.Tensor((4, 8), "float32"),
+            b: R.Tensor((8, 4), "float32"),
+        ) -> R.Tensor((4, 4), "float32"):
+            gv: R.Tensor((4, 4), "float32") = R.matmul(a, b)
+            return gv
+
+        @R.function
+        def f_llvm(
+            c: R.Tensor((4, 8), "float32", "llvm"),
+            d: R.Tensor((8, 4), "float32", "llvm"),
+        ) -> R.Tensor((4, 4), "float32", "llvm"):
+            gv: R.Tensor((4, 4), "float32", "llvm") = R.matmul(c, d)
+            return gv
+
+    with tvm.target.Target("cuda"):
+        After = LegalizeOps()(Before)
+
+    default_gv = After["f_default"].body.blocks[0].bindings[0].value.args[0]
+    llvm_gv = After["f_llvm"].body.blocks[0].bindings[0].value.args[0]
+    assert default_gv != llvm_gv
 
 
 if __name__ == "__main__":

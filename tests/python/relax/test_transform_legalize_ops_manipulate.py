@@ -15,6 +15,8 @@
 # specific language governing permissions and limitations
 # under the License.
 # ruff: noqa: E501, E731, F841
+import pytest
+
 import tvm
 import tvm.testing
 from tvm import relax
@@ -1371,88 +1373,25 @@ def test_scatter_elements():
         def main(x: R.Tensor((4,4), "float32"), indices: R.Tensor((2,2), "int64"), updates: R.Tensor((2,2), "float32")):
             gv = R.scatter_elements(x, indices, updates, axis=1)
             return gv
+
     @I.ir_module
     class Expected:
         @T.prim_func(private=True)
-        def scatter_elements(
-            var_rxplaceholder: T.handle,
-            var_rxplaceholder_1: T.handle,
-            var_rxplaceholder_2: T.handle,
-            out_buf: T.Buffer((T.int64(4), T.int64(4)), "float32"),
-        ):
+        def scatter_elements(data: T.Buffer((T.int64(4), T.int64(4)), "float32"), indices: T.Buffer((T.int64(2), T.int64(2)), "int64"), updates: T.Buffer((T.int64(2), T.int64(2)), "float32"), out_buf: T.Buffer((T.int64(4), T.int64(4)), "float32")):
             T.func_attr({"tir.noalias": True})
-            rxplaceholder = T.match_buffer(
-                var_rxplaceholder, (T.int64(4), T.int64(4)), offset_factor=1
-            )
-            rxplaceholder_1 = T.match_buffer(
-                var_rxplaceholder_1, (T.int64(2), T.int64(2)), "int64", offset_factor=1
-            )
-            rxplaceholder_2 = T.match_buffer(
-                var_rxplaceholder_2, (T.int64(2), T.int64(2)), offset_factor=1
-            )
             with T.sblock("scatter_elements_generic"):
-                T.attr(0, "pragma_scope", "seq")
-                for i in T.parallel(T.int64(16)):
-                    out_buf[i // T.int64(4), i % T.int64(4)] = rxplaceholder[
-                        i // T.int64(4), i % T.int64(4)
-                    ]
+                T.reads()
+                T.writes()
+                for ci in T.parallel(T.int64(16)):
+                    out_buf[ci // T.int64(4) % T.int64(4), ci % T.int64(4)] = data[ci // T.int64(4) % T.int64(4), ci % T.int64(4)]
                 for fused in T.parallel(T.int64(2)):
                     for k in range(T.int64(2)):
-                        out_buf[
-                            (
-                                fused * T.int64(4)
-                                + (
-                                    rxplaceholder_1[
-                                        (fused * T.int64(2) + k) // T.int64(2),
-                                        (fused * T.int64(2) + k) % T.int64(2),
-                                    ]
-                                    + T.Cast(
-                                        "int64",
-                                        rxplaceholder_1[
-                                            (fused * T.int64(2) + k) // T.int64(2),
-                                            (fused * T.int64(2) + k) % T.int64(2),
-                                        ]
-                                        < T.int64(0),
-                                    )
-                                    * T.int64(4)
-                                )
-                            )
-                            // T.int64(4),
-                            (
-                                fused * T.int64(4)
-                                + (
-                                    rxplaceholder_1[
-                                        (fused * T.int64(2) + k) // T.int64(2),
-                                        (fused * T.int64(2) + k) % T.int64(2),
-                                    ]
-                                    + T.Cast(
-                                        "int64",
-                                        rxplaceholder_1[
-                                            (fused * T.int64(2) + k) // T.int64(2),
-                                            (fused * T.int64(2) + k) % T.int64(2),
-                                        ]
-                                        < T.int64(0),
-                                    )
-                                    * T.int64(4)
-                                )
-                            )
-                            % T.int64(4),
-                        ] = rxplaceholder_2[
-                            (fused * T.int64(2) + k) // T.int64(2),
-                            (fused * T.int64(2) + k) % T.int64(2),
-                        ]
+                        out_buf[(fused * T.int64(4) + T.Cast("int64", indices[(k // T.int64(2) + fused) % T.int64(2), k % T.int64(2)] < T.int64(0)) * T.int64(4) + indices[(k // T.int64(2) + fused) % T.int64(2), k % T.int64(2)]) // T.int64(4) % T.int64(4), (fused * T.int64(4) + T.Cast("int64", indices[(k // T.int64(2) + fused) % T.int64(2), k % T.int64(2)] < T.int64(0)) * T.int64(4) + indices[(k // T.int64(2) + fused) % T.int64(2), k % T.int64(2)]) % T.int64(4)] = updates[(fused * T.int64(2) + k) // T.int64(2) % T.int64(2), (fused * T.int64(2) + k) % T.int64(2)]
 
         @R.function
-        def main(
-            x: R.Tensor((4, 4), dtype="float32"),
-            indices: R.Tensor((2, 2), dtype="int64"),
-            updates: R.Tensor((2, 2), dtype="float32"),
-        ) -> R.Tensor((4, 4), dtype="float32"):
-            gv = R.call_tir(
-                Expected.scatter_elements,
-                (x, indices, updates),
-                out_sinfo=R.Tensor((4, 4), dtype="float32"),
-            )
+        def main(x: R.Tensor((4, 4), dtype="float32"), indices: R.Tensor((2, 2), dtype="int64"), updates: R.Tensor((2, 2), dtype="float32")) -> R.Tensor((4, 4), dtype="float32"):
+            cls = Expected
+            gv = R.call_tir(cls.scatter_elements, (x, indices, updates), out_sinfo=R.Tensor((4, 4), dtype="float32"))
             return gv
 
     # fmt: on
@@ -1468,82 +1407,35 @@ def test_scatter_elements_symbolic():
         def main(x: R.Tensor(("a", "b"), "float32"), indices:R.Tensor(("m", "n"), "int64"), updates:R.Tensor(("m","n"), "float32")):
             gv = R.scatter_elements(x, indices, updates, axis=1)
             return gv
+
     @I.ir_module
     class Expected:
         @T.prim_func(private=True)
-        def scatter_elements(
-            var_rxplaceholder: T.handle,
-            var_rxplaceholder_1: T.handle,
-            var_rxplaceholder_2: T.handle,
-            var_scatter_elements_generic: T.handle,
-        ):
+        def scatter_elements(var_x: T.handle, var_indices: T.handle, var_updates: T.handle, var_scatter_elements_generic: T.handle):
             T.func_attr({"tir.noalias": True})
             a, b = T.int64(), T.int64()
-            rxplaceholder = T.match_buffer(var_rxplaceholder, (a, b), offset_factor=1)
+            data = T.match_buffer(var_x, (a, b))
             m, n = T.int64(), T.int64()
-            rxplaceholder_1 = T.match_buffer(
-                var_rxplaceholder_1, (m, n), "int64", offset_factor=1
-            )
-            rxplaceholder_2 = T.match_buffer(var_rxplaceholder_2, (m, n), offset_factor=1)
+            indices = T.match_buffer(var_indices, (m, n), "int64")
+            updates = T.match_buffer(var_updates, (m, n))
             out_buf = T.match_buffer(var_scatter_elements_generic, (a, b))
             with T.sblock("scatter_elements_generic"):
-                T.attr(0, "pragma_scope", "seq")
-                for i in T.parallel(a * b):
-                    out_buf[i // b, i % b] = rxplaceholder[i // b, i % b]
+                T.reads()
+                T.writes()
+                for ci in T.parallel(a * b):
+                    out_buf[ci // b % a, ci % b] = data[ci // b % a, ci % b]
                 for fused in T.parallel(m):
                     for k in range(n):
-                        out_buf[
-                            (
-                                fused * b
-                                + (
-                                    rxplaceholder_1[
-                                        (fused * n + k) // n, (fused * n + k) % n
-                                    ]
-                                    + T.Cast(
-                                        "int64",
-                                        rxplaceholder_1[
-                                            (fused * n + k) // n, (fused * n + k) % n
-                                        ]
-                                        < T.int64(0),
-                                    )
-                                    * b
-                                )
-                            )
-                            // b,
-                            (
-                                fused * b
-                                + (
-                                    rxplaceholder_1[
-                                        (fused * n + k) // n, (fused * n + k) % n
-                                    ]
-                                    + T.Cast(
-                                        "int64",
-                                        rxplaceholder_1[
-                                            (fused * n + k) // n, (fused * n + k) % n
-                                        ]
-                                        < T.int64(0),
-                                    )
-                                    * b
-                                )
-                            )
-                            % b,
-                        ] = rxplaceholder_2[(fused * n + k) // n, (fused * n + k) % n]
+                        out_buf[(fused * b + indices[(fused * n + k) // n % m, (fused * n + k) % n] + T.Cast("int64", indices[(fused * n + k) // n % m, (fused * n + k) % n] < T.int64(0)) * b) // b % a, (fused * b + indices[(fused * n + k) // n % m, (fused * n + k) % n] + T.Cast("int64", indices[(fused * n + k) // n % m, (fused * n + k) % n] < T.int64(0)) * b) % b] = updates[(fused * n + k) // n % m, (fused * n + k) % n]
 
         @R.function
-        def main(
-            x: R.Tensor(("a", "b"), dtype="float32"),
-            indices: R.Tensor(("m", "n"), dtype="int64"),
-            updates: R.Tensor(("m", "n"), dtype="float32"),
-        ) -> R.Tensor(("a", "b"), dtype="float32"):
+        def main(x: R.Tensor(("a", "b"), dtype="float32"), indices: R.Tensor(("m", "n"), dtype="int64"), updates: R.Tensor(("m", "n"), dtype="float32")) -> R.Tensor(("a", "b"), dtype="float32"):
             a = T.int64()
             b = T.int64()
             m = T.int64()
             n = T.int64()
-            gv = R.call_tir(
-                Expected.scatter_elements,
-                (x, indices, updates),
-                out_sinfo=R.Tensor((a, b), dtype="float32"),
-            )
+            cls = Expected
+            gv = R.call_tir(cls.scatter_elements, (x, indices, updates), out_sinfo=R.Tensor((a, b), dtype="float32"))
             return gv
     # fmt: on
 
@@ -1794,48 +1686,461 @@ def test_scatter_nd():
 
     @I.ir_module
     class Expected:
-        @R.function
-        def main(
-            data: R.Tensor((8,), "float32"),
-            indices: R.Tensor((4, 1), "int64"),
-            updates: R.Tensor((4,), "float32"),
-        ) -> R.Tensor((8,), "float32"):
-            gv = R.call_tir(
-                Expected.scatter_nd, (data, indices, updates), R.Tensor((8,), dtype="float32")
-            )
-            return gv
-
         @T.prim_func(private=True)
-        def scatter_nd(var_data: T.handle, var_indices: T.handle, var_updates: T.handle, var_scatter_nd_generic: T.handle):
+        def scatter_nd(data: T.Buffer((T.int64(8),), "float32"), indices: T.Buffer((T.int64(4), T.int64(1)), "int64"), updates: T.Buffer((T.int64(4),), "float32"), out_buf: T.Buffer((T.int64(8),), "float32")):
             T.func_attr({"tir.noalias": True})
-            data = T.match_buffer(var_data, (T.int64(8),), offset_factor=1)
-            indices = T.match_buffer(var_indices, (T.int64(4), T.int64(1)), "int64")
-            updates = T.match_buffer(var_updates, (T.int64(4),), offset_factor=1)
-            out_buf = T.match_buffer(var_scatter_nd_generic, (T.int64(8),))
-            with T.sblock("root"):
+            # with T.sblock("root"):
+            T_transpose = T.alloc_buffer((T.int64(1), T.int64(4)), "int64")
+            for ax0, ax1 in T.grid(T.int64(1), T.int64(4)):
+                with T.sblock("T_transpose"):
+                    v_ax0, v_ax1 = T.axis.remap("SS", [ax0, ax1])
+                    T.reads(indices[v_ax1, v_ax0])
+                    T.writes(T_transpose[v_ax0, v_ax1])
+                    T_transpose[v_ax0, v_ax1] = indices[v_ax1, v_ax0]
+            with T.sblock("scatter_nd_generic"):
                 T.reads()
                 T.writes()
-                T_transpose = T.alloc_buffer((T.int64(1), T.int64(4)), "int64")
-                for ax0 in range(T.int64(1)):
-                    for ax1 in range(T.int64(4)):
-                        with T.sblock("T_transpose"):
-                            v_ax0 = T.axis.spatial(T.int64(1), ax0)
-                            v_ax1 = T.axis.spatial(T.int64(4), ax1)
-                            T.reads(indices[v_ax1, v_ax0])
-                            T.writes(T_transpose[v_ax0, v_ax1])
-                            T_transpose[v_ax0, v_ax1] = indices[v_ax1, v_ax0]
-                with T.sblock("scatter_nd_generic"):
-                    T.reads()
-                    T.writes()
-                    T.attr(0, "pragma_scope", "seq")
-                    for i in range(T.int64(8)):
-                        out_buf[i] = data[i]
-                    for j in range(T.int64(4)):
-                        for k in T.parallel(T.int64(1)):
-                            out_buf[k + T_transpose[j // T.int64(4), j % T.int64(4)]] = updates[j + k]
+                for copy_i in range(T.int64(8)):
+                    out_buf[copy_i % T.int64(8)] = data[copy_i % T.int64(8)]
+                for i in range(T.int64(4)):
+                    for j in T.parallel(T.int64(1)):
+                        out_buf[(j + T_transpose[T.int64(0), i % T.int64(4)]) % T.int64(8)] = updates[(i + j) % T.int64(4)]
+
+        @R.function
+        def main(data: R.Tensor((8,), dtype="float32"), indices: R.Tensor((4, 1), dtype="int64"), updates: R.Tensor((4,), dtype="float32")) -> R.Tensor((8,), dtype="float32"):
+            cls = Expected
+            gv = R.call_tir(cls.scatter_nd, (data, indices, updates), out_sinfo=R.Tensor((8,), dtype="float32"))
+            return gv
 
     # fmt: on
     tvm.ir.assert_structural_equal(After, Expected)
+
+
+def _out_sinfo(mod):
+    """Return the StructInfo of the first binding in main's first dataflow block."""
+    binding = mod["main"].body.blocks[0].bindings[0]
+    return binding.value.struct_info
+
+
+@pytest.mark.parametrize("mode", ["update", "add", "mul", "min", "max"])
+def test_scatter_nd_all_modes(mode):
+    """scatter_nd with every supported reduction mode on a 1-D data tensor."""
+
+    @I.ir_module
+    class Before:
+        @R.function
+        def main(
+            data: R.Tensor((8,), "float32"),
+            indices: R.Tensor((3, 1), "int64"),
+            updates: R.Tensor((3,), "float32"),
+        ) -> R.Tensor((8,), "float32"):
+            gv: R.Tensor((8,), "float32") = R.scatter_nd(data, indices, updates, reduction=mode)
+            return gv
+
+    After = LegalizeOps()(Before)
+    sinfo = _out_sinfo(After)
+    assert [int(d) for d in sinfo.shape] == [8]
+    assert sinfo.dtype == "float32"
+
+
+def test_scatter_nd_2d_data_update():
+    """scatter_nd on a 2-D data tensor with mode='update'."""
+
+    @I.ir_module
+    class Before:
+        @R.function
+        def main(
+            data: R.Tensor((4, 4), "float32"),
+            indices: R.Tensor((2, 2), "int64"),
+            updates: R.Tensor((2,), "float32"),
+        ) -> R.Tensor((4, 4), "float32"):
+            gv: R.Tensor((4, 4), "float32") = R.scatter_nd(
+                data, indices, updates, reduction="update"
+            )
+            return gv
+
+    After = LegalizeOps()(Before)
+    sinfo = _out_sinfo(After)
+    assert [int(d) for d in sinfo.shape] == [4, 4]
+
+
+def test_scatter_nd_3d_data_add():
+    """scatter_nd on a 3-D data tensor with mode='add'."""
+
+    @I.ir_module
+    class Before:
+        @R.function
+        def main(
+            data: R.Tensor((2, 3, 4), "float32"),
+            indices: R.Tensor((2, 2), "int64"),
+            updates: R.Tensor((2, 4), "float32"),
+        ) -> R.Tensor((2, 3, 4), "float32"):
+            gv: R.Tensor((2, 3, 4), "float32") = R.scatter_nd(
+                data, indices, updates, reduction="add"
+            )
+            return gv
+
+    After = LegalizeOps()(Before)
+    sinfo = _out_sinfo(After)
+    assert [int(d) for d in sinfo.shape] == [2, 3, 4]
+
+
+def test_scatter_elements_axis0_update():
+    """scatter_elements along axis=0 with reduction='update'."""
+
+    @I.ir_module
+    class Before:
+        @R.function
+        def main(
+            data: R.Tensor((4, 4), "float32"),
+            indices: R.Tensor((2, 4), "int64"),
+            updates: R.Tensor((2, 4), "float32"),
+        ) -> R.Tensor((4, 4), "float32"):
+            gv: R.Tensor((4, 4), "float32") = R.scatter_elements(
+                data, indices, updates, axis=0, reduction="update"
+            )
+            return gv
+
+    After = LegalizeOps()(Before)
+    sinfo = _out_sinfo(After)
+    assert [int(d) for d in sinfo.shape] == [4, 4]
+
+
+def test_scatter_elements_axis0_add():
+    """scatter_elements along axis=0 with reduction='add'."""
+
+    @I.ir_module
+    class Before:
+        @R.function
+        def main(
+            data: R.Tensor((4, 4), "float32"),
+            indices: R.Tensor((2, 4), "int64"),
+            updates: R.Tensor((2, 4), "float32"),
+        ) -> R.Tensor((4, 4), "float32"):
+            gv: R.Tensor((4, 4), "float32") = R.scatter_elements(
+                data, indices, updates, axis=0, reduction="add"
+            )
+            return gv
+
+    After = LegalizeOps()(Before)
+    sinfo = _out_sinfo(After)
+    assert [int(d) for d in sinfo.shape] == [4, 4]
+
+
+def test_scatter_elements_axis1_mul():
+    """scatter_elements along axis=1 with reduction='mul'."""
+
+    @I.ir_module
+    class Before:
+        @R.function
+        def main(
+            data: R.Tensor((3, 5), "float32"),
+            indices: R.Tensor((3, 2), "int64"),
+            updates: R.Tensor((3, 2), "float32"),
+        ) -> R.Tensor((3, 5), "float32"):
+            gv: R.Tensor((3, 5), "float32") = R.scatter_elements(
+                data, indices, updates, axis=1, reduction="mul"
+            )
+            return gv
+
+    After = LegalizeOps()(Before)
+    sinfo = _out_sinfo(After)
+    assert [int(d) for d in sinfo.shape] == [3, 5]
+
+
+@pytest.mark.parametrize("reduction", ["min", "max"])
+def test_scatter_elements_axis0_min_max(reduction):
+    """scatter_elements along axis=0 with reduction='min' and 'max'."""
+
+    @I.ir_module
+    class Before:
+        @R.function
+        def main(
+            data: R.Tensor((4, 4), "float32"),
+            indices: R.Tensor((2, 4), "int64"),
+            updates: R.Tensor((2, 4), "float32"),
+        ) -> R.Tensor((4, 4), "float32"):
+            gv: R.Tensor((4, 4), "float32") = R.scatter_elements(
+                data, indices, updates, axis=0, reduction=reduction
+            )
+            return gv
+
+    After = LegalizeOps()(Before)
+    sinfo = _out_sinfo(After)
+    assert [int(d) for d in sinfo.shape] == [4, 4]
+
+
+def test_scatter_elements_negative_axis():
+    """scatter_elements with a negative axis value (axis=-1 == axis=1)."""
+
+    @I.ir_module
+    class Before:
+        @R.function
+        def main(
+            data: R.Tensor((3, 5), "float32"),
+            indices: R.Tensor((3, 2), "int64"),
+            updates: R.Tensor((3, 2), "float32"),
+        ) -> R.Tensor((3, 5), "float32"):
+            gv: R.Tensor((3, 5), "float32") = R.scatter_elements(
+                data, indices, updates, axis=-1, reduction="update"
+            )
+            return gv
+
+    After = LegalizeOps()(Before)
+    sinfo = _out_sinfo(After)
+    assert [int(d) for d in sinfo.shape] == [3, 5]
+
+
+def test_scatter_elements_3d_axis1():
+    """scatter_elements on a 3-D tensor along axis=1."""
+
+    @I.ir_module
+    class Before:
+        @R.function
+        def main(
+            data: R.Tensor((2, 4, 3), "float32"),
+            indices: R.Tensor((2, 2, 3), "int64"),
+            updates: R.Tensor((2, 2, 3), "float32"),
+        ) -> R.Tensor((2, 4, 3), "float32"):
+            gv: R.Tensor((2, 4, 3), "float32") = R.scatter_elements(
+                data, indices, updates, axis=1, reduction="update"
+            )
+            return gv
+
+    After = LegalizeOps()(Before)
+    sinfo = _out_sinfo(After)
+    assert [int(d) for d in sinfo.shape] == [2, 4, 3]
+
+
+def test_slice_scatter_identity_fast_path():
+    """start=0, end=dim, step=1 triggers the identity fast-path."""
+
+    @I.ir_module
+    class Before:
+        @R.function
+        def main(
+            inp: R.Tensor((8, 4), "float32"),
+            src: R.Tensor((8, 4), "float32"),
+        ) -> R.Tensor((8, 4), "float32"):
+            gv: R.Tensor((8, 4), "float32") = R.slice_scatter(
+                inp, src, start=0, end=8, step=1, axis=0
+            )
+            return gv
+
+    After = LegalizeOps()(Before)
+    sinfo = _out_sinfo(After)
+    assert [int(d) for d in sinfo.shape] == [8, 4]
+
+
+def test_slice_scatter_partial_slice():
+    """Partial slice [2, 6) along axis=0."""
+
+    @I.ir_module
+    class Before:
+        @R.function
+        def main(
+            inp: R.Tensor((8, 4), "float32"),
+            src: R.Tensor((4, 4), "float32"),
+        ) -> R.Tensor((8, 4), "float32"):
+            gv: R.Tensor((8, 4), "float32") = R.slice_scatter(
+                inp, src, start=2, end=6, step=1, axis=0
+            )
+            return gv
+
+    After = LegalizeOps()(Before)
+    sinfo = _out_sinfo(After)
+    assert [int(d) for d in sinfo.shape] == [8, 4]
+
+
+def test_slice_scatter_step2():
+    """Slice with step=2 along axis=0."""
+
+    @I.ir_module
+    class Before:
+        @R.function
+        def main(
+            inp: R.Tensor((8, 4), "float32"),
+            src: R.Tensor((4, 4), "float32"),
+        ) -> R.Tensor((8, 4), "float32"):
+            gv: R.Tensor((8, 4), "float32") = R.slice_scatter(
+                inp, src, start=0, end=8, step=2, axis=0
+            )
+            return gv
+
+    After = LegalizeOps()(Before)
+    sinfo = _out_sinfo(After)
+    assert [int(d) for d in sinfo.shape] == [8, 4]
+
+
+def test_slice_scatter_axis1():
+    """Slice along axis=1."""
+
+    @I.ir_module
+    class Before:
+        @R.function
+        def main(
+            inp: R.Tensor((4, 8), "float32"),
+            src: R.Tensor((4, 4), "float32"),
+        ) -> R.Tensor((4, 8), "float32"):
+            gv: R.Tensor((4, 8), "float32") = R.slice_scatter(
+                inp, src, start=2, end=6, step=1, axis=1
+            )
+            return gv
+
+    After = LegalizeOps()(Before)
+    sinfo = _out_sinfo(After)
+    assert [int(d) for d in sinfo.shape] == [4, 8]
+
+
+def test_expand_dims_single_axis():
+    """expand_dims with a single positive axis."""
+
+    @I.ir_module
+    class Before:
+        @R.function
+        def main(x: R.Tensor((3, 4), "float32")) -> R.Tensor((1, 3, 4), "float32"):
+            gv: R.Tensor((1, 3, 4), "float32") = R.expand_dims(x, axis=[0])
+            return gv
+
+    After = LegalizeOps()(Before)
+    sinfo = _out_sinfo(After)
+    assert [int(d) for d in sinfo.shape] == [1, 3, 4]
+
+
+def test_expand_dims_multiple_axes():
+    """expand_dims inserting two new axes at positions 0 and 2."""
+
+    @I.ir_module
+    class Before:
+        @R.function
+        def main(x: R.Tensor((3, 4), "float32")) -> R.Tensor((1, 3, 1, 4), "float32"):
+            gv: R.Tensor((1, 3, 1, 4), "float32") = R.expand_dims(x, axis=[0, 2])
+            return gv
+
+    After = LegalizeOps()(Before)
+    sinfo = _out_sinfo(After)
+    assert [int(d) for d in sinfo.shape] == [1, 3, 1, 4]
+
+
+def test_expand_dims_negative_axis():
+    """expand_dims with a negative axis (axis=-1 appends a trailing dim)."""
+
+    @I.ir_module
+    class Before:
+        @R.function
+        def main(x: R.Tensor((3, 4), "float32")) -> R.Tensor((3, 4, 1), "float32"):
+            gv: R.Tensor((3, 4, 1), "float32") = R.expand_dims(x, axis=[-1])
+            return gv
+
+    After = LegalizeOps()(Before)
+    sinfo = _out_sinfo(After)
+    assert [int(d) for d in sinfo.shape] == [3, 4, 1]
+
+
+def test_expand_dims_symbolic_sinfo():
+    """expand_dims on a tensor with symbolic shape dimensions."""
+
+    @I.ir_module
+    class Before:
+        @R.function
+        def main(x: R.Tensor(("m", "n"), "float32")):
+            gv = R.expand_dims(x, axis=[1])
+            return gv
+
+    After = LegalizeOps()(Before)
+    sinfo = _out_sinfo(After)
+    assert sinfo.ndim == 3
+
+
+def test_repeat_with_axis():
+    """repeat along axis=1: [2, 3] -> [2, 9]."""
+
+    @I.ir_module
+    class Before:
+        @R.function
+        def main(x: R.Tensor((2, 3), "float32")) -> R.Tensor((2, 9), "float32"):
+            gv: R.Tensor((2, 9), "float32") = R.repeat(x, repeats=3, axis=1)
+            return gv
+
+    After = LegalizeOps()(Before)
+    sinfo = _out_sinfo(After)
+    assert [int(d) for d in sinfo.shape] == [2, 9]
+
+
+def test_repeat_axis0():
+    """repeat along axis=0: [2, 3] -> [6, 3]."""
+
+    @I.ir_module
+    class Before:
+        @R.function
+        def main(x: R.Tensor((2, 3), "float32")) -> R.Tensor((6, 3), "float32"):
+            gv: R.Tensor((6, 3), "float32") = R.repeat(x, repeats=3, axis=0)
+            return gv
+
+    After = LegalizeOps()(Before)
+    sinfo = _out_sinfo(After)
+    assert [int(d) for d in sinfo.shape] == [6, 3]
+
+
+def test_repeat_no_axis_sinfo():
+    """repeat without axis flattens then repeats: [2, 3] -> [12]."""
+
+    @I.ir_module
+    class Before:
+        @R.function
+        def main(x: R.Tensor((2, 3), "float32")) -> R.Tensor((12,), "float32"):
+            gv: R.Tensor((12,), "float32") = R.repeat(x, repeats=2)
+            return gv
+
+    After = LegalizeOps()(Before)
+    sinfo = _out_sinfo(After)
+    assert sinfo.ndim == 1
+    assert int(sinfo.shape[0]) == 12
+
+
+def test_flip_axis0():
+    """flip along axis=0 preserves shape."""
+
+    @I.ir_module
+    class Before:
+        @R.function
+        def main(x: R.Tensor((4, 5), "float32")) -> R.Tensor((4, 5), "float32"):
+            gv: R.Tensor((4, 5), "float32") = R.flip(x, axis=0)
+            return gv
+
+    After = LegalizeOps()(Before)
+    sinfo = _out_sinfo(After)
+    assert [int(d) for d in sinfo.shape] == [4, 5]
+
+
+def test_flip_axis1():
+    """flip along axis=1 preserves shape."""
+
+    @I.ir_module
+    class Before:
+        @R.function
+        def main(x: R.Tensor((4, 5), "float32")) -> R.Tensor((4, 5), "float32"):
+            gv: R.Tensor((4, 5), "float32") = R.flip(x, axis=1)
+            return gv
+
+    After = LegalizeOps()(Before)
+    sinfo = _out_sinfo(After)
+    assert [int(d) for d in sinfo.shape] == [4, 5]
+
+
+def test_flip_3d():
+    """flip on a 3-D tensor preserves shape."""
+
+    @I.ir_module
+    class Before:
+        @R.function
+        def main(x: R.Tensor((2, 3, 4), "float32")) -> R.Tensor((2, 3, 4), "float32"):
+            gv: R.Tensor((2, 3, 4), "float32") = R.flip(x, axis=2)
+            return gv
+
+    After = LegalizeOps()(Before)
+    sinfo = _out_sinfo(After)
+    assert [int(d) for d in sinfo.shape] == [2, 3, 4]
 
 
 if __name__ == "__main__":

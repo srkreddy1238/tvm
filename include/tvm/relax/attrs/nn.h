@@ -707,7 +707,8 @@ struct PadAttrs : public AttrsNodeReflAdapter<PadAttrs> {
                 refl::DefaultValue(0.0))
         .def_ro("pad_mode", &PadAttrs::pad_mode,
                 "Padding type to use. \"constant\" pads with constant_value, "
-                "\"edge\" pads using the edge values of the input array, "
+                "\"edge or replicate\" pads using the edge values of the input array, "
+                "\"circular\" pads using using tiling from begining of the input array, "
                 "\"reflect\" pads by reflecting values with respect to the edges.",
                 refl::DefaultValue("constant"));
   }

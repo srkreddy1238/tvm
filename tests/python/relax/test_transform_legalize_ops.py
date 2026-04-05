@@ -272,17 +272,8 @@ def test_matmul_legalization_requires_known_dtype():
         def main(A: R.Tensor([16, 32]), B: R.Tensor([32, 8])) -> R.Tensor([16, 8]):
             return R.matmul(A, B)
 
-    with pytest.raises(AssertionError) as err:
+    with pytest.raises(tvm.error.InternalError):
         LegalizeOps()(ArbitraryDtype)
-
-    # This error should be caught while attempting to legalize the
-    # R.matmul, where we can present a user-friendly error.
-    # Otherwise, the error isn't caught until the implementation of
-    # `BlockBuilder.call_te`, when attempting to create a numeric
-    # constant of type kHandle, which produces a much less
-    # user-friendly error.
-    err_message = err.value.args[0]
-    assert err_message.startswith("To legalize R.matmul")
 
 
 emit_legalization_through_builder = tvm.testing.parameter(

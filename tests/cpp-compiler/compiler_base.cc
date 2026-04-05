@@ -137,11 +137,21 @@ std::vector<runtime::Tensor> CPPCompilerBase::InitRandomInputs(const tvm::IRModu
   return args;
 }
 
-runtime::Tensor CPPCompilerBase::VMRun(const ffi::Module& vm,
-                                       const std::vector<ffi::AnyView>& args) {
+ffi::Array<runtime::Tensor> CPPCompilerBase::VMRun(const ffi::Module& vm,
+                                                   const std::vector<ffi::AnyView>& args,
+                                                   int ret_count) {
   ffi::Any ret;
+  ffi::Array<runtime::Tensor> ret_tensors;
 
   vm->GetFunction("set_input").value().CallPacked(ffi::PackedArgs(args.data(), args.size()), &ret);
   vm->GetFunction("invoke_stateful").value()("main");
-  return vm->GetFunction("get_output").value()("main").cast<runtime::Tensor>();
+  if (ret_count > 1) {
+    for (int i = 0; i < ret_count; ++i) {
+      ret_tensors.push_back(
+          vm->GetFunction("get_output").value()("main", i).cast<runtime::Tensor>());
+    }
+  } else {
+    ret_tensors.push_back(vm->GetFunction("get_output").value()("main").cast<runtime::Tensor>());
+  }
+  return ret_tensors;
 }

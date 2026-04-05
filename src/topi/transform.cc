@@ -25,6 +25,7 @@
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/topi/einsum.h>
 #include <tvm/topi/transform.h>
+#include <tvm/topi/trilu.h>
 #include <tvm/topi/utils.h>
 
 #include <iostream>
@@ -267,7 +268,10 @@ TVM_FFI_STATIC_INIT_BLOCK() {
                                           k1, k2, super_diag_right_align, sub_diag_right_align);
                   })
       .def("topi.adv_index",
-           [](te::Tensor x, ffi::Array<te::Tensor> indices) { return adv_index(x, indices); });
+           [](te::Tensor x, ffi::Array<te::Tensor> indices) { return adv_index(x, indices); })
+      .def("topi.trilu", [](te::Tensor data, int k, bool upper) {
+        return trilu(data, tvm::IntImm(DataType::Int(32), k), upper);
+      });
 }
 
 }  // namespace topi

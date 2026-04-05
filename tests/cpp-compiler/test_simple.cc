@@ -86,7 +86,7 @@ TEST_P(Simple, Binary) {
 
   // VMRun
   auto output = VMRun(vm, packed_args);
-  LOG(INFO) << "Result:" << output.shape();
+  LOG(INFO) << "Result:" << output[0].shape();
 }
 
 TEST_P(Simple, BinaryScalar) {
@@ -142,7 +142,7 @@ TEST_P(Simple, BinaryScalar) {
 
   // VMRun
   auto output = VMRun(vm, packed_args);
-  LOG(INFO) << "Result:" << output.shape();
+  LOG(INFO) << "Result:" << output[0].shape();
 }
 
 INSTANTIATE_TEST_SUITE_P(

@@ -40,8 +40,18 @@
 #include "../../../te/operation/create_primfunc.h"
 #include "../../ir/emit_te.h"
 
+/*
+ * Default level (python) is 10. Keep this lower to give priority to python legalizations.
+ * One can override this setting with build options to enfore cpp legalization if needed.
+ */
+#ifndef TVM_LEGALIZE_CPP_LEVEL
+#define TVM_LEGALIZE_CPP_LEVEL 20
+#endif
+
 namespace tvm {
 namespace relax {
+
+using FTOPIHandler = ffi::TypedFunction<ffi::Array<te::Tensor>(const ffi::Array<ffi::Any>)>;
 
 class MakeCallTE {
  public:
@@ -56,8 +66,13 @@ class MakeCallTE {
    * Legalize handler can inject additional args over relax call args.
    */
 
-  tvm::relax::Call Make(const tvm::ffi::Array<tvm::ffi::Any>& topi_args, std::string topi_handler,
-                        std::string fname);
+  tvm::relax::Call Make(const tvm::ffi::Array<tvm::ffi::Any>& topi_args,
+                        ffi::Variant<FTOPIHandler, ffi::String> topi_handler, std::string fname);
+
+  std::tuple<tvm::tir::PrimFunc, tvm::ffi::Array<Expr>, ffi::Array<TensorStructInfo>,
+             ffi::Array<PrimExpr>>
+  GenCallTirInputs(const ffi::Array<ffi::Any>& args,
+                   ffi::Variant<FTOPIHandler, ffi::String> topi_handler, std::string fname);
 
  private:
   BlockBuilder bb_;
@@ -68,12 +83,27 @@ class MakeCallTE {
   ffi::Array<tvm::ffi::Any> extra_tir_args_list_;
 
   VDevice GetVDevice(void);
-  ffi::Array<tvm::te::Tensor> CallTEHandler(const ffi::Array<tvm::ffi::Any>& te_args,
-                                            const std::string& topi_handler);
+  ffi::Array<tvm::te::Tensor> CallTEHandler(
+      const ffi::Array<tvm::ffi::Any>& te_args,
+      const ffi::Variant<FTOPIHandler, ffi::String>& topi_handler
+
+  );
 };
 
 #define JOIN(x, y) x##y
 #define MAKE_NAME(fn, id) JOIN(fn, id)
+
+ffi::Any TryConvertToScalarConst(const relax::Expr& val);
+
+ffi::Array<ffi::Any> GetConstTuple(const ffi::Array<PrimExpr>& tuple);
+
+std::pair<ffi::Array<tvm::PrimExpr>, ffi::Array<tvm::PrimExpr>> GetPadTupleGeneric(
+    const ffi::Array<tvm::PrimExpr>& padding, const ffi::Array<tvm::PrimExpr>& kernel_dims);
+
+bool EqualsConstInt(const tvm::PrimExpr& expr, int64_t val);
+
+te::Tensor Dilate(const te::Tensor& data, const ffi::Array<tvm::PrimExpr>& strides,
+                  const PrimExpr& dilation_value, const ffi::String& name = "DilatedInput");
 
 }  // namespace relax
 }  // namespace tvm

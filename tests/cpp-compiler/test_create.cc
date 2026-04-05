@@ -54,7 +54,7 @@ class CreateBase : public CPPCompilerBase {
 
     // VMRun
     auto output = VMRun(vm, packed_args);
-    LOG(INFO) << "Result:" << output.shape();
+    LOG(INFO) << "Result:" << output[0].shape();
   }
 
   tir::Var N, M;

@@ -497,14 +497,16 @@ def _nn_prelu(bb: BlockBuilder, call: Call) -> Expr:
 def _nn_gelu(bb: BlockBuilder, call: Call) -> Expr:
     def te_gelu(x: te.Tensor):
         dtype = x.dtype
-        erf_inp = x * tir.const(0.5**0.5, dtype)
 
-        if dtype == "float16":
-            erf = topi.math.cast(topi.erf(topi.math.cast(erf_inp, "float32")), "float16")
-        else:
-            erf = topi.erf(erf_inp)
+        def _compute(*i):
+            erf_inp = x(*i) * tir.const(0.5**0.5, dtype)
+            if dtype == "float16":
+                erf = tir.cast(tir.erf(tir.cast(erf_inp, "float32")), "float16")
+            else:
+                erf = tir.erf(erf_inp)
+            return x(*i) * (tir.const(0.5, dtype) + erf * tir.const(0.5, dtype))
 
-        return x * (tir.const(0.5, dtype) + erf * tir.const(0.5, dtype))
+        return te.compute(x.shape, lambda *idx: _compute(*idx), name="T_gelu")
 
     return bb.call_te(te_gelu, call.args[0], primfunc_name_hint="gelu")
 
@@ -513,18 +515,16 @@ def _nn_gelu(bb: BlockBuilder, call: Call) -> Expr:
 def _nn_gelu_tanh(bb: BlockBuilder, call: Call) -> Expr:
     def te_gelu_tanh(x: te.Tensor):
         dtype = x.dtype
-        return (
-            tir.const(0.5, dtype)
-            * x
-            * (
-                tir.const(1.0, dtype)
-                + topi.tanh(
-                    tir.const(math.sqrt(2.0 / math.pi), dtype)
-                    * x
-                    * (1 + tir.const(0.044715, dtype) * x * x)
-                )
+
+        def _compute(*i):
+            tanh_arg = (
+                tir.const(math.sqrt(2.0 / math.pi), dtype)
+                * x(*i)
+                * (tir.const(1.0, dtype) + tir.const(0.044715, dtype) * x(*i) * x(*i))
             )
-        )
+            return tir.const(0.5, dtype) * x(*i) * (tir.const(1.0, dtype) + tir.tanh(tanh_arg))
+
+        return te.compute(x.shape, lambda *idx: _compute(*idx), name="T_gelu_tanh")
 
     return bb.call_te(te_gelu_tanh, call.args[0], primfunc_name_hint="gelu_tanh")
 
@@ -579,7 +579,7 @@ def _nn_log_softmax(bb: BlockBuilder, call: Call):
 def _nn_cross_entropy_with_logits(bb: BlockBuilder, call: Call):
     def te_cross_entropy_with_logits(x, y):
         if len(x.shape) > 1:
-            return -topi.sum(x * y) / x.shape[0]
+            return 0 - topi.sum(x * y) / x.shape[0]
         return -topi.sum(x * y)
 
     return bb.call_te(

@@ -84,7 +84,7 @@ TEST_P(Binary, Ops) {
 
   // VMRun
   auto output = VMRun(vm, packed_args);
-  LOG(INFO) << "Result:" << output.shape();
+  LOG(INFO) << "Result:" << output[0].shape();
 }
 
 INSTANTIATE_TEST_SUITE_P(

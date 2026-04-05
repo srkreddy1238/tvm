@@ -38,6 +38,7 @@ namespace tvm {
 namespace topi {
 
 using namespace tvm::te;
+using Tensor = tvm::te::Tensor;
 
 // Unary intrinsic operators
 #define TOPI_DECLARE_UNARY_OP(OpName)                                                        \
@@ -229,13 +230,7 @@ inline Tensor sign(const Tensor& x, std::string name = "T_sign", std::string tag
  * \return A Tensor whose op member is the rsqrt operation
  */
 inline Tensor rsqrt(const Tensor& x, std::string name = "tensor", std::string tag = kElementWise) {
-  return compute(
-      x->shape,
-      [&](const ffi::Array<Var>& i) {
-        PrimExpr one = make_const(x->dtype, 1);
-        return one / tvm::sqrt(x(i));
-      },
-      name, tag);
+  return compute(x->shape, [&](const ffi::Array<Var>& i) { return tvm::rsqrt(x(i)); }, name, tag);
 }
 
 /*!
