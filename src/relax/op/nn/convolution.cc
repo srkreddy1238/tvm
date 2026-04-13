@@ -371,12 +371,11 @@ InferLayoutOutput InferLayoutConv2d(
         new_attrs->kernel_layout = (*it).second[1];
         new_attrs->out_layout = (*it).second.size() == 3 ? (*it).second[2] : (*it).second[0];
         return InferLayoutOutput({data_layout, weight_layout}, {output_layout}, Attrs(new_attrs));
-      } else {
-        data_layout = LayoutDecision(InitialLayout(4));
-        weight_layout = LayoutDecision(InitialLayout(4));
       }
     }
   }
+  data_layout = LayoutDecision(InitialLayout(4));
+  weight_layout = LayoutDecision(InitialLayout(4));
 
   // We don't have a desired layout for conv2d or desired layouts not compatible.
   // We can just propagate the layout from the input.

@@ -34,7 +34,7 @@ def library_dispatch_passes(target: tvm.target.Target):  # pylint: disable=unuse
 
 def legalize_passes(target: tvm.target.Target):  # pylint: disable=unused-argument
     """The default legalization passes for Adreno GPU backend."""
-    opt_texture = "texture" in target.attrs.get("keys", [])
+    opt_texture = "texture" in target.keys
     opt_coopmat = target.attrs.get("supports_khr_cooperative_matrix", False)
     skip_ops = [
         "relax.nn.conv2d",
