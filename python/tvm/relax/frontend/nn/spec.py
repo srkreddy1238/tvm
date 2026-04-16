@@ -1,4 +1,4 @@
-# Licensed to the Apache Software Foundation (ASF) under one
+﻿# Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
 # distributed with this work for additional information
 # regarding copyright ownership.  The ASF licenses this file
@@ -14,47 +14,145 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-"""Compilation specifications, for example, dynamic shape inputs."""
+"""Compilation specifications for nn.Module export.
+
+All six spec types are now native C++ objects:
+
+  Int        (relax.frontend.nn.spec.Int)      – no fields
+  Tensor     (relax.frontend.nn.spec.Tensor)   – shape, dtype
+  Tuple      (relax.frontend.nn.spec.Tuple)    – name, elements, is_tuple
+  MethodSpec (relax.frontend.nn.spec.MethodSpec)
+    forward:     ffi::Function(Map<String,Any>) -> Any
+    arg_names:   Array<String>
+    arg_specs:   Array<Any>
+    param_mode:  String
+    effect_mode: String
+  ModuleSpec (relax.frontend.nn.spec.ModuleSpec)
+    method_names: Array<String>
+    method_specs: Array<Any>
+    named_params: Map<String, NNParameter>
+
+  Object – stays Python: object_type is a Python class used as a constructor.
+
+The forward function in MethodSpec receives Map<String, Any> where each
+value is an nn.Tensor (TensorNode).  The implementation casts ffi::Any to
+NNTensor as needed.  No inspect.signature is required.
+
+MethodSpec.from_raw() and ModuleSpec.from_raw() are Python helpers that
+build the C++ objects from the user-facing dict API.  They use
+inspect.signature only to discover arg_names; the forward function they
+register is a Python closure that calls the original method.
+"""
 
 import inspect
 import typing
 
-if typing.TYPE_CHECKING:
-    from .core import Module as nn_module_class
+import tvm_ffi
+import tvm
 
+if typing.TYPE_CHECKING:
+    from .core import Module as _nn_module_class
+
+# ---------------------------------------------------------------------------
+# Type aliases (unchanged public API)
+# ---------------------------------------------------------------------------
 ArgSpecType = typing.Union["Int", "Tensor"]
 MethodSpecType = typing.Union["MethodSpec", dict[str, ArgSpecType]]
 ModuleSpecType = typing.Union["ModuleSpec", dict[str, MethodSpecType]]
 SpecAny = typing.Union["Object", "Int", "Tensor", "Tuple"]
 
+# ---------------------------------------------------------------------------
+# FFI API – populated by init_ffi_api("relax.frontend.nn.spec") at import time.
+# Each attribute corresponds to a C++ global registered as
+# "relax.frontend.nn.spec.<Name>" (the dot-free suffix becomes the attribute).
+# Note: constructor names like "Int.__init__" contain a dot and are therefore
+# NOT exposed by init_ffi_api.  They are accessed via the type-info mechanism
+# that register_object sets up: _ffi_api_spec.Int is the constructor function
+# registered by refl::init<>() and surfaced as the __c_ffi_init__ method,
+# which __init_handle_by_constructor__ calls directly.
+# ---------------------------------------------------------------------------
+from . import _ffi_api_spec  # noqa: E402  pylint: disable=wrong-import-position
+from . import _ffi_api       # noqa: E402  pylint: disable=wrong-import-position
 
-class Int:  # pylint: disable=too-few-public-methods
-    """An integer input"""
+
+# ===========================================================================
+# Int  –  native C++ object
+# ===========================================================================
+
+@tvm_ffi.register_object("relax.frontend.nn.spec.Int")
+class Int:
+    """Spec for a scalar integer input (becomes a tir.Var in the IR)."""
 
     def __init__(self) -> None:
-        pass
+        self.__init_handle_by_constructor__(_ffi_api_spec.Int)
 
     def __repr__(self) -> str:
         return "int"
 
 
-class Tensor:  # pylint: disable=too-few-public-methods
-    """A tensor input with static ndim and dtype, but can have symbolic shapes."""
+# ===========================================================================
+# Tensor  –  native C++ object
+# ===========================================================================
 
-    shape: list[int | str]
-    dtype: str
+@tvm_ffi.register_object("relax.frontend.nn.spec.Tensor")
+class Tensor:
+    """Spec for a tensor input: static ndim/dtype, symbolic or static shapes."""
 
     def __init__(self, shape: typing.Sequence[int | str], dtype: str) -> None:
-        self.shape = list(shape)
-        self.dtype = dtype
+        self.__init_handle_by_constructor__(
+            _ffi_api_spec.Tensor,
+            list(shape), dtype,
+        )
+
+    @property
+    def shape(self) -> list[int | str]:
+        raw = self.__object_handle__.shape  # type: ignore[attr-defined]
+        return [int(x) if isinstance(x, int) else str(x) for x in raw]
+
+    @property
+    def dtype(self) -> str:
+        return str(self.__object_handle__.dtype)  # type: ignore[attr-defined]
 
     def __repr__(self) -> str:
-        shape = ", ".join(str(i) for i in self.shape)
-        return f"Tensor([{shape}], '{self.dtype}')"
+        return str(self.__object_handle__.__repr__())  # type: ignore[attr-defined]
 
 
-class Object:  # pylint: disable=too-few-public-methods
-    """An non-tensor opaque frontend object."""
+# ===========================================================================
+# Tuple  –  native C++ object
+# ===========================================================================
+
+@tvm_ffi.register_object("relax.frontend.nn.spec.Tuple")
+class Tuple:
+    """Spec for a tuple or list input containing nested specs."""
+
+    def __init__(self, name: str, elements: "list[SpecAny] | tuple[SpecAny, ...]") -> None:
+        assert isinstance(elements, (list, tuple))
+        is_tuple = isinstance(elements, tuple)
+        self.__init_handle_by_constructor__(
+            _ffi_api_spec.Tuple,
+            name, list(elements), is_tuple,
+        )
+
+    @property
+    def name(self) -> str:
+        return str(self.__object_handle__.name)  # type: ignore[attr-defined]
+
+    @property
+    def elements(self) -> "list[SpecAny] | tuple[SpecAny, ...]":
+        raw = list(self.__object_handle__.elements)  # type: ignore[attr-defined]
+        return tuple(raw) if self.__object_handle__.is_tuple else raw  # type: ignore[attr-defined]
+
+    def __repr__(self) -> str:
+        return str(self.__object_handle__.__repr__())  # type: ignore[attr-defined]
+
+
+# ===========================================================================
+# Object  –  stays Python
+# object_type is a Python class used as a constructor in exporter.py.
+# ===========================================================================
+
+class Object:
+    """Spec for a non-tensor opaque frontend object (e.g. KVCache)."""
 
     object_type: type
 
@@ -65,193 +163,193 @@ class Object:  # pylint: disable=too-few-public-methods
         return "object"
 
 
-class Tuple:  # pylint: disable=too-few-public-methods
-    """A tuple input or a list input"""
+# ===========================================================================
+# MethodSpec  –  native C++ object
+#
+# The forward function is stored as ffi::Function(Map<String,Any>) -> Any.
+# Python wraps the original method in a closure that:
+#   1. Receives Map<String, Any> from C++.
+#   2. Extracts each nn.Tensor by name.
+#   3. Calls the original Python method.
+#   4. Returns the result as-is (Tensor or tuple of Tensors).
+# ===========================================================================
 
-    name: str
-    elements: list[SpecAny] | tuple[SpecAny, ...]
+@tvm_ffi.register_object("relax.frontend.nn.spec.MethodSpec")
+class MethodSpec:
+    """Spec for a single compiled method.
+
+    The forward function receives Map<String, Any> where each value is an
+    nn.Tensor.  arg_names is provided explicitly; no inspect.signature needed
+    at the C++ level.
+    """
 
     def __init__(
-        self,
-        name: str,
-        elements: list[SpecAny] | tuple[SpecAny, ...],
-    ) -> None:
-        assert isinstance(elements, tuple | list), f"Unsupported container type: {type(elements)}"
-        self.name = name
-        self.elements = elements
-
-    def __repr__(self) -> str:
-        return self.elements.__repr__()
-
-
-class MethodSpec:
-    """A spec for a compiled method"""
-
-    method: typing.Callable
-    arg_names: list[str]
-    arg_specs: list[ArgSpecType]
-    param_mode: str  # "plain", "packed", "none"
-    effect_mode: str  # "plain", "packed", "none"
-
-    def __init__(  # pylint: disable=too-many-arguments
         self,
         method: typing.Callable,
         arg_names: list[str],
         arg_specs: list[ArgSpecType],
         param_mode: str,
         effect_mode: str,
-    ):
-        if param_mode not in ["plain", "packed", "none"]:
-            raise ValueError(f"Invalid param_mode: {param_mode}")
-        if effect_mode not in ["plain", "packed", "none"]:
-            raise ValueError(f"Invalid effect_mode: {effect_mode}")
-        self.method = method
-        self.arg_names = arg_names
-        self.arg_specs = arg_specs
-        self.param_mode = param_mode
-        self.effect_mode = effect_mode
+    ) -> None:
+        if param_mode not in ("plain", "packed", "none"):
+            raise ValueError(f"Invalid param_mode: {param_mode!r}")
+        if effect_mode not in ("plain", "packed", "none"):
+            raise ValueError(f"Invalid effect_mode: {effect_mode!r}")
+
+        # Build the ffi::Function closure.
+        # It receives Map<String, Any> and calls the original Python method
+        # with positional arguments in arg_names order.
+        def _forward(named_args):
+            args = [named_args[name] for name in arg_names]
+            return method(*args)
+
+        self.__init_handle_by_constructor__(
+            _ffi_api_spec.MethodSpec,
+            _forward,          # ffi::Function
+            arg_names,         # Array<String>
+            arg_specs,         # Array<Any>
+            param_mode,
+            effect_mode,
+        )
+
+    # ---- read-only properties from C++ fields ----------------------------
+
+    @property
+    def arg_names(self) -> list[str]:
+        return list(self.__object_handle__.arg_names)  # type: ignore[attr-defined]
+
+    @property
+    def arg_specs(self) -> list[ArgSpecType]:
+        return list(self.__object_handle__.arg_specs)  # type: ignore[attr-defined]
+
+    @property
+    def param_mode(self) -> str:
+        return str(self.__object_handle__.param_mode)  # type: ignore[attr-defined]
+
+    @property
+    def effect_mode(self) -> str:
+        return str(self.__object_handle__.effect_mode)  # type: ignore[attr-defined]
 
     def _repr(self, name: str) -> str:
-        args = ", ".join(
-            f"{name}: {spec}"
-            for name, spec in zip(
-                self.arg_names,
-                self.arg_specs,
-            )
-        )
+        args = ", ".join(f"{n}: {s}" for n, s in zip(self.arg_names, self.arg_specs))
         return f"{name}({args})"
 
     def __repr__(self) -> str:
-        return self._repr(name="MethodSpec")
+        return self._repr("MethodSpec")
 
     @staticmethod
     def from_raw(spec: MethodSpecType, method: typing.Callable) -> "MethodSpec":
-        """Create MethodSpec from raw python dictionaries.
+        """Build a MethodSpec from a raw dict.
 
-        Examples
-        --------
-        .. code-block:: python
-
-            MethodSpec.from_raw(
-                spec={
-                    "inputs": spec.Tensor([batch_size, "seq_len"], "int32"),
-                    "total_seq_len": "int",
-                },
-                method=module.prefill,
-            )
+        inspect.signature is used here (Python side) only to discover
+        arg_names.  The C++ MethodSpecNode never calls inspect.
         """
         if isinstance(spec, MethodSpec):
             return spec
-        config: dict[str, typing.Any] = spec.pop("$", {})  # type: ignore[assignment]
+
+        config: dict[str, typing.Any] = spec.pop("$", {})  # type: ignore[union-attr]
         param_mode = config.get("param_mode", "plain")
         effect_mode = config.get("effect_mode", "plain")
-        method_signature = inspect.signature(method)
-        arg_names = list(method_signature.parameters.keys())
-        arg_specs = []
 
-        def _convert_arg_spec(arg_spec, arg_name):
+        sig = inspect.signature(method)
+        arg_names = list(sig.parameters.keys())
+        arg_specs: list[ArgSpecType] = []
+
+        def _convert(arg_spec, arg_name: str) -> ArgSpecType:
             if arg_spec is Int or arg_spec is int:
                 return Int()
             if isinstance(arg_spec, str) and arg_spec == "int":
                 return Int()
-            if isinstance(arg_spec, Int | Tensor | Object):
+            if isinstance(arg_spec, (Int, Tensor, Object)):
                 return arg_spec
-            if isinstance(arg_spec, tuple | list | Tuple):
-                return Tuple(
-                    arg_name,
-                    elements=type(arg_spec)(
-                        [
-                            _convert_arg_spec(arg_spec_i, f"{arg_name}_{i}")
-                            for i, arg_spec_i in enumerate(arg_spec)
-                        ]
-                    ),
+            if isinstance(arg_spec, (list, tuple, Tuple)):
+                elems = (list(arg_spec) if not isinstance(arg_spec, Tuple)
+                         else list(arg_spec.elements))
+                converted = (
+                    tuple(_convert(e, f"{arg_name}_{i}") for i, e in enumerate(elems))
+                    if isinstance(arg_spec, tuple)
+                    else [_convert(e, f"{arg_name}_{i}") for i, e in enumerate(elems)]
                 )
-            raise TypeError(f"Invalid spec for argument {arg_name}: {arg_spec}")
+                return Tuple(arg_name, converted)
+            raise TypeError(f"Invalid spec for argument {arg_name!r}: {arg_spec!r}")
 
         for arg_name in arg_names:
-            if arg_name in spec:
-                arg_spec = spec[arg_name]
-                arg_spec = _convert_arg_spec(arg_spec, arg_name)
-                arg_specs.append(arg_spec)
-        return MethodSpec(
-            method,
-            arg_names,
-            arg_specs,
-            param_mode=param_mode,
-            effect_mode=effect_mode,
-        )
+            if arg_name in spec:  # type: ignore[operator]
+                arg_specs.append(_convert(spec[arg_name], arg_name))  # type: ignore[index]
+
+        return MethodSpec(method, arg_names, arg_specs,
+                          param_mode=param_mode, effect_mode=effect_mode)
 
     @staticmethod
     def from_torch(args: list[typing.Any], method: typing.Callable) -> "MethodSpec":
-        """Converts a list of torch tensors to MethodSpec."""
-        from .torch import (  # pylint: disable=import-outside-toplevel
-            _method_spec_from_torch,
-        )
-
+        """Build a MethodSpec from a list of example torch tensors."""
+        from .torch import _method_spec_from_torch  # pylint: disable=import-outside-toplevel
         return _method_spec_from_torch(args, method)
 
 
-class ModuleSpec:
-    """A spec for a compiled nn.Module"""
+# ===========================================================================
+# ModuleSpec  –  native C++ object
+#
+# named_params is pre-collected from Module.named_parameters() so the C++
+# Exporter never needs to call back into Python for parameter discovery.
+# ===========================================================================
 
-    module: "nn_module_class"
-    method_names: list[str]
-    method_specs: list[MethodSpec]
+@tvm_ffi.register_object("relax.frontend.nn.spec.ModuleSpec")
+class ModuleSpec:
+    """Spec for a complete nn.Module compilation."""
 
     def __init__(
         self,
-        module: "nn_module_class",
+        module: "_nn_module_class",
         method_names: list[str],
         method_specs: list[MethodSpec],
     ) -> None:
-        self.module = module
-        self.method_names = method_names
-        self.method_specs = method_specs
+        # Collect named parameters from the Python module
+        from .core import Parameter, _attribute_finder  # pylint: disable=import-outside-toplevel
+        named_params = {
+            name: param
+            for name, param in _attribute_finder(
+                module, prefix="", condition_yield=lambda x: isinstance(x, Parameter)
+            )
+        }
+        self.__init_handle_by_constructor__(
+            _ffi_api_spec.ModuleSpec,
+            method_names,
+            method_specs,
+            named_params,
+        )
+
+    @property
+    def method_names(self) -> list[str]:
+        return list(self.__object_handle__.method_names)  # type: ignore[attr-defined]
+
+    @property
+    def method_specs(self) -> list[MethodSpec]:
+        return list(self.__object_handle__.method_specs)  # type: ignore[attr-defined]
+
+    @property
+    def named_params(self) -> dict:
+        return dict(self.__object_handle__.named_params)  # type: ignore[attr-defined]
 
     @staticmethod
-    def from_raw(spec: ModuleSpecType, module: "nn_module_class") -> "ModuleSpec":
-        """Create ModuleSpec from raw python dictionaries.
-
-        Examples
-        --------
-        .. code-block:: python
-
-            ModuleSpec.from_raw(
-                spec={
-                    "prefill": {
-                        "inputs": spec.Tensor([batch_size, "seq_len"], "int32"),
-                        "total_seq_len": int,
-                    },
-                    "decode": {
-                        "inputs": spec.Tensor([batch_size, 1], "int32"),
-                        "total_seq_len": int,
-                    },
-                    "softmax_with_temperature": {
-                        "logits": spec.Tensor([1, 1, config.vocab_size], "float32"),
-                        "temperature": spec.Tensor([], "float32"),
-                    },
-                },
-                module=module,
-            )
-        """
+    def from_raw(spec: ModuleSpecType, module: "_nn_module_class") -> "ModuleSpec":
+        """Build a ModuleSpec from a raw dict or return as-is."""
         if isinstance(spec, ModuleSpec):
             return spec
-        method_names = list(spec.keys())
+        method_names = list(spec.keys())  # type: ignore[union-attr]
         method_specs: list[MethodSpec] = []
         for method_name in method_names:
-            method_spec = spec[method_name]
-            if isinstance(method_spec, MethodSpec):
-                pass
-            else:
-                method_spec = MethodSpec.from_raw(method_spec, getattr(module, method_name))
+            method_spec = spec[method_name]  # type: ignore[index]
+            if not isinstance(method_spec, MethodSpec):
+                method_spec = MethodSpec.from_raw(
+                    method_spec, getattr(module, method_name)
+                )
             method_specs.append(method_spec)
         return ModuleSpec(module, method_names, method_specs)
 
     def __repr__(self) -> str:
-        return "ModuleSpec:\n" + "\n".join(
-            "  " + spec._repr(name)  # pylint: disable=protected-access
-            for name, spec in zip(
-                self.method_names,
-                self.method_specs,
-            )
+        lines = "\n".join(
+            "  " + ms._repr(name)
+            for name, ms in zip(self.method_names, self.method_specs)
         )
+        return f"ModuleSpec:\n{lines}"

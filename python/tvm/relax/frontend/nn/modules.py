@@ -1,4 +1,4 @@
-# Licensed to the Apache Software Foundation (ASF) under one
+﻿# Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
 # distributed with this work for additional information
 # regarding copyright ownership.  The ASF licenses this file
@@ -14,89 +14,132 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-# pylint: disable=too-many-arguments,invalid-name,protected-access,unused-argument
-# ruff: noqa: RUF005
-"""Builtin Modules."""
+# pylint: disable=too-many-arguments,invalid-name
+"""Built-in nn.Module subclasses.
+
+Every compute module (ReLU, SiLU, GELU, Linear, Embedding, LayerNorm,
+RMSNorm, GroupNorm, Conv1D, Conv2D, Conv3D, ConvTranspose1D) is a native
+C++ runtime::Object.  ALL members -- Parameters, scalars, strings -- live
+inside the C++ object.  Python holds only the object handle.
+
+__init__ is a single __init_handle_by_constructor__ call to a C++ Make*
+factory that allocates Parameters, computes kernel shapes, and returns the
+fully-constructed object.
+
+Properties (weight, bias, epsilon, ...) are thin wrappers that read the
+corresponding C++ field via __object_handle__.
+
+Pure-Python modules (IOEffect, KVCache, Identity, TimestepEmbedding,
+Timesteps, Attention) remain in Python because they manage Python-level
+state (BlockBuilder effects, module composition).
+"""
 
 from collections.abc import Sequence
+
+import tvm_ffi
 
 from tvm import relax as rx
 from tvm import tir
 
 from . import op
 from .core import Effect, Module, ModuleList, Parameter, Tensor, get_default_dtype
+from . import _ffi_api
 
+
+# ===========================================================================
+# IOEffect  (pure Python)
+# ===========================================================================
 
 class IOEffect(Effect):
-    """
-    Modeling IO side effect, for example, printing the content of Tensors on screen, inserting
-    debug breakpoints, etc.
-    """
-
-    effect: rx.Var | None
+    """Modeling IO side effect."""
 
     def __init__(self):
         self.effect = None
 
-    def emit_init(self, name_hint, builder: rx.BlockBuilder) -> list[rx.DataflowVar]:
+    def emit_init(self, name_hint, builder):
         return [builder.emit(rx.op.null_value(), f"{name_hint}.io")]
 
-    def create(self, name_hint: str) -> list[rx.Var]:
-        assert self.effect is None
-        effect = rx.Var(f"{name_hint}.io", struct_info=rx.ObjectStructInfo())
-        return [effect]
+    def create(self, name_hint):
+        self.effect = rx.Var(f"{name_hint}.io", struct_info=rx.ObjectStructInfo())
+        return [self.effect]
 
-    def set_state(self, state_vars: list[rx.Var]) -> None:
+    def set_state(self, state_vars):
         (self.effect,) = state_vars
 
-    def finalize(self) -> list[rx.Var]:
-        result = self.effect
-        self.effect = None
+    def finalize(self):
+        result, self.effect = self.effect, None
         return [result]
 
 
-class ReLU(Module):
-    """Module for ReLU activation layer."""
-
-    def forward(self, x: Tensor):
-        return op.relu(x)
-
-
-class SiLU(Module):
-    """Module for SiLU activation layer."""
-
-    def forward(self, x: Tensor):
-        return op.silu(x)
-
-
-class GELU(Module):
-    """Module for GELU activation layer."""
-
-    def forward(self, x: Tensor):
-        return op.gelu(x)
-
+# ===========================================================================
+# Identity  (pure Python)
+# ===========================================================================
 
 class Identity(Module):
-    """Module that does nothing, sometimes useful for naming purposes."""
+    """Pass-through module."""
 
-    def forward(self, x: Tensor):
-        """Forward method for identity.
-
-        Parameters
-        ----------
-        x : Tensor
-            The input tensor.
-        Returns
-        -------
-        Result : Tensor
-            The unchanged input tensor.
-        """
+    def forward(self, x: Tensor) -> Tensor:
         return x
 
 
+# ===========================================================================
+# ReLU
+# ===========================================================================
+
+@tvm_ffi.register_object("relax.frontend.nn.ReLU")
+class ReLU(Module):
+    """ReLU activation."""
+
+    def __init__(self) -> None:
+        self.__init_handle_by_constructor__(_ffi_api.ReLU)
+
+    def forward(self, x: Tensor) -> Tensor:
+        return Tensor(_expr=self.__object_handle__.forward(x._expr))
+
+
+# ===========================================================================
+# SiLU
+# ===========================================================================
+
+@tvm_ffi.register_object("relax.frontend.nn.SiLU")
+class SiLU(Module):
+    """SiLU activation."""
+
+    def __init__(self) -> None:
+        self.__init_handle_by_constructor__(_ffi_api.SiLU)
+
+    def forward(self, x: Tensor) -> Tensor:
+        return Tensor(_expr=self.__object_handle__.forward(x._expr))
+
+
+# ===========================================================================
+# GELU
+# ===========================================================================
+
+@tvm_ffi.register_object("relax.frontend.nn.GELU")
+class GELU(Module):
+    """GELU activation."""
+
+    def __init__(self, approximate: str = "") -> None:
+        self.__init_handle_by_constructor__(_ffi_api.GELU, approximate)
+
+    @property
+    def approximate(self) -> str:
+        return str(self.__object_handle__.approximate)
+
+    def forward(self, x: Tensor) -> Tensor:
+        return Tensor(_expr=self.__object_handle__.forward(x._expr))
+
+
+# ===========================================================================
+# Linear
+# ===========================================================================
+
+@tvm_ffi.register_object("relax.frontend.nn.Linear")
 class Linear(Module):
-    """
-    Module for linear layer.
+    """Linear layer: out = x @ W^T + b.
+
+    All state (weight Parameter, bias Parameter, out_dtype) lives in C++.
     """
 
     def __init__(
@@ -106,57 +149,193 @@ class Linear(Module):
         bias: bool = True,
         dtype: str | None = None,
         out_dtype: str | None = None,
-    ):
-        super().__init__()
-        self.in_features = in_features
-        self.out_features = out_features
-        self.out_dtype = out_dtype
-        self.weight = Parameter((out_features, in_features), dtype)
-        if bias:
-            self.bias = Parameter((out_features,), dtype=dtype if out_dtype is None else out_dtype)
-        else:
-            self.bias = None
+    ) -> None:
+        self.__init_handle_by_constructor__(
+            _ffi_api.MakeLinear,
+            in_features, out_features, bias, dtype, out_dtype,
+        )
+
+    # -- properties read directly from C++ fields --
+    @property
+    def weight(self) -> Parameter:
+        return self.__object_handle__.weight
+
+    @property
+    def bias(self) -> Parameter | None:
+        return self.__object_handle__.bias  # Optional[NNParameter] -> None or Parameter
+
+    @property
+    def out_dtype(self) -> str | None:
+        v = self.__object_handle__.out_dtype
+        return str(v) if v is not None else None
 
     def forward(self, x: Tensor) -> Tensor:
-        """
-        Forward method for linear layer.
-
-        Parameters
-        ----------
-        x : Tensor
-            The input tensor.
-
-        Returns
-        -------
-        ret : Tensor
-            The output tensor for the linear layer.
-        """
-        # x: [*B, in_features]
-        # w: [in_features, out_features]
-        w = op.permute_dims(self.weight)
-        # x: [*B, out_features]
-        x = op.matmul(x, w, out_dtype=self.out_dtype)
-        if self.bias is not None:
-            x = x + self.bias
-        return x
+        return Tensor(_expr=self.__object_handle__.forward(x._expr))
 
     def to(self, dtype: str | None = None) -> None:
-        """
-        Override to() such that we do not convert bias if there is `out_dtype`.
-        Otherwise, we might run into dtype mismatch when computing `x + self.bias`
-        since x is of type `out_dtype` and bias becomes `dtype`, potentially different.
-        """
-        self.weight.to(dtype=dtype)
-        if self.bias is not None and self.out_dtype is None:
-            self.bias.to(dtype=dtype)
-        if dtype is not None and isinstance(getattr(self, "dtype", None), str):
-            self.dtype = dtype  # pylint: disable=attribute-defined-outside-init
+        if dtype is not None:
+            self.weight.to(dtype=dtype)
+            if self.bias is not None and self.out_dtype is None:
+                self.bias.to(dtype=dtype)
 
 
+# ===========================================================================
+# Embedding
+# ===========================================================================
+
+@tvm_ffi.register_object("relax.frontend.nn.Embedding")
+class Embedding(Module):
+    """Embedding lookup. All state lives in C++."""
+
+    def __init__(
+        self,
+        num: int | str | tir.PrimExpr,
+        dim: int | str | tir.PrimExpr,
+        dtype: str | None = None,
+    ) -> None:
+        self.__init_handle_by_constructor__(
+            _ffi_api.MakeEmbedding, num, dim, dtype)
+
+    @property
+    def weight(self) -> Parameter:
+        return self.__object_handle__.weight
+
+    def forward(self, x: Tensor) -> Tensor:
+        out_shape = [] if x.ndim == 1 else list(x.shape) + [self.weight.shape[1]]
+        return Tensor(_expr=self.__object_handle__.forward(x._expr, out_shape))
+
+
+# ===========================================================================
+# LayerNorm
+# ===========================================================================
+
+@tvm_ffi.register_object("relax.frontend.nn.LayerNorm")
+class LayerNorm(Module):
+    """Layer Normalization. All state lives in C++."""
+
+    def __init__(
+        self,
+        normalized_shape: int,
+        eps: float | None = 1e-5,
+        elementwise_affine: bool = True,
+        dtype: str | None = None,
+    ) -> None:
+        self.__init_handle_by_constructor__(
+            _ffi_api.MakeLayerNorm,
+            normalized_shape,
+            float(eps if eps is not None else 1e-5),
+            elementwise_affine,
+            dtype,
+        )
+
+    @property
+    def weight(self) -> Parameter | None:
+        return self.__object_handle__.weight
+
+    @property
+    def bias(self) -> Parameter | None:
+        return self.__object_handle__.bias
+
+    @property
+    def eps(self) -> float:
+        return float(self.__object_handle__.epsilon)
+
+    @property
+    def elementwise_affine(self) -> bool:
+        return bool(self.__object_handle__.elementwise_affine)
+
+    def forward(self, x: Tensor) -> Tensor:
+        return Tensor(_expr=self.__object_handle__.forward(x._expr))
+
+
+# ===========================================================================
+# RMSNorm
+# ===========================================================================
+
+@tvm_ffi.register_object("relax.frontend.nn.RMSNorm")
+class RMSNorm(Module):
+    """RMS Normalization. All state lives in C++."""
+
+    def __init__(
+        self,
+        hidden_size: int,
+        axes: int | list[int],
+        epsilon: float = 1e-5,
+        bias: bool = True,
+        dtype: str | None = None,
+    ) -> None:
+        ax = [axes] if isinstance(axes, int) else list(axes)
+        self.__init_handle_by_constructor__(
+            _ffi_api.MakeRMSNorm,
+            hidden_size, ax, float(epsilon), bias, dtype,
+        )
+
+    @property
+    def weight(self) -> Parameter:
+        return self.__object_handle__.weight
+
+    @property
+    def bias(self) -> Parameter | None:
+        return self.__object_handle__.bias
+
+    @property
+    def epsilon(self) -> float:
+        return float(self.__object_handle__.epsilon)
+
+    def forward(self, x: Tensor) -> Tensor:
+        return Tensor(_expr=self.__object_handle__.forward(x._expr))
+
+
+# ===========================================================================
+# GroupNorm
+# ===========================================================================
+
+@tvm_ffi.register_object("relax.frontend.nn.GroupNorm")
+class GroupNorm(Module):
+    """Group Normalization. All state lives in C++."""
+
+    def __init__(
+        self,
+        num_groups: int,
+        num_channels: int,
+        eps: float = 1e-5,
+        affine: bool = True,
+        dtype: str | None = None,
+    ) -> None:
+        self.__init_handle_by_constructor__(
+            _ffi_api.MakeGroupNorm,
+            num_groups, num_channels, float(eps), affine, dtype,
+        )
+
+    @property
+    def num_groups(self) -> int:
+        return int(self.__object_handle__.num_groups)
+
+    @property
+    def weight(self) -> Parameter | None:
+        return self.__object_handle__.weight
+
+    @property
+    def bias(self) -> Parameter | None:
+        return self.__object_handle__.bias
+
+    @property
+    def eps(self) -> float:
+        return float(self.__object_handle__.epsilon)
+
+    def forward(self, x: Tensor, channel_axis: int = 1, axes: list[int] | None = None) -> Tensor:
+        if axes is None:
+            axes = list(range(2, len(x._expr.struct_info.shape)))
+        return Tensor(_expr=self.__object_handle__.forward(x._expr, channel_axis, axes))
+
+
+# ===========================================================================
+# Conv1D
+# ===========================================================================
+
+@tvm_ffi.register_object("relax.frontend.nn.Conv1D")
 class Conv1D(Module):
-    """
-    Module for conv1d layer.
-    """
+    """1D Convolution. All state lives in C++."""
 
     def __init__(
         self,
@@ -170,53 +349,33 @@ class Conv1D(Module):
         bias: bool = True,
         dtype: str | None = None,
     ) -> None:
-        super().__init__()
-        self.in_channels = in_channels
-        self.out_channels = out_channels
-        self.kernel_size = kernel_size
-        self.stride = stride
-        self.padding = padding
-        self.dilation = dilation
-        self.groups = groups
-
-        self.weight = Parameter(
-            (
-                self.out_channels,
-                int(self.in_channels // self.groups),
-                self.kernel_size,
-            ),
-            dtype,
+        self.__init_handle_by_constructor__(
+            _ffi_api.MakeConv1D,
+            in_channels, out_channels, kernel_size,
+            stride, padding, dilation, groups, bias, dtype,
         )
-        if bias:
-            self.bias = Parameter((self.out_channels,), dtype)
-        else:
-            self.bias = None
+
+    @property
+    def weight(self) -> Parameter:
+        return self.__object_handle__.weight
+
+    @property
+    def bias(self) -> Parameter | None:
+        return self.__object_handle__.bias
 
     def forward(self, x: Tensor) -> Tensor:
-        """
-        Forward method for conv1d layer.
-
-        Parameters
-        ----------
-        x : Tensor
-            The input tensor.
-
-        Returns
-        -------
-        ret : Tensor
-            The output tensor for the conv1d layer.
-        """
-        return op.conv1d(
-            x, self.weight, self.bias, self.stride, self.padding, self.dilation, self.groups
-        )
+        return Tensor(_expr=self.__object_handle__.forward(x._expr))
 
 
+# ===========================================================================
+# Conv2D
+# ===========================================================================
+
+@tvm_ffi.register_object("relax.frontend.nn.Conv2D")
 class Conv2D(Module):
-    """
-    Module for conv2d layer.
-    """
+    """2D Convolution. All state lives in C++."""
 
-    def __init__(  # pylint: disable=too-many-arguments
+    def __init__(
         self,
         in_channels: int,
         out_channels: int,
@@ -228,69 +387,39 @@ class Conv2D(Module):
         bias: bool = True,
         dtype: str | None = None,
         data_layout: str = "NCHW",
-    ):
-        super().__init__()
-        self.in_channels = in_channels
-        self.out_channels = out_channels
-        self.stride = stride
-        self.padding = padding
-        self.dilation = dilation
-        self.groups = groups
-        self.data_layout = data_layout
-
-        # Allow dynamic input channels.
-        if isinstance(self.in_channels, int):
-            in_channels = int(self.in_channels / self.groups)
-        else:
-            in_channels = tir.floordiv(self.in_channels, self.groups)
-
-        # Expand kernel size if provided an integer.
-        if isinstance(kernel_size, int):
-            self.kernel_size = [kernel_size] * 2
-        else:
-            self.kernel_size = kernel_size
-
-        kernel_shape = [self.out_channels, in_channels] + list(self.kernel_size)
-
-        self.weight = Parameter(kernel_shape, dtype)
-
-        if bias:
-            self.bias = Parameter((self.out_channels,), dtype)
-        else:
-            self.bias = None
-
-    def forward(self, x: Tensor) -> Tensor:  # pylint: disable=invalid-name
-        """
-        Forward method for conv2d layer.
-
-        Parameters
-        ----------
-        x : Tensor
-            The input tensor.
-
-        Returns
-        -------
-        ret : Tensor
-            The output tensor for the conv2d layer.
-        """
-        return op.conv2d(
-            x,
-            self.weight,
-            self.bias,
-            self.stride,
-            self.padding,
-            self.dilation,
-            self.groups,
-            self.data_layout,
+    ) -> None:
+        ks = [kernel_size, kernel_size] if isinstance(kernel_size, int) else list(kernel_size)
+        self.__init_handle_by_constructor__(
+            _ffi_api.MakeConv2D,
+            in_channels, out_channels, ks,
+            stride, padding, dilation, groups, bias, dtype, data_layout,
         )
 
+    @property
+    def weight(self) -> Parameter:
+        return self.__object_handle__.weight
 
+    @property
+    def bias(self) -> Parameter | None:
+        return self.__object_handle__.bias
+
+    @property
+    def data_layout(self) -> str:
+        return str(self.__object_handle__.data_layout)
+
+    def forward(self, x: Tensor) -> Tensor:
+        return Tensor(_expr=self.__object_handle__.forward(x._expr))
+
+
+# ===========================================================================
+# Conv3D
+# ===========================================================================
+
+@tvm_ffi.register_object("relax.frontend.nn.Conv3D")
 class Conv3D(Module):
-    """
-    Module for conv3d layer.
-    """
+    """3D Convolution. All state lives in C++."""
 
-    def __init__(  # pylint: disable=too-many-arguments
+    def __init__(
         self,
         in_channels: int,
         out_channels: int,
@@ -302,67 +431,39 @@ class Conv3D(Module):
         bias: bool = True,
         dtype: str | None = None,
         data_layout: str = "NCDHW",
-    ):
-        super().__init__()
-        self.in_channels = in_channels
-        self.out_channels = out_channels
-        self.stride = stride
-        self.padding = padding
-        self.dilation = dilation
-        self.groups = groups
-        self.data_layout = data_layout
-
-        # Allow dynamic input channels.
-        if isinstance(self.in_channels, int):
-            in_channels = int(self.in_channels / self.groups)
-        else:
-            in_channels = tir.floordiv(self.in_channels, self.groups)
-
-        # Expand kernel size if given an integer.
-        if isinstance(kernel_size, int):
-            self.kernel_size = [kernel_size] * 3
-        else:
-            self.kernel_size = kernel_size
-
-        kernel_shape = [self.out_channels, self.in_channels] + list(self.kernel_size)
-
-        self.weight = Parameter(kernel_shape, dtype)
-
-        if bias:
-            self.bias = Parameter((self.out_channels,), dtype)
-        else:
-            self.bias = None
-
-    def forward(self, x: Tensor) -> Tensor:  # pylint: disable=invalid-name
-        """
-        Forward method for conv3d layer.
-
-        Parameters
-        ----------
-        x : Tensor
-            The input tensor.
-
-        Returns
-        -------
-        ret : Tensor
-            The output tensor for the conv3d layer.
-        """
-        return op.conv3d(
-            x,
-            self.weight,
-            self.bias,
-            self.stride,
-            self.padding,
-            self.dilation,
-            self.groups,
-            self.data_layout,
+    ) -> None:
+        ks = [kernel_size] * 3 if isinstance(kernel_size, int) else list(kernel_size)
+        s = stride[0] if isinstance(stride, (list, tuple)) else stride
+        p = padding[0] if isinstance(padding, (list, tuple)) else padding
+        self.__init_handle_by_constructor__(
+            _ffi_api.MakeConv3D,
+            in_channels, out_channels, ks,
+            s, p, dilation, groups, bias, dtype, data_layout,
         )
 
+    @property
+    def weight(self) -> Parameter:
+        return self.__object_handle__.weight
 
+    @property
+    def bias(self) -> Parameter | None:
+        return self.__object_handle__.bias
+
+    @property
+    def data_layout(self) -> str:
+        return str(self.__object_handle__.data_layout)
+
+    def forward(self, x: Tensor) -> Tensor:
+        return Tensor(_expr=self.__object_handle__.forward(x._expr))
+
+
+# ===========================================================================
+# ConvTranspose1D
+# ===========================================================================
+
+@tvm_ffi.register_object("relax.frontend.nn.ConvTranspose1D")
 class ConvTranspose1D(Module):
-    """
-    Module for ConvTranspose1D layer.
-    """
+    """1D Transposed Convolution. All state lives in C++."""
 
     def __init__(
         self,
@@ -377,574 +478,155 @@ class ConvTranspose1D(Module):
         bias: bool = True,
         dtype: str | None = None,
     ) -> None:
-        super().__init__()
-        self.in_channels = in_channels
-        self.out_channels = out_channels
-        self.kernel_size = kernel_size
-        self.stride = stride
-        self.padding = padding
-        self.output_padding = output_padding
-        self.dilation = dilation
-        self.groups = groups
-
-        self.weight = Parameter(
-            (
-                self.in_channels,
-                int(self.out_channels // self.groups),
-                self.kernel_size,
-            ),
-            dtype,
+        self.__init_handle_by_constructor__(
+            _ffi_api.MakeConvTranspose1D,
+            in_channels, out_channels, kernel_size,
+            stride, padding, output_padding, dilation, groups, bias, dtype,
         )
-        if bias:
-            self.bias = Parameter((self.out_channels,), dtype)
-        else:
-            self.bias = None
+
+    @property
+    def weight(self) -> Parameter:
+        return self.__object_handle__.weight
+
+    @property
+    def bias(self) -> Parameter | None:
+        return self.__object_handle__.bias
 
     def forward(self, x: Tensor) -> Tensor:
-        """
-        Forward method for conv transpose 1d layer.
-
-        Parameters
-        ----------
-        x : Tensor
-            The input tensor.
-
-        Returns
-        -------
-        ret : Tensor
-            The output tensor for the conv transpose 1d layer.
-        """
-        return op.conv1d_transpose(
-            x,
-            self.weight,
-            self.bias,
-            self.stride,
-            self.padding,
-            self.output_padding,
-            self.dilation,
-            self.groups,
-        )
+        return Tensor(_expr=self.__object_handle__.forward(x._expr))
 
 
-class LayerNorm(Module):
-    """
-    Module for Layer Normalization
-    """
-
-    def __init__(
-        self,
-        normalized_shape: int,
-        eps: float | None = 1e-5,
-        elementwise_affine: bool = True,
-        dtype: str | None = None,
-    ) -> None:
-        super().__init__()
-        self.normalized_shape = normalized_shape
-        self.eps = eps
-        self.elementwise_affine = elementwise_affine
-        if self.elementwise_affine:
-            self.weight = Parameter((normalized_shape,), dtype=dtype)
-            self.bias = Parameter((normalized_shape,), dtype=dtype)
-        else:
-            self.weight = None
-            self.bias = None
-
-    def forward(self, x: Tensor) -> Tensor:
-        """
-        Forward method for layer normalization layer.
-
-        Parameters
-        ----------
-        x : Tensor
-            The input tensor.
-
-        Returns
-        -------
-        ret : Tensor
-            The output tensor for the layer normalization layer.
-        """
-        return op.layer_norm(
-            x,
-            normalized_shape=self.normalized_shape,
-            weight=self.weight,
-            bias=self.bias,
-            eps=self.eps,
-        )
-
-
-class RMSNorm(Module):
-    """
-    Module for rms norm layer.
-    """
-
-    def __init__(
-        self,
-        hidden_size: int,
-        axes: int | list[int],
-        epsilon: float = 1e-5,
-        bias: bool = True,
-        dtype: str | None = None,
-    ):
-        super().__init__()
-        self.epsilon = epsilon
-        self.axes = axes
-        self.weight = Parameter((hidden_size,), dtype=dtype)
-        if bias:
-            self.bias = Parameter((hidden_size,), dtype=dtype)
-        else:
-            self.bias = None
-
-    def forward(self, x: Tensor):
-        """
-        Forward method for rms norm layer.
-
-        Parameters
-        ----------
-        x : Tensor
-            The input tensor.
-
-        Returns
-        -------
-        ret : Tensor
-            The output tensor for the rms norm layer.
-        """
-        out = op.rms_norm(x, weight=self.weight, axes=self.axes, epsilon=self.epsilon)
-        if self.bias:
-            out = op.add(out, self.bias)
-        return out
-
-
-class GroupNorm(Module):
-    """
-    Module for group norm layer.
-    """
-
-    def __init__(
-        self,
-        num_groups: int,
-        num_channels: int,
-        eps: float = 1e-5,
-        affine: bool = True,
-        dtype: str | None = None,
-    ):
-        super().__init__()
-        self.num_groups = num_groups
-        self.num_channels = num_channels
-        self.eps = eps
-        if affine:
-            self.weight = Parameter((num_channels,), dtype=dtype)
-            self.bias = Parameter((num_channels,), dtype=dtype)
-        else:
-            self.weight = None
-            self.bias = None
-
-    def forward(self, x: Tensor, channel_axis: int = 1, axes: list[int] | None = None):
-        """
-        Forward method for group norm layer.
-
-        Parameters
-        ----------
-        x : Tensor
-            The input tensor.
-        channel_axis : int
-            Channel axis of the input data.
-        axes : Optional[List[int]]
-            Optional list of axes to compute norm over, if not specified,
-            assumes that the first two axes should be left alone.
-
-        Returns
-        -------
-        ret : Tensor
-            The output tensor for the group norm layer.
-        """
-        return op.group_norm(
-            x, self.num_groups, self.weight, self.bias, self.eps, channel_axis, axes
-        )
-
+# ===========================================================================
+# KVCache  (pure Python)
+# ===========================================================================
 
 class KVCache(Effect):
-    """
-    Effect to implement KVCache.
-    """
+    """KVCache effect for attention layers."""
 
-    init_seq_len: int
-    unit_shape: list[int]
-    dtype: str
-    cache: rx.Var | None
-
-    def __init__(
-        self,
-        init_seq_len: int,
-        unit_shape: Sequence[int],
-        dtype: str | None = None,
-    ):
+    def __init__(self, init_seq_len: int, unit_shape: Sequence[int], dtype: str | None = None):
         if dtype is None:
             dtype = get_default_dtype()
-        # Usually the shape is: [init_seq_len, num_heads, head_dim]
-        # and unit_shape = [num_heads, head_dim]
         self.init_seq_len = init_seq_len
         self.unit_shape = [int(i) for i in unit_shape]
         self.dtype = dtype
+        self.cache = None
 
-    def emit_init(self, name_hint: str, bb: rx.BlockBuilder):  # pylint: disable=arguments-renamed
-        """
-        Emit the initialization of the KVCache effect.
-
-        Parameters
-        ----------
-        name_hint : str
-            The name hint of the initialization binding Var.
-
-        bb : relax.BlockBuilder
-            The relax BlockBuilder to emit.
-        """
+    def emit_init(self, name_hint, bb):
         init_shape = rx.ShapeExpr([self.init_seq_len] + self.unit_shape)
-        return [
-            bb.emit(
-                rx.op.call_pure_packed(
-                    "vm.builtin.attention_kv_cache_create",
-                    rx.op.zeros(init_shape, self.dtype),
-                    init_shape,
-                    rx.PrimValue(0),
-                    sinfo_args=rx.ObjectStructInfo(),
-                ),
-                name_hint=name_hint,
-            )
-        ]
+        return [bb.emit(rx.op.call_pure_packed(
+            "vm.builtin.attention_kv_cache_create",
+            rx.op.zeros(init_shape, self.dtype), init_shape, rx.PrimValue(0),
+            sinfo_args=rx.ObjectStructInfo()), name_hint=name_hint)]
 
-    def create(self, name_hint: str) -> list[rx.Var]:
-        """
-        Create the implicit inputs to a relax.Function that represents the KVCache effect.
+    def create(self, name_hint):
+        self.cache = rx.Var(name_hint, struct_info=rx.ObjectStructInfo())
+        return [self.cache]
 
-        Parameters
-        ----------
-        name_hint : str
-            The name hint of the relax.Var.
-
-        Returns
-        -------
-        ret : List[relax.Var]
-            The relax.Var for KVCache.
-        """
-        cache = rx.Var(name_hint, struct_info=rx.ObjectStructInfo())
-        return [cache]
-
-    def set_state(self, state_vars: list[rx.Var]) -> None:
+    def set_state(self, state_vars):
         (self.cache,) = state_vars
 
-    def finalize(self) -> list[rx.Var]:
-        """
-        Finalize the KVCache effect as the implicit return value of a relax.Function.
-
-        Returns
-        -------
-        ret : List[rx.Var]
-            The output relax.Var as KVCache.
-        """
-        result = self.cache
-        self.cache = None
+    def finalize(self):
+        result, self.cache = self.cache, None
         return [result]
 
-    def to(self, dtype: str | None = None) -> None:
-        """
-        Convert the KVCache effect to specific dtype.
-
-        Parameters
-        ----------
-        dtype : Optional[str]
-            The target data type to convert.
-        """
+    def to(self, dtype=None):
         if dtype is not None:
             self.dtype = dtype
 
-    def view(self, seq_len: tir.Var) -> Tensor:
-        """
-        View the last elements in KVCache.
-
-        Parameters
-        ----------
-        seq_len : tir.Var
-            The number of last elements to view.
-
-        Returns
-        -------
-        ret : Tensor
-            The last tensor to view.
-        """
+    def view(self, seq_len) -> Tensor:
         shape = rx.ShapeExpr([seq_len] + self.unit_shape)
-        return Tensor(
-            _expr=rx.BlockBuilder.current().emit(
-                rx.op.call_pure_packed(
-                    "vm.builtin.attention_kv_cache_view",
-                    self.cache,
-                    shape,
-                    sinfo_args=rx.TensorStructInfo(shape, self.dtype),
-                )
-            )
-        )
+        return Tensor(_expr=rx.BlockBuilder.current().emit(
+            rx.op.call_pure_packed("vm.builtin.attention_kv_cache_view",
+                                   self.cache, shape,
+                                   sinfo_args=rx.TensorStructInfo(shape, self.dtype))))
 
     def append(self, new_element: Tensor) -> None:
-        """
-        Append a new element in KVCache.
-
-        Parameters
-        ----------
-        new_element : Tensor
-            The new tensor to append.
-        """
         if new_element.dtype != self.dtype:
-            raise TypeError(
-                f'KVCache has been set to use dtype "{self.dtype}", but got "{new_element.dtype}"'
-            )
+            raise TypeError(f'KVCache dtype "{self.dtype}" != "{new_element.dtype}"')
         self.cache = rx.BlockBuilder.current().emit(
-            rx.op.call_inplace_packed(
-                "vm.builtin.attention_kv_cache_append",
-                self.cache,
-                new_element._expr,
-                inplace_indices=[0],
-                sinfo_args=rx.ObjectStructInfo(),
-            )
-        )
+            rx.op.call_inplace_packed("vm.builtin.attention_kv_cache_append",
+                                      self.cache, new_element._expr,
+                                      inplace_indices=[0],
+                                      sinfo_args=rx.ObjectStructInfo()))
 
 
-class Embedding(Module):
-    """
-    Module for embedding layer.
-    """
-
-    def __init__(
-        self,
-        num: int | str | tir.PrimExpr,
-        dim: int | str | tir.PrimExpr,
-        dtype: str | None = None,
-    ):
-        self.num = num
-        self.dim = dim
-        self.weight = Parameter((num, dim), dtype=dtype)
-
-    def forward(self, x: Tensor):
-        """
-        Forward method for embedding layer.
-
-        Parameters
-        ----------
-        x : Tensor
-            The input tensor.
-
-        Returns
-        -------
-        ret : Tensor
-            The output tensor for the embedding layer.
-        """
-        if x.ndim == 1:
-            return op.take(self.weight, x, axis=0)
-        return op.reshape(
-            op.take(
-                self.weight,
-                op.reshape(x, shape=[-1]),
-                axis=0,
-            ),
-            shape=[*x.shape, self.weight.shape[1]],
-        )
-
+# ===========================================================================
+# TimestepEmbedding  (pure Python)
+# ===========================================================================
 
 class TimestepEmbedding(Module):
-    """
-    Module for HF TimestepEmbedding layer.
-    """
+    """HF TimestepEmbedding layer."""
 
-    def __init__(
-        self,
-        in_channels: int,
-        time_embed_dim: int,
-        act_fn: str = "silu",
-        out_dim: int | None = None,
-        post_act_fn: str | None = None,
-        cond_proj_dim: int | None = None,
-    ):
+    def __init__(self, in_channels, time_embed_dim, act_fn="silu",
+                 out_dim=None, post_act_fn=None, cond_proj_dim=None):
         self.linear_1 = Linear(in_channels, time_embed_dim)
-
-        if cond_proj_dim is not None:
-            self.cond_proj = Linear(cond_proj_dim, in_channels, bias=False)
-        else:
-            self.cond_proj = None
-
-        assert act_fn == "silu", "Only SiLU activations are supported."
+        self.cond_proj = Linear(cond_proj_dim, in_channels, bias=False) \
+            if cond_proj_dim is not None else None
+        assert act_fn == "silu"
         self.act = SiLU()
+        self.linear_2 = Linear(time_embed_dim, out_dim if out_dim else time_embed_dim)
+        self.post_act = SiLU() if post_act_fn == "silu" else None
 
-        if out_dim is not None:
-            time_embed_dim_out = out_dim
-        else:
-            time_embed_dim_out = time_embed_dim
-
-        self.linear_2 = Linear(time_embed_dim, time_embed_dim_out)
-
-        if post_act_fn is None:
-            self.post_act = None
-        else:
-            assert self.post_act == "silu", "Only SiLU post-activation supported."
-            self.post_act = SiLU()
-
-    def forward(self, sample: Tensor, condition: Tensor | None = None):
-        """
-        Forward method for TimestepEmbedding layer.
-
-        Parameters
-        ----------
-        sample : Tensor
-            The input timestep that should be looked up.
-        condition : Optional[Tensor]
-            Optional additional projection matrix.
-
-        Returns
-        -------
-        ret : Tensor
-            The resulting embedding lookup for the input sample.
-        """
+    def forward(self, sample: Tensor, condition: Tensor | None = None) -> Tensor:
         if condition is not None:
             sample = sample + self.cond_proj(condition)
-        sample = self.linear_1(sample)
-
-        if self.act is not None:
-            sample = self.act(sample)
-
+        sample = self.act(self.linear_1(sample))
         sample = self.linear_2(sample)
-
         if self.post_act is not None:
             sample = self.post_act(sample)
         return sample
 
 
-class Timesteps(Module):
-    """
-    Module for HF timesteps layer.
-    """
+# ===========================================================================
+# Timesteps  (pure Python)
+# ===========================================================================
 
-    def __init__(
-        self, num_channels: int, flip_sin_to_cos: bool = False, downscale_freq_shift: float = 1
-    ):
+class Timesteps(Module):
+    """HF Timesteps layer."""
+
+    def __init__(self, num_channels, flip_sin_to_cos=False, downscale_freq_shift=1):
         self.num_channels = num_channels
         self.flip_sin_to_cos = flip_sin_to_cos
         self.downscale_freq_shift = downscale_freq_shift
 
-    def forward(self, x: Tensor):
+    def forward(self, x: Tensor) -> Tensor:
         return op.get_timestep_embedding(
-            x,
-            embedding_dim=self.num_channels,
+            x, embedding_dim=self.num_channels,
             flip_sin_to_cos=self.flip_sin_to_cos,
-            downscale_freq_shift=self.downscale_freq_shift,
-        )
+            downscale_freq_shift=self.downscale_freq_shift)
 
+
+# ===========================================================================
+# Attention  (pure Python)
+# ===========================================================================
 
 class Attention(Module):
-    """
-    A cross attention layer.
+    """Cross-attention layer."""
 
-    Parameters
-    ----------
-        query_dim : int
-            The number of channels in the query.
-        cross_attention_dim : Optional[int]
-            The number of channels in the encoder_hidden_states.
-            If not given, defaults to `query_dim`.
-        heads : int
-            The number of heads to use for multi-head attention.
-        dim_head : int
-            The number of channels in each head.
-        bias : bool
-            Set to `True` for the query, key, and value linear layers to contain a bias parameter.
-        norm_num_groups : Optional[int]
-            When set, group norm is applied to the input using this number of groups.
-        out_bias : bool
-            Set to `True` to apply a bias to the output linear layer.
-        scale_qk : bool
-            Whether to apply scaling to query and key tensors.
-    """
-
-    def __init__(
-        self,
-        query_dim: int,
-        cross_attention_dim: int | None = None,
-        heads: int = 8,
-        dim_head: int = 64,
-        bias: bool = False,
-        norm_num_groups: int | None = None,
-        out_bias: bool = True,
-        scale_qk: bool = True,
-    ):
-        self.query_dim = query_dim
-        self.cross_attention_dim = cross_attention_dim if cross_attention_dim else query_dim
+    def __init__(self, query_dim, cross_attention_dim=None, heads=8, dim_head=64,
+                 bias=False, norm_num_groups=None, out_bias=True, scale_qk=True):
         self.heads = heads
-        self.dim_head = dim_head
-        self.bias = bias
-        self.norm_num_groups = norm_num_groups
-        self.out_bias = out_bias
-        self.scale_qk = scale_qk
-
-        self.scale = dim_head**-0.5 if self.scale_qk else 1.0
         self.inner_dim = dim_head * heads
+        cross_dim = cross_attention_dim if cross_attention_dim else query_dim
+        self.to_q = Linear(query_dim, self.inner_dim, bias=bias)
+        self.to_k = Linear(cross_dim, self.inner_dim, bias=bias)
+        self.to_v = Linear(cross_dim, self.inner_dim, bias=bias)
+        self.group_norm = (
+            GroupNorm(num_channels=query_dim, num_groups=norm_num_groups, affine=True)
+            if norm_num_groups is not None else None)
+        self.to_out = ModuleList([Linear(self.inner_dim, query_dim, bias=out_bias)])
 
-        self.to_q = Linear(self.query_dim, self.inner_dim, bias=self.bias)
-        self.to_k = Linear(self.cross_attention_dim, self.inner_dim, bias=self.bias)
-        self.to_v = Linear(self.cross_attention_dim, self.inner_dim, bias=self.bias)
-
-        if self.norm_num_groups is not None:
-            self.group_norm = GroupNorm(
-                num_channels=self.query_dim, num_groups=self.norm_num_groups, affine=True
-            )
-        else:
-            self.group_norm = None
-
-        self.to_out = ModuleList([Linear(self.inner_dim, self.query_dim, bias=self.out_bias)])
-
-    def forward(
-        self,
-        hidden_states: Tensor,
-        encoder_hidden_states: Tensor | None = None,
-        attention_mask: Tensor | None = None,
-        **cross_attention_kwargs,
-    ):
-        """
-        Forward method for Attention layer.
-
-        Parameters
-        ----------
-        hidden_states : Tensor
-            The input sample tensor.
-        encoder_hidden_states : Optional[Tensor]
-            Previous hidden step hidden states.
-        attention_mask : Optional[Tensor]
-            Mask tensor for attention, currently not supported.
-
-        Returns
-        -------
-        ret : Tensor
-            The output tensor for the embedding layer.
-        """
-        # This implementation assumes use of torch 2.0 scaled_dot_product attention.
-        assert attention_mask is None, "Attention mask not yet supported."
-
+    def forward(self, hidden_states, encoder_hidden_states=None, attention_mask=None, **kw):
+        assert attention_mask is None
         if self.group_norm is not None:
             hidden_states = self.group_norm(hidden_states, channel_axis=2, axes=[1])
-
-        query = self.to_q(hidden_states)
-        if encoder_hidden_states is None:
-            encoder_hidden_states = hidden_states
-
-        key = self.to_k(encoder_hidden_states)
-        value = self.to_v(encoder_hidden_states)
+        q = self.to_q(hidden_states)
+        enc = encoder_hidden_states if encoder_hidden_states is not None else hidden_states
+        k, v = self.to_k(enc), self.to_v(enc)
         head_dim = int(self.inner_dim // self.heads)
-
-        query = op.reshape(query, [0, -1, self.heads, head_dim])
-        key = op.reshape(key, [0, -1, self.heads, head_dim])
-        value = op.reshape(value, [0, -1, self.heads, head_dim])
-
-        hidden_states = op.scaled_dot_product_attention(query, key, value, is_causal=False)
-
-        # Return to proper shape.
-        hidden_states = op.reshape(hidden_states, (0, -1, self.heads * head_dim))
-
-        # Linear projection
-        hidden_states = self.to_out[0](hidden_states)
-
-        return hidden_states
+        q = op.reshape(q, [0, -1, self.heads, head_dim])
+        k = op.reshape(k, [0, -1, self.heads, head_dim])
+        v = op.reshape(v, [0, -1, self.heads, head_dim])
+        out = op.scaled_dot_product_attention(q, k, v, is_causal=False)
+        out = op.reshape(out, (0, -1, self.heads * head_dim))
+        return self.to_out[0](out)

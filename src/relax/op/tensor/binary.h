@@ -1,4 +1,4 @@
-/*
+﻿/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -99,7 +99,7 @@ Expr equal(Expr x1, Expr x2);
 Expr greater(Expr x1, Expr x2);
 
 /*! \brief Broadcasted element-wise test for (lhs >= rhs). */
-Expr greter_equal(Expr x1, Expr x2);
+Expr greater_equal(Expr x1, Expr x2);
 
 /*! \brief Broadcasted element-wise test for (lhs < rhs). */
 Expr less(Expr x1, Expr x2);

@@ -297,6 +297,7 @@ tvm_file_glob(GLOB_RECURSE COMPILER_SRCS
     src/relax/distributed/transform/*.cc
     src/relax/op/distributed/*.cc
     src/relax/testing/*.cc
+    src/relax/frontend/nn/*.cc
     src/dlight/*.cc
     )
 
