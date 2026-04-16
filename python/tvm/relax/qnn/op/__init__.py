@@ -18,6 +18,7 @@
 
 from .batch_matmul import *
 from .binary import *
+from .linear_algebra import *
 from .manipulate import *
 from .nn import *
 from .requantize import *

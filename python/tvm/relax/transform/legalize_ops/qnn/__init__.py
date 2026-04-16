@@ -16,4 +16,4 @@
 # under the License.
 """Legalize high-level QNN operators calls in Relax functions to call_tir."""
 
-from . import batch_matmul, binary, manipulate, nn, requantize, utils
+from . import batch_matmul, binary, linear_algebra, manipulate, nn, requantize, utils

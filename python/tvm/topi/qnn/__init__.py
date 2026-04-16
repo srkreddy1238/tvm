@@ -22,7 +22,7 @@
 
 from .batch_matmul import *
 from .binary import *
+from .linear_algebra import *
 from .mainpulate import *
 from .nn import *
 from .requantize import *
-from .utils import *
