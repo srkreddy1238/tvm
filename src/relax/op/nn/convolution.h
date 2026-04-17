@@ -95,6 +95,18 @@ Expr conv2d_transpose(Expr data, Expr weight, ffi::Array<int64_t> strides,
                       ffi::String kernel_layout, ffi::Optional<ffi::String> out_layout,
                       ffi::Optional<DataType> out_dtype);
 
+StructInfo InferStructInfoConv2d(const Call& call, const BlockBuilder& ctx);
+
+InferLayoutOutput InferLayoutConv2d(
+    const Call& call, const ffi::Map<ffi::String, ffi::Array<ffi::String>>& desired_layouts,
+    const VarLayoutMap& var_layout_map);
+
+StructInfo InferStructInfoConv2dTranspose(const Call& call, const BlockBuilder& ctx);
+
+InferLayoutOutput InferLayoutConv2dTranspose(
+    const Call& call, const ffi::Map<ffi::String, ffi::Array<ffi::String>>& desired_layouts,
+    const VarLayoutMap& var_layout_map);
+
 }  // namespace relax
 }  // namespace tvm
 

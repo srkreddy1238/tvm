@@ -20,7 +20,7 @@
 
 import tvm
 from tvm import te
-from tvm.topi.nn import conv
+from tvm.topi.nn import conv, conv2d_transpose_nchw, conv2d_transpose_nhwc
 
 from ..utils import get_const_tuple
 from .utils import is_scalar_tensor, subtract_zero_point
@@ -56,7 +56,7 @@ def conv2d(  # Conv2d inputs
     # Handling Default Case
     if len(data_layout) == 4 and len(kernel_layout) == 4:
         out = conv(
-            data, weight, strides, padding, dilation, groups, data_layout, kernel_layout, out_dtype
+            data, weight, strides, padding, dilation, groups, data_layout, kernel_layout, "int32"
         )
     else:
         raise ValueError(
@@ -88,5 +88,72 @@ def conv2d(  # Conv2d inputs
                 ).astype(out_dtype),
                 name="kernel_scale",
             )
+
+    return out
+
+
+def conv2d_transpose(
+    data,
+    weight,
+    input_zero_point,
+    kernel_zero_point,
+    input_scale,
+    kernel_scale,
+    strides,
+    padding,
+    output_padding,
+    dilation,
+    groups: int,
+    out_dtype: str,
+    data_layout: str,
+    kernel_layout: str,
+):
+    """
+    TOPI compute for qnn.conv2d_transpose.
+
+    """
+
+    weight = subtract_zero_point(weight, kernel_zero_point, "weight_zp")
+    data = subtract_zero_point(data, input_zero_point, "data_zp")
+
+    strides = get_const_tuple(strides)
+    padding = get_const_tuple(padding)
+    output_padding = get_const_tuple(output_padding)
+    dilation = get_const_tuple(dilation)
+
+    if data_layout == "NCHW" and kernel_layout == "IOHW":
+        out = conv2d_transpose_nchw(
+            data,
+            weight,
+            strides,
+            padding,
+            out_dtype,
+            output_padding,
+        )
+    elif data_layout == "NHWC" and kernel_layout == "OHWI":
+        out = conv2d_transpose_nhwc(
+            data,
+            weight,
+            strides,
+            padding,
+            out_dtype,
+            output_padding,
+        )
+    else:
+        raise ValueError(
+            f"qnn_conv2d_transpose: cannot handle layouts "
+            f"data_layout={data_layout!r}, kernel_layout={kernel_layout!r}. "
+            f"Only 4-D layouts (e.g. NCHW / IOHW ; NHWC / OIHW) are currently supported."
+        )
+
+    if input_scale is not None and kernel_scale is not None:
+        out = te.compute(
+            out.shape,
+            lambda *i: tvm.tir.multiply(
+                out(*i),
+                tvm.tir.multiply(input_scale, kernel_scale),
+            ).astype(out_dtype),
+            name="scale",
+        )
 
     return out

@@ -20,6 +20,7 @@
 import logging
 
 from tvm import s_tir, tir, topi
+from tvm.topi.qnn.nn import conv2d_transpose as _topi_qnn_conv2d_transpose
 
 from ....block_builder import BlockBuilder
 from ....expr import Call, Expr
@@ -68,4 +69,35 @@ def _qnn_conv2d(bb: BlockBuilder, call: Call) -> Expr:
         data_layout=call.attrs.data_layout,
         kernel_layout=call.attrs.kernel_layout,
         primfunc_name_hint="qnn_conv2d",
+    )
+
+
+@register_legalize("relax.qnn.conv2d_transpose")
+def _qnn_conv2d_transpose_legalize(bb: BlockBuilder, call: Call) -> Expr:
+    """
+    Lower relax.qnn.conv2d_transpose to a TOPI TE compute call.
+    """
+    attrs = call.attrs
+
+    has_scale = len(call.args) == 6
+    data_scale = call.args[4] if has_scale else None
+    weight_scale = call.args[5] if has_scale else None
+
+    return bb.call_te(
+        _topi_qnn_conv2d_transpose,
+        call.args[0],  # data
+        call.args[1],  # weight
+        call.args[2],  # input_zero_point
+        call.args[3],  # kernel_zero_point
+        data_scale,
+        weight_scale,
+        attrs.strides,
+        attrs.padding,
+        attrs.output_padding,
+        attrs.dilation,
+        attrs.groups,
+        attrs.out_dtype,
+        attrs.data_layout,
+        attrs.kernel_layout,
+        primfunc_name_hint="qnn_conv2d_transpose",
     )

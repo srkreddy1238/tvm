@@ -244,3 +244,97 @@ def group_conv2d_transpose_nchw(data, kernel, stride, padding, out_dtype, output
         ),
         tag="group_conv2d_transpose_nchw",
     )
+
+
+def conv2d_transpose_nhwc(Input, Filter, strides, padding, out_dtype, output_padding):
+    """Transposed 2D convolution nhwc forward operator.
+    Parameters
+    ----------
+    Input : tvm.te.Tensor
+        4-D with shape [batch, in_height, in_width, in_channel]
+    Filter : tvm.te.Tensor
+        4-D with shape [in_channel, out_channel, filter_height, filter_width]  (IOHW)
+        -- or pass already in OHWI; see preprocess below
+    strides : tuple of two ints
+        The spatial stride along height and width
+    padding : int or str
+        Padding size, or ['VALID', 'SAME']
+    out_dtype : str
+        The output data type. This is used for mixed precision.
+    output_padding : tuple of ints
+        Used to get the right output shape for gradients
+    Returns
+    -------
+    Output : tvm.te.Tensor
+        4-D with shape [batch, out_height, out_width, out_channel]
+    """
+    return declaration_conv2d_transpose_nhwc_impl(
+        Input, Filter, strides, padding, out_dtype, output_padding=output_padding
+    )
+
+
+def conv2d_transpose_nhwc_preprocess(data, kernel, strides, padding, out_dtype, output_padding):
+    """Preprocess data (NHWC) and kernel (OHWI) so the compute pattern
+    of conv2d_transpose matches a plain conv2d in NHWC layout.
+
+    Kernel is assumed to arrive in OHWI layout:
+        kernel[out_c, filter_h, filter_w, in_c]
+    """
+    batch, in_h, in_w, in_c = data.shape
+    out_c, filter_h, filter_w, _ = kernel.shape  # OHWI
+    stride_h, stride_w = strides
+    opad_h, opad_w = output_padding
+    assert opad_h < stride_h and opad_w < stride_w
+
+    data_dilate = dilate(data, [1, stride_h, stride_w, 1], name="data_dilate")
+
+    fpad_top, fpad_left, fpad_bottom, fpad_right = get_pad_tuple(padding, (filter_h, filter_w))
+    bpad_top = filter_h - 1 - fpad_top
+    bpad_bottom = filter_h - 1 - fpad_bottom + opad_h
+    bpad_left = filter_w - 1 - fpad_left
+    bpad_right = filter_w - 1 - fpad_right + opad_w
+
+    data_pad = pad(
+        data_dilate,
+        [0, bpad_top, bpad_left, 0],
+        [0, bpad_bottom, bpad_right, 0],
+        name="data_pad",
+    )
+
+    kernel_transform = te.compute(
+        (out_c, filter_h, filter_w, in_c),
+        lambda o, h, w, i: kernel[o, filter_h - 1 - h, filter_w - 1 - w, i],
+        name="kernel_transform",
+    )
+    return data_pad, kernel_transform
+
+
+def declaration_conv2d_transpose_nhwc_impl(
+    data, kernel, strides, padding, out_dtype, output_padding
+):
+    """Implementation of conv2d transpose in NHWC layout."""
+    data_pad, kernel_transform = conv2d_transpose_nhwc_preprocess(
+        data, kernel, strides, padding, out_dtype, output_padding
+    )
+
+    batch, in_h, in_w, in_c = data_pad.shape
+    out_c, filter_h, filter_w, _ = kernel_transform.shape
+
+    out_c = simplify(out_c)
+    out_h = simplify(in_h - filter_h + 1)
+    out_w = simplify(in_w - filter_w + 1)
+
+    dc = te.reduce_axis((0, in_c), name="dc")
+    dh = te.reduce_axis((0, filter_h), name="dh")
+    dw = te.reduce_axis((0, filter_w), name="dw")
+
+    Output = te.compute(
+        (batch, out_h, out_w, out_c),
+        lambda b, h, w, c: te.sum(
+            data_pad[b, h + dh, w + dw, dc].astype(out_dtype)
+            * kernel_transform[c, dh, dw, dc].astype(out_dtype),
+            axis=[dc, dh, dw],
+        ),
+        tag="conv2d_transpose_nhwc",
+    )
+    return Output

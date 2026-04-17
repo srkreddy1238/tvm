@@ -138,3 +138,67 @@ def conv2d(
         out_layout,
         out_dtype,
     )
+
+
+def conv2d_transpose(
+    data: Expr,
+    weight: Expr,
+    data_zero_point: Expr,
+    weight_zero_point: Expr,
+    data_scale: Expr | None,
+    weight_scale: Expr | None,
+    strides: int | tuple[int, int] = (1, 1),
+    padding: int | tuple[int, ...] = (0, 0),
+    output_padding: int | tuple[int, int] = (0, 0),
+    dilation: int | tuple[int, int] = (1, 1),
+    groups: int = 1,
+    data_layout: str = "NCHW",
+    kernel_layout: str = "IOHW",
+    out_layout: str | None = None,
+    out_dtype: str | DataType | None = None,
+) -> Expr:
+    """
+    2D Quantized transposed convolution
+
+    This is the quantized counterpart of `relax.op.nn.conv2d_transpose`.
+    Zero-points are subtracted from data and weight before the transposed
+    convolution is performed. When ``data_scale`` and ``weight_scale`` are
+    provided, the output is additionally multiplied by their product.
+
+    In the default layout (``data_layout="NCHW"``, ``kernel_layout="IOHW"``):
+
+    * ``data``   shape: ``(N, in_channels, H, W)``
+    * ``weight`` shape: ``(in_channels, out_channels, kH, kW)``
+    * ``output`` shape: ``(N, out_channels * groups, out_H, out_W)``
+
+    where::
+
+        out_H = (H - 1) * strides[0] + kH - 2 * padding[0] + output_padding[0]
+        out_W = (W - 1) * strides[1] + kW - 2 * padding[1] + output_padding[1]
+    """
+    if isinstance(strides, int):
+        strides = (strides, strides)
+    if isinstance(dilation, int):
+        dilation = (dilation, dilation)
+    if isinstance(padding, int):
+        padding = (padding, padding, padding, padding)
+    if isinstance(output_padding, int):
+        output_padding = (output_padding, output_padding)
+
+    return _ffi_api.conv2d_transpose(  # type: ignore
+        data,
+        weight,
+        data_zero_point,
+        weight_zero_point,
+        data_scale,
+        weight_scale,
+        strides,
+        padding,
+        output_padding,
+        dilation,
+        groups,
+        data_layout,
+        kernel_layout,
+        out_layout,
+        out_dtype,
+    )
