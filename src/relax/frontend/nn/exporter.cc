@@ -144,15 +144,21 @@ static Expr UnwrapReturn(const ffi::Any& val) {
 //
 // Builds and adds to bb the function:
 //   @R.function
-//   def _initialize_effect() -> R.Tuple(R.Object):
+//   def _initialize_effect() -> R.Tuple(R.Object, ...):
 //       with R.dataflow():
-//           _io  = R.null_value()
-//           lv   = (_io,)
+//           effect1 = effect1.emit_init("effect1", bb)
+//           effect2 = effect2.emit_init("effect2", bb)
+//           ...
+//           lv   = (effect1, effect2, ...)
 //           gv   = lv          # output
 //       return gv
+//
+// Calls emit_init() on each Effect in named_effects.
 // ===========================================================================
 
-static void EmitInitializeEffect(BlockBuilder& bb) {
+static void EmitInitializeEffect(BlockBuilder& bb,
+                                 const ffi::Map<ffi::String, runtime::ObjectRef>& named_effects,
+                                 bool debug) {
   ffi::Array<Var> params;  // no parameters
 
   bb->BeginScope(params);
@@ -161,10 +167,58 @@ static void EmitInitializeEffect(BlockBuilder& bb) {
   // Set current BB so that relax ops called from here can use BlockBuilder::Current()
   BBScope bb_scope(bb);
 
-  static const Op& null_value_op = Op::Get("relax.null_value");
-  Var io = bb->Emit(Call(null_value_op, {}, {}, {}), "_io");
-  Var lv = bb->Emit(relax::Tuple({io}), "lv");
-  // Expected: gv = lv  (Tuple(Object), not Tuple(Tuple(Object)))
+  ffi::Array<Expr> effect_vars;
+
+  // If debug=true, always emit _io = null_value() first
+  if (debug) {
+    static const Op& null_value_op = Op::Get("relax.null_value");
+    Var io = bb->Emit(Call(null_value_op, {}, {}, {}), "_io");
+    effect_vars.push_back(io);
+  }
+
+  // Then call emit_init() on each Effect in named_effects
+  for (const auto& [name, effect_obj] : named_effects) {
+    // Call effect._cpp_emit_init(name, bb) via the registered method.
+    // Methods registered with .def("_cpp_emit_init", &Class::Method) are
+    // callable via ffi::Function::GetMethod.
+    std::string type_key = effect_obj->GetTypeKey();
+
+    // Get the method function from the type's method table
+    auto type_index = effect_obj->type_index();
+    const TVMFFITypeInfo* type_info = TVMFFIGetTypeInfo(type_index);
+    if (!type_info || !type_info->methods) {
+      TVM_FFI_THROW(TypeError) << "Effect object has no type info: " << type_key;
+      TVM_FFI_UNREACHABLE();
+    }
+
+    // Find the "_cpp_emit_init" method in the methods array
+    const TVMFFIMethodInfo* method_info = nullptr;
+    for (int32_t i = 0; i < type_info->num_methods; ++i) {
+      const TVMFFIMethodInfo* m = &type_info->methods[i];
+      if (std::string(m->name.data, m->name.size) == "_cpp_emit_init") {
+        method_info = m;
+        break;
+      }
+    }
+
+    if (!method_info) {
+      TVM_FFI_THROW(TypeError) << "Effect object has no _cpp_emit_init method: " << type_key;
+      TVM_FFI_UNREACHABLE();
+    }
+
+    // Call the method: _cpp_emit_init(effect_obj, name, bb) -> Array<Var>
+    // method_info->method is a TVMFFIAny containing the ffi::Function
+    ffi::AnyView method_any = ffi::AnyView::CopyFromTVMFFIAny(method_info->method);
+    auto method_func_opt = method_any.try_cast<ffi::Function>();
+    TVM_FFI_ICHECK(method_func_opt.has_value()) << "Method is not an ffi::Function";
+    ffi::Function method_func = method_func_opt.value();
+    ffi::Any result = method_func(effect_obj, ffi::Any(name), ffi::Any(bb));
+    auto vars_opt = result.try_cast<ffi::Array<Var>>();
+    TVM_FFI_ICHECK(vars_opt.has_value()) << "Effect._cpp_emit_init must return Array<Var>";
+    for (const Var& v : vars_opt.value()) effect_vars.push_back(v);
+  }
+
+  Var lv = bb->Emit(relax::Tuple(effect_vars), "lv");
   Var gv = bb->EmitOutput(lv, "gv");
 
   BindingBlock df_block = bb->EndBlock();
@@ -234,7 +288,8 @@ static ffi::Any BuildSpecTupleInput(const SpecTupleNode* st, Var tuple_var, Bloc
 }
 
 static void EmitMethod(BlockBuilder& bb, const ffi::String& method_name, const MethodSpecNode* ms,
-                       const ffi::Map<ffi::String, NNParameter>& named_params, bool debug) {
+                       const ffi::Map<ffi::String, NNParameter>& named_params,
+                       const ffi::Map<ffi::String, runtime::ObjectRef>& named_effects, bool debug) {
   // ---- 1. Build symbolic-shape deduplication map -------------------------
   std::unordered_map<std::string, tir::Var> str2var;
 
@@ -286,11 +341,69 @@ static void EmitMethod(BlockBuilder& bb, const ffi::String& method_name, const M
     }
   }
 
-  // ---- 3. Build param Vars -----------------------------------------------
+  // ---- 4. Build effect Vars and call create/set_state -------------------
+  // For each Effect in named_effects:
+  //   1. Call effect._cpp_create(name) -> Array<Var> (effect state vars)
+  //   2. Add those Vars to func_params (if effect_mode != "none")
+  //   3. Call effect._cpp_set_state(state_vars) to initialize the Effect
+  //
+  // Special case: if debug=true and effect_mode != "none", ALWAYS add a
+  // legacy _io effect var as the FIRST effect (for backward compatibility),
+  // followed by any Effects from named_effects.
+  std::string effect_mode_str = std::string(ms->effect_mode);
+  std::vector<std::pair<ffi::String, runtime::ObjectRef>> effects_vec;
+  std::vector<ffi::Array<Var>> effect_state_vars;  // per-effect state vars
+  ffi::Array<Var> all_effect_vars;                 // flattened list for func params
+  bool use_legacy_io = (effect_mode_str != "none") && debug;
+
+  if (use_legacy_io) {
+    // Always add legacy _io as first effect when debug=true
+    Var io_var("_io", ObjectStructInfo());
+    all_effect_vars.push_back(io_var);
+  }
+
+  // Then add Effects from named_effects (if any)
+  for (const auto& [name, effect_obj] : named_effects) {
+    effects_vec.emplace_back(name, effect_obj);
+
+    // Call effect._cpp_create(name) -> Array<Var>
+    auto type_index = effect_obj->type_index();
+    const TVMFFITypeInfo* type_info = TVMFFIGetTypeInfo(type_index);
+    if (!type_info || !type_info->methods) {
+      TVM_FFI_THROW(TypeError) << "Effect has no type info: " << effect_obj->GetTypeKey();
+      TVM_FFI_UNREACHABLE();
+    }
+
+    // Find _cpp_create method
+    const TVMFFIMethodInfo* create_method = nullptr;
+    for (int32_t i = 0; i < type_info->num_methods; ++i) {
+      const TVMFFIMethodInfo* m = &type_info->methods[i];
+      if (std::string(m->name.data, m->name.size) == "_cpp_create") {
+        create_method = m;
+        break;
+      }
+    }
+    if (!create_method) {
+      TVM_FFI_THROW(TypeError) << "Effect has no _cpp_create method: " << effect_obj->GetTypeKey();
+      TVM_FFI_UNREACHABLE();
+    }
+
+    ffi::AnyView create_any = ffi::AnyView::CopyFromTVMFFIAny(create_method->method);
+    auto create_func_opt = create_any.try_cast<ffi::Function>();
+    TVM_FFI_ICHECK(create_func_opt.has_value());
+    ffi::Function create_func = create_func_opt.value();
+    ffi::Any create_result = create_func(effect_obj, ffi::Any(name));
+    auto state_vars_opt = create_result.try_cast<ffi::Array<Var>>();
+    TVM_FFI_ICHECK(state_vars_opt.has_value()) << "Effect._cpp_create must return Array<Var>";
+    ffi::Array<Var> state_vars = state_vars_opt.value();
+    effect_state_vars.push_back(state_vars);
+    for (const Var& v : state_vars) all_effect_vars.push_back(v);
+  }
+
+  // ---- 5. Build param Vars -----------------------------------------------
   // param_mode: "plain" = individual params, "packed" = single R.Tuple param,
   //             "none"  = no params appended
   std::string param_mode_str = std::string(ms->param_mode);
-  std::string effect_mode_str = std::string(ms->effect_mode);
 
   std::vector<std::pair<ffi::String, NNParameter>> params_vec;
   for (const auto& [name, param] : named_params) params_vec.emplace_back(name, param);
@@ -357,33 +470,61 @@ static void EmitMethod(BlockBuilder& bb, const ffi::String& method_name, const M
   }
   // param_mode == "none": no params appended, param->expr stays as placeholder
 
-  // ---- 4. Build effect Var -----------------------------------------------
-  // effect_mode: "plain" = _io param added when debug=true
-  //              "none"  = no _io param regardless of debug
-  bool use_effect = (effect_mode_str != "none") && debug;
-  ffi::Optional<Var> io_var;
-  if (use_effect) io_var = Var("_io", ObjectStructInfo());
-
-  // ---- 5. Assemble full function parameter list --------------------------
+  // ---- 7. Assemble full function parameter list --------------------------
   ffi::Array<Var> func_params;
   for (const Var& v : input_vars) func_params.push_back(v);
-  if (use_effect) func_params.push_back(io_var.value());
+  // Add effect state vars if effect_mode != "none"
+  if (effect_mode_str != "none") {
+    for (const Var& v : all_effect_vars) func_params.push_back(v);
+  }
   if (param_mode_str == "plain") {
     for (const Var& v : param_vars) func_params.push_back(v);
   } else if (param_mode_str == "packed") {
     func_params.push_back(packed_params_var.value());
   }
 
-  int64_t num_input = static_cast<int64_t>(input_vars.size()) + (use_effect ? 1 : 0);
+  int64_t num_input =
+      static_cast<int64_t>(input_vars.size()) +
+      (effect_mode_str != "none" ? static_cast<int64_t>(all_effect_vars.size()) : 0);
 
-  // ---- 6. Build the function body ----------------------------------------
+  // ---- 8. Build the function body ----------------------------------------
   bb->BeginScope(func_params);
   bb->BeginDataflowBlock();
 
   // Install current BB so WrapNested / Emit helpers work
   BBScope bb_scope(bb);
-  // Install current _io var so debug_func can retrieve it
-  IOVarScope io_scope(io_var);
+  // Install current _io var (first effect var if any) so debug_func can retrieve it
+  ffi::Optional<Var> io_var_for_debug;
+  if (!all_effect_vars.empty()) io_var_for_debug = all_effect_vars[0];
+  IOVarScope io_scope(io_var_for_debug);
+
+  // Call effect._cpp_set_state(state_vars) for each Effect
+  for (size_t ei = 0; ei < effects_vec.size(); ++ei) {
+    const auto& [name, effect_obj] = effects_vec[ei];
+    const ffi::Array<Var>& state_vars = effect_state_vars[ei];
+
+    auto type_index = effect_obj->type_index();
+    const TVMFFITypeInfo* type_info = TVMFFIGetTypeInfo(type_index);
+    const TVMFFIMethodInfo* set_state_method = nullptr;
+    for (int32_t i = 0; i < type_info->num_methods; ++i) {
+      const TVMFFIMethodInfo* m = &type_info->methods[i];
+      if (std::string(m->name.data, m->name.size) == "_cpp_set_state") {
+        set_state_method = m;
+        break;
+      }
+    }
+    if (!set_state_method) {
+      TVM_FFI_THROW(TypeError) << "Effect has no _cpp_set_state method: "
+                               << effect_obj->GetTypeKey();
+      TVM_FFI_UNREACHABLE();
+    }
+
+    ffi::AnyView set_state_any = ffi::AnyView::CopyFromTVMFFIAny(set_state_method->method);
+    auto set_state_func_opt = set_state_any.try_cast<ffi::Function>();
+    TVM_FFI_ICHECK(set_state_func_opt.has_value());
+    ffi::Function set_state_func = set_state_func_opt.value();
+    set_state_func(effect_obj, ffi::Any(state_vars));
+  }
 
   // For packed params: emit TupleGetItem bindings now that we are in the dataflow block
   if (param_mode_str == "packed" && packed_params_var.defined()) {
@@ -437,12 +578,48 @@ static void EmitMethod(BlockBuilder& bb, const ffi::String& method_name, const M
   }
   Expr out_expr = UnwrapReturn(raw_out);
 
-  // Wrap effect output if use_effect -- use the (possibly updated) _io var
+  // Build effect output vars:
+  // 1. If use_legacy_io: return the (possibly updated) _io var
+  // 2. Then call _cpp_finalize() for each Effect
+  ffi::Array<Expr> effect_output_vars;
+  if (use_legacy_io) {
+    // Legacy: return the _io var (use updated value from g_current_io_var if available)
+    Var final_io = g_current_io_var.defined() ? g_current_io_var.value() : all_effect_vars[0];
+    effect_output_vars.push_back(final_io);
+  }
+
+  // Call finalize() for each Effect
+  for (const auto& [name, effect_obj] : effects_vec) {
+    auto type_index = effect_obj->type_index();
+    const TVMFFITypeInfo* type_info = TVMFFIGetTypeInfo(type_index);
+    const TVMFFIMethodInfo* finalize_method = nullptr;
+    for (int32_t i = 0; i < type_info->num_methods; ++i) {
+      const TVMFFIMethodInfo* m = &type_info->methods[i];
+      if (std::string(m->name.data, m->name.size) == "_cpp_finalize") {
+        finalize_method = m;
+        break;
+      }
+    }
+    if (!finalize_method) {
+      TVM_FFI_THROW(TypeError) << "Effect has no _cpp_finalize method: "
+                               << effect_obj->GetTypeKey();
+      TVM_FFI_UNREACHABLE();
+    }
+
+    ffi::AnyView finalize_any = ffi::AnyView::CopyFromTVMFFIAny(finalize_method->method);
+    auto finalize_func_opt = finalize_any.try_cast<ffi::Function>();
+    TVM_FFI_ICHECK(finalize_func_opt.has_value());
+    ffi::Function finalize_func = finalize_func_opt.value();
+    ffi::Any finalize_result = finalize_func(effect_obj);
+    auto finalized_vars_opt = finalize_result.try_cast<ffi::Array<Var>>();
+    TVM_FFI_ICHECK(finalized_vars_opt.has_value()) << "Effect._cpp_finalize must return Array<Var>";
+    for (const Var& v : finalized_vars_opt.value()) effect_output_vars.push_back(v);
+  }
+
+  // Wrap effect outputs if effect_mode != "none" and we have effects
   Expr final_out;
-  if (use_effect) {
-    // debug_func may have updated g_current_io_var; use the latest value
-    Var final_io = g_current_io_var.defined() ? g_current_io_var.value() : io_var.value();
-    Expr effect_tuple = relax::Tuple({final_io});
+  if (effect_mode_str != "none" && !effect_output_vars.empty()) {
+    Expr effect_tuple = relax::Tuple(effect_output_vars);
     final_out = relax::Tuple({out_expr, effect_tuple});
   } else {
     final_out = out_expr;
@@ -470,7 +647,9 @@ IRModule ExportToIRModule(ModuleSpec spec, bool debug) {
   const ModuleSpecNode* ms_node = spec.get();
   BlockBuilder bb = BlockBuilder::Create(std::nullopt);
 
-  if (debug) EmitInitializeEffect(bb);
+  if (debug) {
+    EmitInitializeEffect(bb, ms_node->named_effects, debug);
+  }
 
   for (size_t i = 0; i < ms_node->method_names.size(); ++i) {
     const ffi::String& method_name = ms_node->method_names[i];
@@ -481,7 +660,8 @@ IRModule ExportToIRModule(ModuleSpec spec, bool debug) {
         << "ExportToIRModule: method_spec[" << i << "] is not a MethodSpec, got "
         << method_spec_any.GetTypeKey();
 
-    EmitMethod(bb, method_name, opt.value().get(), ms_node->named_params, debug);
+    EmitMethod(bb, method_name, opt.value().get(), ms_node->named_params, ms_node->named_effects,
+               debug);
   }
 
   IRModule mod = bb->Finalize();

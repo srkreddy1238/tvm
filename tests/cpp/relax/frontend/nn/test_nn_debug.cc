@@ -82,7 +82,7 @@ static IRModule ExportSingle(const std::string& method_name, ffi::Function forwa
                              ffi::Array<ffi::String> arg_names, ffi::Array<ffi::Any> arg_specs) {
   MethodSpec ms(forward_fn, arg_names, arg_specs, "plain", "plain");
   ModuleSpec mod_spec(ffi::Array<ffi::String>{ffi::String(method_name)},
-                      ffi::Array<ffi::Any>{ffi::Any(ms)}, {});
+                      ffi::Array<ffi::Any>{ffi::Any(ms)}, {}, {});  // named_params, named_effects
   return ExportToIRModule(mod_spec, /*debug=*/true);
 }
 

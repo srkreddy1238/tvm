@@ -223,21 +223,27 @@ class ModuleSpecNode : public runtime::Object {
   ffi::Array<ffi::Any> method_specs;
   /*! \brief Pre-collected named parameters: dotted_name -> NNParameter. */
   ffi::Map<ffi::String, NNParameter> named_params;
+  /*! \brief Pre-collected named effects: dotted_name -> Effect object. */
+  ffi::Map<ffi::String, runtime::ObjectRef> named_effects;
 
   ModuleSpecNode(ffi::Array<ffi::String> method_names, ffi::Array<ffi::Any> method_specs,
-                 ffi::Map<ffi::String, NNParameter> named_params)
+                 ffi::Map<ffi::String, NNParameter> named_params,
+                 ffi::Map<ffi::String, runtime::ObjectRef> named_effects)
       : method_names(std::move(method_names)),
         method_specs(std::move(method_specs)),
-        named_params(std::move(named_params)) {}
+        named_params(std::move(named_params)),
+        named_effects(std::move(named_effects)) {}
 
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
     refl::ObjectDef<ModuleSpecNode>()
         .def(refl::init<ffi::Array<ffi::String>, ffi::Array<ffi::Any>,
-                        ffi::Map<ffi::String, NNParameter>>())
+                        ffi::Map<ffi::String, NNParameter>,
+                        ffi::Map<ffi::String, runtime::ObjectRef>>())
         .def_ro("method_names", &ModuleSpecNode::method_names)
         .def_ro("method_specs", &ModuleSpecNode::method_specs)
-        .def_ro("named_params", &ModuleSpecNode::named_params);
+        .def_ro("named_params", &ModuleSpecNode::named_params)
+        .def_ro("named_effects", &ModuleSpecNode::named_effects);
   }
   static constexpr bool _type_mutable = false;
   TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.frontend.nn.spec.ModuleSpec", ModuleSpecNode,
@@ -246,7 +252,8 @@ class ModuleSpecNode : public runtime::Object {
 class ModuleSpec : public runtime::ObjectRef {
  public:
   explicit ModuleSpec(ffi::Array<ffi::String> method_names, ffi::Array<ffi::Any> method_specs,
-                      ffi::Map<ffi::String, NNParameter> named_params);
+                      ffi::Map<ffi::String, NNParameter> named_params,
+                      ffi::Map<ffi::String, runtime::ObjectRef> named_effects);
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(ModuleSpec, runtime::ObjectRef, ModuleSpecNode);
 };
 

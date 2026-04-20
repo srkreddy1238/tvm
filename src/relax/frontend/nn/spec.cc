@@ -117,9 +117,10 @@ MethodSpec::MethodSpec(ffi::Function forward, ffi::Array<ffi::String> arg_names,
 // ---------------------------------------------------------------------------
 
 ModuleSpec::ModuleSpec(ffi::Array<ffi::String> method_names, ffi::Array<ffi::Any> method_specs,
-                       ffi::Map<ffi::String, NNParameter> named_params) {
+                       ffi::Map<ffi::String, NNParameter> named_params,
+                       ffi::Map<ffi::String, runtime::ObjectRef> named_effects) {
   data_ = ffi::make_object<ModuleSpecNode>(std::move(method_names), std::move(method_specs),
-                                           std::move(named_params));
+                                           std::move(named_params), std::move(named_effects));
 }
 
 // ---------------------------------------------------------------------------

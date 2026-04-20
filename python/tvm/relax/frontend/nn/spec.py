@@ -269,7 +269,11 @@ class ModuleSpec(tvm_ffi.Object):
         method_names: list[str],
         method_specs: list[MethodSpec],
     ) -> None:
-        from .core import Parameter, _attribute_finder  # pylint: disable=import-outside-toplevel
+        from .core import (  # pylint: disable=import-outside-toplevel
+            Effect,
+            Parameter,
+            _attribute_finder,
+        )
 
         named_params = {
             name: param
@@ -277,10 +281,17 @@ class ModuleSpec(tvm_ffi.Object):
                 module, prefix="", condition_yield=lambda x: isinstance(x, Parameter)
             )
         }
-        self.__ffi_init__(method_names, method_specs, named_params)
+        named_effects = {
+            name: effect
+            for name, effect in _attribute_finder(
+                module, prefix="", condition_yield=lambda x: isinstance(x, Effect)
+            )
+        }
+        self.__ffi_init__(method_names, method_specs, named_params, named_effects)
         # Keep a Python-side reference to the module so that exporter.py
-        # can call _attribute_finder on it (e.g. to discover Effect instances).
-        # The C++ ModuleSpec only stores named_params, not the module itself.
+        # can call _attribute_finder on it (e.g. for backward compatibility).
+        # The C++ ModuleSpec now stores named_effects, so the C++ exporter
+        # can discover Effects without accessing the module.
         self._module = module
 
     # method_names, method_specs, named_params are C++ fields exposed
