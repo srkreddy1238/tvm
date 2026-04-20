@@ -47,7 +47,7 @@ def test_llvm_targets(capfd):
         "`-mtriple=x86_64-linux-gnu`, using default `-mcpu=generic`"
     )
     readout_error = capfd.readouterr().err
-    assert "Error: Using LLVM " in readout_error
+    assert "Warning: Using LLVM " in readout_error
     assert expected_str in readout_error
 
 

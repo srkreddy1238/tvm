@@ -222,11 +222,9 @@ LLVMTargetInfo::LLVMTargetInfo(LLVMInstance& instance,
     bool has_arch =
         std::any_of(arches.begin(), arches.end(), [&](const auto& var) { return var == cpu_; });
     if (!has_arch) {
-      // Flag an error, but don't abort. This mimicks the behaviour of 'llc' to
-      // give the code a chance to run with a less-specific target.
-      LOG(ERROR) << "Using LLVM " << LLVM_VERSION_STRING << " with `-mcpu=" << cpu_
-                 << "` is not valid in `-mtriple=" << triple_ << "`"
-                 << ", using default `-mcpu=" << ffi::String(defaults::cpu) << "`";
+      LOG(WARNING) << "Using LLVM " << LLVM_VERSION_STRING << " with `-mcpu=" << cpu_
+                   << "` is not valid in `-mtriple=" << triple_ << "`"
+                   << ", using default `-mcpu=" << ffi::String(defaults::cpu) << "`";
       // LLVM default cpu fallback
       cpu_ = ffi::String(defaults::cpu);
     }
