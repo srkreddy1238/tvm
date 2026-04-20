@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -377,6 +377,17 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def("relax.frontend.nn.WrapNested", WrapNested)
       // BlockBuilder accessor
       .def("relax.frontend.nn.GetCurrentBlockBuilder", GetCurrentBlockBuilder)
+      // BlockBuilder install/restore for Python exporter
+      .def("relax.frontend.nn.SetCurrentBlockBuilder",
+           [](ffi::Optional<BlockBuilder> bb) {
+             static thread_local BlockBuilder t_bb;
+             if (bb.defined()) {
+               t_bb = bb.value();
+               BlockBuilder_SetCurrent(&t_bb);
+             } else {
+               BlockBuilder_SetCurrent(nullptr);
+             }
+           })
       // Parameter discovery for named_parameters() traversal
       .def("relax.frontend.nn.GetNativeParameters", GetNativeParameters)
       // Container traversal helpers

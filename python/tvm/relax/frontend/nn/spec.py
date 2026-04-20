@@ -271,6 +271,10 @@ class ModuleSpec(tvm_ffi.Object):
             )
         }
         self.__ffi_init__(method_names, method_specs, named_params)
+        # Keep a Python-side reference to the module so that exporter.py
+        # can call _attribute_finder on it (e.g. to discover Effect instances).
+        # The C++ ModuleSpec only stores named_params, not the module itself.
+        self._module = module
 
     # method_names, method_specs, named_params are C++ fields exposed
     # directly as attributes by register_object; no property wrappers needed.

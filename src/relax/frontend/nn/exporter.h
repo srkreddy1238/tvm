@@ -48,6 +48,7 @@
 #define TVM_RELAX_FRONTEND_NN_EXPORTER_H_
 
 #include <tvm/ir/module.h>
+#include <tvm/relax/expr.h>
 
 #include "spec.h"
 
@@ -64,6 +65,18 @@ namespace nn {
  * \return        The compiled IRModule.
  */
 IRModule ExportToIRModule(ModuleSpec spec, bool debug);
+
+/*!
+ * \brief Get the current debug _io Var from the thread-local storage.
+ * Set by EmitMethod before calling forward(), updated by NNDebugFunc.
+ */
+ffi::Optional<Var> GetCurrentIOVar();
+
+/*!
+ * \brief Set the current debug _io Var in the thread-local storage.
+ * Called by NNDebugFunc after emitting each debug call to chain effects.
+ */
+void SetCurrentIOVar(ffi::Optional<Var> v);
 
 }  // namespace nn
 }  // namespace frontend

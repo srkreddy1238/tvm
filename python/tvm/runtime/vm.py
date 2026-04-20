@@ -24,7 +24,6 @@ from numbers import Integral, Number
 from typing import Any
 
 import numpy as np  # type: ignore
-from tvm_ffi import register_global_func
 
 import tvm
 from tvm.runtime import Device, Object, PackedFunc
@@ -502,6 +501,6 @@ class VirtualMachine:
         return Report.from_json(report_json)
 
 
-@register_global_func("vm.builtin.debug_print")
-def _print(lineo: str, array) -> None:
-    print(f"{lineo}: shape = {array.shape}, dtype = {array.dtype}, data =\n{array}")
+# @register_global_func("vm.builtin.debug_print")
+# def _print(lineo: str, array) -> None:
+#    print(f"{lineo}: shape = {array.shape}, dtype = {array.dtype}, data =\n{array}")

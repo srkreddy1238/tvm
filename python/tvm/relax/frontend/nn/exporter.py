@@ -31,6 +31,22 @@ from . import core, extern
 from . import spec as _spec
 from .modules import IOEffect
 
+# C++ thread-local BlockBuilder install/restore helpers
+_ffi_set_current_bb = None
+_ffi_get_current_io_var = None
+_ffi_set_current_io_var = None
+
+
+def _get_ffi_helpers():
+    global _ffi_set_current_bb, _ffi_get_current_io_var, _ffi_set_current_io_var
+    if _ffi_set_current_bb is None:
+        import tvm_ffi  # pylint: disable=import-outside-toplevel
+
+        _ffi_set_current_bb = tvm_ffi.get_global_func("relax.frontend.nn.SetCurrentBlockBuilder")
+        _ffi_get_current_io_var = tvm_ffi.get_global_func("relax.frontend.nn.GetCurrentIOVar")
+        _ffi_set_current_io_var = tvm_ffi.get_global_func("relax.frontend.nn.SetCurrentIOVar")
+    return _ffi_set_current_bb, _ffi_get_current_io_var, _ffi_set_current_io_var
+
 
 def add_extern(mod: extern.ExternModule) -> None:
     """Add an external module to the exporter."""
@@ -98,7 +114,7 @@ class Exporter:
         def _params() -> list[tuple[str, core.Parameter]]:
             params = []
             for name, param in core._attribute_finder(
-                spec.module, prefix="", condition_yield=lambda x: isinstance(x, core.Parameter)
+                spec._module, prefix="", condition_yield=lambda x: isinstance(x, core.Parameter)
             ):
                 params.append((name, param))
             return params
@@ -108,7 +124,7 @@ class Exporter:
             if self.io_effect is not None:
                 result.append(("", self.io_effect))
             for name, effect in core._attribute_finder(
-                spec.module, "", condition_yield=lambda x: isinstance(x, core.Effect)
+                spec._module, "", condition_yield=lambda x: isinstance(x, core.Effect)
             ):
                 result.append((name, effect))
             return result
@@ -279,7 +295,25 @@ def _emit_method(  # pylint: disable=too-many-locals,too-many-branches,too-many-
         if isinstance(arg, _spec.Tuple):
             explicit_inputs[arg_idx] = _detuple(arg, var, builder)
 
-    outputs = spec.method(*explicit_inputs)
+    named_args = dict(zip(spec.arg_names, explicit_inputs))
+    # Install the C++ thread-local BlockBuilder and _io var so that C++ nn ops
+    # (debug_func, tensor_expr_op, etc.) can find them via BlockBuilder_Current().
+    set_bb, get_io, set_io = _get_ffi_helpers()
+    set_bb(builder)
+    # Also install the _io var for debug_func (the first effect var if effects exist)
+    io_var = None
+    for _, effect in effects:
+        if hasattr(effect, "effect") and effect.effect is not None:
+            io_var = effect.effect
+            break
+    if io_var is not None:
+        set_io(io_var)
+    try:
+        outputs = spec.forward(named_args)
+    finally:
+        set_bb(None)
+        if io_var is not None:
+            set_io(None)
     effect_outputs = []
     for _, effect in effects:
         effect_outputs.extend(effect.finalize())

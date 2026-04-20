@@ -57,6 +57,7 @@
 #include "../../op/tensor/ternary.h"
 #include "../../op/tensor/unary.h"
 #include "core.h"
+#include "exporter.h"
 
 namespace tvm {
 namespace relax {
@@ -849,7 +850,11 @@ static Var NNDebugFunc(ffi::String name, ffi::Array<ffi::Any> args, Var io_effec
 
   static const Op& call_pure_packed_op = Op::Get("relax.call_pure_packed");
   Expr call = Call(call_pure_packed_op, call_args, tvm::Attrs(), {ObjectStructInfo()});
-  return bb->Emit(call, std::string(io_effect->name_hint()));
+  Var new_io = bb->Emit(call, std::string(io_effect->name_hint()));
+  // Update the thread-local io var so subsequent debug_func calls chain correctly
+  // and EmitMethod can read the final updated io var after forward() returns.
+  SetCurrentIOVar(new_io);
+  return new_io;
 }
 
 // ---------------------------------------------------------------------------

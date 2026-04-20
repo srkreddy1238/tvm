@@ -34,6 +34,10 @@
 #include <tvm/runtime/vm/bytecode.h>
 #include <tvm/runtime/vm/vm.h>
 
+#include <cstring>
+#include <functional>
+#include <iomanip>
+#include <sstream>
 #include <unordered_map>
 
 namespace tvm {
@@ -191,6 +195,7 @@ int64_t MakePrimValue(DLTensor* heap, int shape_code, int64_t reg) {
     return heap_data[reg];
   } else {
     TVM_FFI_THROW(InternalError) << "Invalid shape code: " << shape_code;
+    TVM_FFI_UNREACHABLE();
   }
 }
 
@@ -623,6 +628,188 @@ TVM_FFI_STATIC_INIT_BLOCK() {
         }
         debug_func->CallPacked(ffi::PackedArgs(call_args.data(), call_args.size()), rv);
         *rv = io_effect;
+      });
+}
+
+TVM_FFI_STATIC_INIT_BLOCK() {
+  namespace refl = tvm::ffi::reflection;
+  // vm.builtin.debug_print
+  // Signature: (line_info: str, tensor: runtime::Tensor) -> None
+  // Prints the tensor's shape, dtype, and data to stdout.
+  // Mirrors the Python implementation in python/tvm/runtime/vm.py:
+  //   @register_global_func("vm.builtin.debug_print")
+  //   def _print(lineo: str, array) -> None:
+  //       print(f"{lineo}: shape = {array.shape}, dtype = {array.dtype}, data =\n{array}")
+  refl::GlobalDef().def(
+      "vm.builtin.debug_print", [](ffi::String line_info, runtime::Tensor tensor) -> void {
+        // Build shape string: (d0, d1, ...)
+        std::ostringstream shape_ss;
+        shape_ss << "(";
+        for (int i = 0; i < tensor.ndim(); ++i) {
+          if (i > 0) shape_ss << ", ";
+          shape_ss << tensor.Shape()[i];
+        }
+        if (tensor.ndim() == 1) shape_ss << ",";
+        shape_ss << ")";
+
+        // Build dtype string from DLDataType
+        DLDataType dtype = tensor.DataType();
+        std::ostringstream dtype_ss;
+        if (dtype.code == kDLFloat) {
+          dtype_ss << "float" << dtype.bits;
+        } else if (dtype.code == kDLInt) {
+          dtype_ss << "int" << dtype.bits;
+        } else if (dtype.code == kDLUInt) {
+          dtype_ss << "uint" << dtype.bits;
+        } else if (dtype.code == kDLBfloat) {
+          dtype_ss << "bfloat" << dtype.bits;
+        } else {
+          dtype_ss << "dtype(code=" << static_cast<int>(dtype.code) << ",bits=" << dtype.bits
+                   << ")";
+        }
+
+        // Copy tensor data to a CPU byte buffer.
+        size_t nbytes = ffi::GetDataSize(tensor);
+        std::vector<uint8_t> buf(nbytes);
+        tensor.CopyToBytes(buf.data(), nbytes);
+
+        // Compute total number of elements.
+        int64_t nelems = 1;
+        for (int i = 0; i < tensor.ndim(); ++i) nelems *= tensor.Shape()[i];
+
+        // Format elements into a flat list, then wrap into nested brackets
+        // matching NumPy's array repr.
+        // Step 1: build a flat vector of formatted element strings.
+        std::vector<std::string> elems(nelems);
+        for (int64_t i = 0; i < nelems; ++i) {
+          std::ostringstream elem_ss;
+          if (dtype.code == kDLFloat && dtype.bits == 32) {
+            float v;
+            std::memcpy(&v, buf.data() + i * sizeof(float), sizeof(float));
+            elem_ss << v;
+          } else if (dtype.code == kDLFloat && dtype.bits == 64) {
+            double v;
+            std::memcpy(&v, buf.data() + i * sizeof(double), sizeof(double));
+            elem_ss << v;
+          } else if (dtype.code == kDLFloat && dtype.bits == 16) {
+            // float16: stored as uint16, convert via bit pattern
+            uint16_t bits;
+            std::memcpy(&bits, buf.data() + i * sizeof(uint16_t), sizeof(uint16_t));
+            // Simple fp16 -> fp32 conversion
+            uint32_t sign = (bits >> 15) & 0x1;
+            uint32_t exp = (bits >> 10) & 0x1f;
+            uint32_t mant = bits & 0x3ff;
+            uint32_t f32_bits;
+            if (exp == 0) {
+              f32_bits = (sign << 31) | (mant << 13);
+            } else if (exp == 31) {
+              f32_bits = (sign << 31) | (0xff << 23) | (mant << 13);
+            } else {
+              f32_bits = (sign << 31) | ((exp + 112) << 23) | (mant << 13);
+            }
+            float v;
+            std::memcpy(&v, &f32_bits, sizeof(float));
+            elem_ss << v;
+          } else if (dtype.code == kDLInt && dtype.bits == 8) {
+            int8_t v;
+            std::memcpy(&v, buf.data() + i * sizeof(int8_t), sizeof(int8_t));
+            elem_ss << static_cast<int>(v);
+          } else if (dtype.code == kDLInt && dtype.bits == 16) {
+            int16_t v;
+            std::memcpy(&v, buf.data() + i * sizeof(int16_t), sizeof(int16_t));
+            elem_ss << v;
+          } else if (dtype.code == kDLInt && dtype.bits == 32) {
+            int32_t v;
+            std::memcpy(&v, buf.data() + i * sizeof(int32_t), sizeof(int32_t));
+            elem_ss << v;
+          } else if (dtype.code == kDLInt && dtype.bits == 64) {
+            int64_t v;
+            std::memcpy(&v, buf.data() + i * sizeof(int64_t), sizeof(int64_t));
+            elem_ss << v;
+          } else if (dtype.code == kDLUInt && dtype.bits == 8) {
+            uint8_t v;
+            std::memcpy(&v, buf.data() + i * sizeof(uint8_t), sizeof(uint8_t));
+            elem_ss << static_cast<unsigned>(v);
+          } else if (dtype.code == kDLUInt && dtype.bits == 16) {
+            uint16_t v;
+            std::memcpy(&v, buf.data() + i * sizeof(uint16_t), sizeof(uint16_t));
+            elem_ss << v;
+          } else if (dtype.code == kDLUInt && dtype.bits == 32) {
+            uint32_t v;
+            std::memcpy(&v, buf.data() + i * sizeof(uint32_t), sizeof(uint32_t));
+            elem_ss << v;
+          } else if (dtype.code == kDLUInt && dtype.bits == 64) {
+            uint64_t v;
+            std::memcpy(&v, buf.data() + i * sizeof(uint64_t), sizeof(uint64_t));
+            elem_ss << v;
+          } else {
+            // Fallback: print raw bytes as hex
+            size_t elem_bytes = dtype.bits / 8;
+            elem_ss << "0x";
+            for (size_t b = 0; b < elem_bytes; ++b) {
+              elem_ss << std::hex << std::setw(2) << std::setfill('0')
+                      << static_cast<unsigned>(buf[i * elem_bytes + b]);
+            }
+          }
+          elems[i] = elem_ss.str();
+        }
+
+        // Step 2: wrap flat elements into nested brackets following NumPy's
+        // array repr rules:
+        //   - innermost rows are comma-separated on one line
+        //   - between sub-arrays at dimension d, insert (ndim-1-d) blank lines
+        //     then indent (d+1) spaces so columns align under the opening '['
+        // Example for shape (2,3,4):
+        //   [[[v, v, v, v],
+        //     [v, v, v, v],
+        //     [v, v, v, v]],
+        //
+        //    [[v, v, v, v],
+        //     [v, v, v, v],
+        //     [v, v, v, v]]]
+        std::ostringstream data_ss;
+        if (tensor.ndim() == 0) {
+          data_ss << (nelems > 0 ? elems[0] : "");
+        } else {
+          int ndim = tensor.ndim();
+          std::vector<int64_t> strides(ndim, 1);
+          for (int d = ndim - 2; d >= 0; --d) strides[d] = strides[d + 1] * tensor.Shape()[d + 1];
+
+          // print_dim writes the sub-array rooted at `dim` starting at flat
+          // index `offset`.  `indent` is the column of the opening '[' so
+          // that continuation rows can be aligned.
+          std::function<void(int, int64_t, int)> print_dim = [&](int dim, int64_t offset,
+                                                                 int indent) {
+            data_ss << "[";
+            int64_t size = tensor.Shape()[dim];
+            for (int64_t j = 0; j < size; ++j) {
+              if (j > 0) {
+                if (dim == ndim - 1) {
+                  // innermost: just a comma-space
+                  data_ss << ", ";
+                } else {
+                  // between sub-arrays: close nothing yet, but add
+                  // (ndim-1-dim) newlines then re-indent
+                  data_ss << ",";
+                  int blank_lines = ndim - 1 - dim;
+                  for (int b = 0; b < blank_lines; ++b) data_ss << "\n";
+                  data_ss << std::string(indent, ' ');
+                }
+              }
+              if (dim == ndim - 1) {
+                data_ss << elems[offset + j];
+              } else {
+                print_dim(dim + 1, offset + j * strides[dim + 1], indent + 1);
+              }
+            }
+            data_ss << "]";
+          };
+          print_dim(0, 0, 0);
+        }
+
+        LOG(INFO) << line_info << ": shape = " << shape_ss.str() << ", dtype = " << dtype_ss.str()
+                  << ", data =\n"
+                  << data_ss.str();
       });
 }
 
