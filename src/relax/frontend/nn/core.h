@@ -405,6 +405,13 @@ ffi::Map<ffi::String, NNParameter> GetContainerParameters(runtime::ObjectRef con
  */
 void ContainerApplyTo(runtime::ObjectRef container, ffi::String dtype);
 
+/*!
+ * \brief Apply dtype conversion to all Parameters in a Python module's __dict__.
+ * \param py_dict  Python dict (from module.__dict__) as ffi::Map<String, Any>.
+ * \param dtype    Target dtype string.
+ */
+void PythonModuleApplyTo(ffi::Map<ffi::String, ffi::Any> py_dict, ffi::String dtype);
+
 }  // namespace nn
 }  // namespace frontend
 }  // namespace relax

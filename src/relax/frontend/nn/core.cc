@@ -367,6 +367,42 @@ void ContainerApplyTo(runtime::ObjectRef container, ffi::String dtype) {
   for (const auto& [_, param] : params) param->To(dtype);
 }
 
+/*!
+ * \brief Apply dtype conversion to all Parameters in a Python module's __dict__.
+ * \param py_dict  Python dict (from module.__dict__) as ffi::Map<String, Any>.
+ * \param dtype    Target dtype string.
+ *
+ * Recursively walks the dict, calling To() on Parameters, ModuleLists, ModuleDicts,
+ * and any native C++ modules.
+ */
+void PythonModuleApplyTo(ffi::Map<ffi::String, ffi::Any> py_dict, ffi::String dtype) {
+  for (const auto& [name, val] : py_dict) {
+    // Case 1: Parameter -> call To()
+    if (auto opt = val.try_cast<NNParameter>()) {
+      opt.value()->To(dtype);
+      continue;
+    }
+    // Case 2: ModuleList / ModuleDict -> delegate to ContainerApplyTo
+    auto opt_ref = val.try_cast<runtime::ObjectRef>();
+    if (!opt_ref.has_value() || !opt_ref.value().defined()) continue;
+    runtime::ObjectRef obj = opt_ref.value();
+    if (obj->IsInstance<ModuleListNode>() || obj->IsInstance<ModuleDictNode>()) {
+      ContainerApplyTo(obj, dtype);
+      continue;
+    }
+    // Case 3: NNModuleNode subclass -> call To()
+    if (const auto* mod = obj.as<NNModuleNode>()) {
+      mod->To(dtype);
+      continue;
+    }
+    // Case 4: nested dict (pure-Python sub-module) -> recurse
+    if (auto dict_opt = val.try_cast<ffi::Map<ffi::String, ffi::Any>>()) {
+      PythonModuleApplyTo(dict_opt.value(), dtype);
+      continue;
+    }
+  }
+}
+
 // ===========================================================================
 // NNModuleNode
 // ===========================================================================
@@ -490,6 +526,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       // Container traversal helpers
       .def("relax.frontend.nn.GetContainerParameters", GetContainerParameters)
       .def("relax.frontend.nn.ContainerApplyTo", ContainerApplyTo)
+      .def("relax.frontend.nn.PythonModuleApplyTo", PythonModuleApplyTo)
       // NNModule construction
       .def("relax.frontend.nn.MakeModule",
            [](ffi::Map<ffi::String, ffi::Any> attrs) { return NNModule(std::move(attrs)); });

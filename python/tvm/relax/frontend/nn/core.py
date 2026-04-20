@@ -569,13 +569,10 @@ class Module(SubroutineMixin):
 
     def to(self, dtype: str | None = None) -> None:
         """Recursively convert all parameters and sub-modules to dtype."""
-        for item in self.__dict__.values():
-            if isinstance(item, ModuleList | ModuleDict):
-                # Native containers: delegate to C++ ContainerApplyTo
-                if dtype is not None:
-                    _ffi_api.ContainerApplyTo(item, dtype)
-            elif hasattr(item, "to") and callable(item.to):
-                item.to(dtype=dtype)
+        if dtype is not None:
+            # Delegate to C++ helper which handles Parameters, ModuleLists,
+            # ModuleDicts, native C++ modules, and nested dicts uniformly.
+            _ffi_api.PythonModuleApplyTo(self.__dict__, dtype)
         if dtype is not None and isinstance(getattr(self, "dtype", None), str):
             self.dtype = dtype  # pylint: disable=attribute-defined-outside-init
 
