@@ -174,11 +174,18 @@ class MethodSpec(tvm_ffi.Object):
         if effect_mode not in ("plain", "packed", "none"):
             raise ValueError(f"Invalid effect_mode: {effect_mode!r}")
 
+        # arg_names from inspect.signature may include extra params with
+        # defaults (e.g. channel_axis, axes on GroupNorm.forward) that are
+        # not spec-driven.  Only the first len(arg_specs) names are in
+        # named_args; the rest use Python defaults.
+        n_spec = len(arg_specs)
+        spec_names = arg_names[:n_spec]
+
         def _forward(named_args):
-            args = [named_args[name] for name in arg_names]
+            args = [named_args[name] for name in spec_names]
             return method(*args)
 
-        self.__ffi_init__(_forward, arg_names, arg_specs, param_mode, effect_mode)
+        self.__ffi_init__(_forward, spec_names, arg_specs, param_mode, effect_mode)
 
     # ---- read-only properties from C++ fields ----------------------------
     # arg_names, arg_specs, param_mode, effect_mode are exposed directly

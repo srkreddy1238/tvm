@@ -38,64 +38,64 @@ from collections.abc import Sequence
 
 import tvm_ffi
 
-from tvm import relax as rx
 from tvm import tir
 
-from . import _ffi_api, op
-from .core import Effect, Module, ModuleList, Parameter, Tensor, get_default_dtype
+from . import _ffi_api
+from .core import Effect, Module, Tensor, get_default_dtype
 
 # ===========================================================================
-# IOEffect  (pure Python)
-# ===========================================================================
-
-
-class IOEffect(Effect):
-    """Modeling IO side effect."""
-
-    def __init__(self):
-        self.effect = None
-
-    def emit_init(self, name_hint, builder):
-        return [builder.emit(rx.op.null_value(), f"{name_hint}.io")]
-
-    def create(self, name_hint):
-        self.effect = rx.Var(f"{name_hint}.io", struct_info=rx.ObjectStructInfo())
-        return [self.effect]
-
-    def set_state(self, state_vars):
-        (self.effect,) = state_vars
-
-    def finalize(self):
-        result, self.effect = self.effect, None
-        return [result]
-
-
-# ===========================================================================
-# Identity  (pure Python)
+# Identity
 # ===========================================================================
 
 
-class Identity(Module):
+@tvm_ffi.register_object("relax.frontend.nn.Identity")
+class Identity(tvm_ffi.Object, Module):
     """Pass-through module."""
 
+    def __init__(self) -> None:
+        self.__ffi_init__()
+
     def forward(self, x: Tensor) -> Tensor:
-        return x
+        return Tensor(_expr=self._forward(x._expr))
 
 
 # ===========================================================================
-# ReLU
+# IOEffect
+# ===========================================================================
+
+
+@tvm_ffi.register_object("relax.frontend.nn.IOEffect")
+class IOEffect(tvm_ffi.Object, Effect):
+    """Modeling IO side effect — backed by native C++."""
+
+    def __init__(self) -> None:
+        self.__ffi_init__()
+
+    def emit_init(self, name_hint, builder):
+        return list(self._cpp_emit_init(name_hint, builder))
+
+    def create(self, name_hint):
+        return list(self._cpp_create(name_hint))
+
+    def set_state(self, state_vars):
+        self._cpp_set_state(list(state_vars))
+
+    def finalize(self):
+        return list(self._cpp_finalize())
+
+
 # ===========================================================================
 
 
 @tvm_ffi.register_object("relax.frontend.nn.ReLU")
-class ReLU(Module):
+class ReLU(tvm_ffi.Object, Module):
     """ReLU activation."""
 
     def __init__(self) -> None:
-        self.__init_handle_by_constructor__(_ffi_api.ReLU)
+        self.__ffi_init__()
 
     def forward(self, x: Tensor) -> Tensor:
-        return Tensor(_expr=self.__object_handle__.forward(x._expr))
+        return Tensor(_expr=self._forward(x._expr))
 
 
 # ===========================================================================
@@ -104,14 +104,14 @@ class ReLU(Module):
 
 
 @tvm_ffi.register_object("relax.frontend.nn.SiLU")
-class SiLU(Module):
+class SiLU(tvm_ffi.Object, Module):
     """SiLU activation."""
 
     def __init__(self) -> None:
-        self.__init_handle_by_constructor__(_ffi_api.SiLU)
+        self.__ffi_init__()
 
     def forward(self, x: Tensor) -> Tensor:
-        return Tensor(_expr=self.__object_handle__.forward(x._expr))
+        return Tensor(_expr=self._forward(x._expr))
 
 
 # ===========================================================================
@@ -120,18 +120,16 @@ class SiLU(Module):
 
 
 @tvm_ffi.register_object("relax.frontend.nn.GELU")
-class GELU(Module):
+class GELU(tvm_ffi.Object, Module):
     """GELU activation."""
 
     def __init__(self, approximate: str = "") -> None:
-        self.__init_handle_by_constructor__(_ffi_api.GELU, approximate)
+        self.__ffi_init__(approximate)
 
-    @property
-    def approximate(self) -> str:
-        return str(self.__object_handle__.approximate)
+    # approximate is a C++ field; register_object sets it as a property directly.
 
     def forward(self, x: Tensor) -> Tensor:
-        return Tensor(_expr=self.__object_handle__.forward(x._expr))
+        return Tensor(_expr=self._forward(x._expr))
 
 
 # ===========================================================================
@@ -140,10 +138,11 @@ class GELU(Module):
 
 
 @tvm_ffi.register_object("relax.frontend.nn.Linear")
-class Linear(Module):
+class Linear(tvm_ffi.Object, Module):
     """Linear layer: out = x @ W^T + b.
 
     All state (weight Parameter, bias Parameter, out_dtype) lives in C++.
+    weight, bias, out_dtype are set as properties by register_object.
     """
 
     def __init__(
@@ -163,22 +162,8 @@ class Linear(Module):
             out_dtype,
         )
 
-    # -- properties read directly from C++ fields --
-    @property
-    def weight(self) -> Parameter:
-        return self.__object_handle__.weight
-
-    @property
-    def bias(self) -> Parameter | None:
-        return self.__object_handle__.bias  # Optional[NNParameter] -> None or Parameter
-
-    @property
-    def out_dtype(self) -> str | None:
-        v = self.__object_handle__.out_dtype
-        return str(v) if v is not None else None
-
     def forward(self, x: Tensor) -> Tensor:
-        return Tensor(_expr=self.__object_handle__.forward(x._expr))
+        return Tensor(_expr=self._forward(x._expr))
 
     def to(self, dtype: str | None = None) -> None:
         if dtype is not None:
@@ -193,8 +178,10 @@ class Linear(Module):
 
 
 @tvm_ffi.register_object("relax.frontend.nn.Embedding")
-class Embedding(Module):
-    """Embedding lookup. All state lives in C++."""
+class Embedding(tvm_ffi.Object, Module):
+    """Embedding lookup. All state lives in C++.
+    weight is set as a property by register_object.
+    """
 
     def __init__(
         self,
@@ -204,13 +191,9 @@ class Embedding(Module):
     ) -> None:
         self.__init_handle_by_constructor__(_ffi_api.MakeEmbedding, num, dim, dtype)
 
-    @property
-    def weight(self) -> Parameter:
-        return self.__object_handle__.weight
-
     def forward(self, x: Tensor) -> Tensor:
         out_shape = [] if x.ndim == 1 else [*list(x.shape), self.weight.shape[1]]
-        return Tensor(_expr=self.__object_handle__.forward(x._expr, out_shape))
+        return Tensor(_expr=self._forward(x._expr, out_shape))
 
 
 # ===========================================================================
@@ -219,8 +202,10 @@ class Embedding(Module):
 
 
 @tvm_ffi.register_object("relax.frontend.nn.LayerNorm")
-class LayerNorm(Module):
-    """Layer Normalization. All state lives in C++."""
+class LayerNorm(tvm_ffi.Object, Module):
+    """Layer Normalization. All state lives in C++.
+    weight, bias, axes, epsilon, elementwise_affine set by register_object.
+    """
 
     def __init__(
         self,
@@ -237,24 +222,8 @@ class LayerNorm(Module):
             dtype,
         )
 
-    @property
-    def weight(self) -> Parameter | None:
-        return self.__object_handle__.weight
-
-    @property
-    def bias(self) -> Parameter | None:
-        return self.__object_handle__.bias
-
-    @property
-    def eps(self) -> float:
-        return float(self.__object_handle__.epsilon)
-
-    @property
-    def elementwise_affine(self) -> bool:
-        return bool(self.__object_handle__.elementwise_affine)
-
     def forward(self, x: Tensor) -> Tensor:
-        return Tensor(_expr=self.__object_handle__.forward(x._expr))
+        return Tensor(_expr=self._forward(x._expr))
 
 
 # ===========================================================================
@@ -263,8 +232,10 @@ class LayerNorm(Module):
 
 
 @tvm_ffi.register_object("relax.frontend.nn.RMSNorm")
-class RMSNorm(Module):
-    """RMS Normalization. All state lives in C++."""
+class RMSNorm(tvm_ffi.Object, Module):
+    """RMS Normalization. All state lives in C++.
+    weight, bias, axes, epsilon set by register_object.
+    """
 
     def __init__(
         self,
@@ -284,20 +255,8 @@ class RMSNorm(Module):
             dtype,
         )
 
-    @property
-    def weight(self) -> Parameter:
-        return self.__object_handle__.weight
-
-    @property
-    def bias(self) -> Parameter | None:
-        return self.__object_handle__.bias
-
-    @property
-    def epsilon(self) -> float:
-        return float(self.__object_handle__.epsilon)
-
     def forward(self, x: Tensor) -> Tensor:
-        return Tensor(_expr=self.__object_handle__.forward(x._expr))
+        return Tensor(_expr=self._forward(x._expr))
 
 
 # ===========================================================================
@@ -306,8 +265,10 @@ class RMSNorm(Module):
 
 
 @tvm_ffi.register_object("relax.frontend.nn.GroupNorm")
-class GroupNorm(Module):
-    """Group Normalization. All state lives in C++."""
+class GroupNorm(tvm_ffi.Object, Module):
+    """Group Normalization. All state lives in C++.
+    num_groups, weight, bias, epsilon set by register_object.
+    """
 
     def __init__(
         self,
@@ -326,26 +287,10 @@ class GroupNorm(Module):
             dtype,
         )
 
-    @property
-    def num_groups(self) -> int:
-        return int(self.__object_handle__.num_groups)
-
-    @property
-    def weight(self) -> Parameter | None:
-        return self.__object_handle__.weight
-
-    @property
-    def bias(self) -> Parameter | None:
-        return self.__object_handle__.bias
-
-    @property
-    def eps(self) -> float:
-        return float(self.__object_handle__.epsilon)
-
     def forward(self, x: Tensor, channel_axis: int = 1, axes: list[int] | None = None) -> Tensor:
         if axes is None:
             axes = list(range(2, len(x._expr.struct_info.shape)))
-        return Tensor(_expr=self.__object_handle__.forward(x._expr, channel_axis, axes))
+        return Tensor(_expr=self._forward(x._expr, channel_axis, axes))
 
 
 # ===========================================================================
@@ -354,8 +299,10 @@ class GroupNorm(Module):
 
 
 @tvm_ffi.register_object("relax.frontend.nn.Conv1D")
-class Conv1D(Module):
-    """1D Convolution. All state lives in C++."""
+class Conv1D(tvm_ffi.Object, Module):
+    """1D Convolution. All state lives in C++.
+    weight, bias, stride, padding, dilation, groups set by register_object.
+    """
 
     def __init__(
         self,
@@ -382,16 +329,8 @@ class Conv1D(Module):
             dtype,
         )
 
-    @property
-    def weight(self) -> Parameter:
-        return self.__object_handle__.weight
-
-    @property
-    def bias(self) -> Parameter | None:
-        return self.__object_handle__.bias
-
     def forward(self, x: Tensor) -> Tensor:
-        return Tensor(_expr=self.__object_handle__.forward(x._expr))
+        return Tensor(_expr=self._forward(x._expr))
 
 
 # ===========================================================================
@@ -400,8 +339,10 @@ class Conv1D(Module):
 
 
 @tvm_ffi.register_object("relax.frontend.nn.Conv2D")
-class Conv2D(Module):
-    """2D Convolution. All state lives in C++."""
+class Conv2D(tvm_ffi.Object, Module):
+    """2D Convolution. All state lives in C++.
+    weight, bias, stride, padding, dilation, groups, data_layout set by register_object.
+    """
 
     def __init__(
         self,
@@ -431,20 +372,8 @@ class Conv2D(Module):
             data_layout,
         )
 
-    @property
-    def weight(self) -> Parameter:
-        return self.__object_handle__.weight
-
-    @property
-    def bias(self) -> Parameter | None:
-        return self.__object_handle__.bias
-
-    @property
-    def data_layout(self) -> str:
-        return str(self.__object_handle__.data_layout)
-
     def forward(self, x: Tensor) -> Tensor:
-        return Tensor(_expr=self.__object_handle__.forward(x._expr))
+        return Tensor(_expr=self._forward(x._expr))
 
 
 # ===========================================================================
@@ -453,8 +382,10 @@ class Conv2D(Module):
 
 
 @tvm_ffi.register_object("relax.frontend.nn.Conv3D")
-class Conv3D(Module):
-    """3D Convolution. All state lives in C++."""
+class Conv3D(tvm_ffi.Object, Module):
+    """3D Convolution. All state lives in C++.
+    weight, bias, stride, padding, dilation, groups, data_layout set by register_object.
+    """
 
     def __init__(
         self,
@@ -486,20 +417,8 @@ class Conv3D(Module):
             data_layout,
         )
 
-    @property
-    def weight(self) -> Parameter:
-        return self.__object_handle__.weight
-
-    @property
-    def bias(self) -> Parameter | None:
-        return self.__object_handle__.bias
-
-    @property
-    def data_layout(self) -> str:
-        return str(self.__object_handle__.data_layout)
-
     def forward(self, x: Tensor) -> Tensor:
-        return Tensor(_expr=self.__object_handle__.forward(x._expr))
+        return Tensor(_expr=self._forward(x._expr))
 
 
 # ===========================================================================
@@ -508,8 +427,10 @@ class Conv3D(Module):
 
 
 @tvm_ffi.register_object("relax.frontend.nn.ConvTranspose1D")
-class ConvTranspose1D(Module):
-    """1D Transposed Convolution. All state lives in C++."""
+class ConvTranspose1D(tvm_ffi.Object, Module):
+    """1D Transposed Convolution. All state lives in C++.
+    weight, bias, stride, padding, output_padding, dilation, groups set by register_object.
+    """
 
     def __init__(
         self,
@@ -538,98 +459,59 @@ class ConvTranspose1D(Module):
             dtype,
         )
 
-    @property
-    def weight(self) -> Parameter:
-        return self.__object_handle__.weight
-
-    @property
-    def bias(self) -> Parameter | None:
-        return self.__object_handle__.bias
-
     def forward(self, x: Tensor) -> Tensor:
-        return Tensor(_expr=self.__object_handle__.forward(x._expr))
+        return Tensor(_expr=self._forward(x._expr))
 
 
 # ===========================================================================
-# KVCache  (pure Python)
+# KVCache
 # ===========================================================================
 
 
-class KVCache(Effect):
-    """KVCache effect for attention layers."""
+@tvm_ffi.register_object("relax.frontend.nn.KVCache")
+class KVCache(tvm_ffi.Object, Effect):
+    """KVCache effect — backed by native C++."""
 
-    def __init__(self, init_seq_len: int, unit_shape: Sequence[int], dtype: str | None = None):
+    def __init__(
+        self, init_seq_len: int, unit_shape: Sequence[int], dtype: str | None = None
+    ) -> None:
         if dtype is None:
             dtype = get_default_dtype()
-        self.init_seq_len = init_seq_len
-        self.unit_shape = [int(i) for i in unit_shape]
-        self.dtype = dtype
-        self.cache = None
+        self.__init_handle_by_constructor__(
+            _ffi_api.MakeKVCache, int(init_seq_len), [int(i) for i in unit_shape], dtype
+        )
 
     def emit_init(self, name_hint, bb):
-        init_shape = rx.ShapeExpr([self.init_seq_len, *self.unit_shape])
-        return [
-            bb.emit(
-                rx.op.call_pure_packed(
-                    "vm.builtin.attention_kv_cache_create",
-                    rx.op.zeros(init_shape, self.dtype),
-                    init_shape,
-                    rx.PrimValue(0),
-                    sinfo_args=rx.ObjectStructInfo(),
-                ),
-                name_hint=name_hint,
-            )
-        ]
+        return list(self._cpp_emit_init(name_hint, bb))
 
     def create(self, name_hint):
-        self.cache = rx.Var(name_hint, struct_info=rx.ObjectStructInfo())
-        return [self.cache]
+        return list(self._cpp_create(name_hint))
 
     def set_state(self, state_vars):
-        (self.cache,) = state_vars
+        self._cpp_set_state(list(state_vars))
 
     def finalize(self):
-        result, self.cache = self.cache, None
-        return [result]
+        return list(self._cpp_finalize())
 
     def to(self, dtype=None):
         if dtype is not None:
-            self.dtype = dtype
+            self._cpp_to(dtype)
 
     def view(self, seq_len) -> Tensor:
-        shape = rx.ShapeExpr([seq_len, *self.unit_shape])
-        return Tensor(
-            _expr=rx.BlockBuilder.current().emit(
-                rx.op.call_pure_packed(
-                    "vm.builtin.attention_kv_cache_view",
-                    self.cache,
-                    shape,
-                    sinfo_args=rx.TensorStructInfo(shape, self.dtype),
-                )
-            )
-        )
+        return Tensor(_expr=self._view(int(seq_len))._expr)
 
     def append(self, new_element: Tensor) -> None:
-        if new_element.dtype != self.dtype:
-            raise TypeError(f'KVCache dtype "{self.dtype}" != "{new_element.dtype}"')
-        self.cache = rx.BlockBuilder.current().emit(
-            rx.op.call_inplace_packed(
-                "vm.builtin.attention_kv_cache_append",
-                self.cache,
-                new_element._expr,
-                inplace_indices=[0],
-                sinfo_args=rx.ObjectStructInfo(),
-            )
-        )
+        self._append(new_element)
 
 
 # ===========================================================================
-# TimestepEmbedding  (pure Python)
+# TimestepEmbedding
 # ===========================================================================
 
 
-class TimestepEmbedding(Module):
-    """HF TimestepEmbedding layer."""
+@tvm_ffi.register_object("relax.frontend.nn.TimestepEmbedding")
+class TimestepEmbedding(tvm_ffi.Object, Module):
+    """HF TimestepEmbedding layer — backed by native C++."""
 
     def __init__(
         self,
@@ -639,55 +521,51 @@ class TimestepEmbedding(Module):
         out_dim=None,
         post_act_fn=None,
         cond_proj_dim=None,
-    ):
-        self.linear_1 = Linear(in_channels, time_embed_dim)
-        self.cond_proj = (
-            Linear(cond_proj_dim, in_channels, bias=False) if cond_proj_dim is not None else None
+    ) -> None:
+        self.__init_handle_by_constructor__(
+            _ffi_api.MakeTimestepEmbedding,
+            int(in_channels),
+            int(time_embed_dim),
+            str(act_fn),
+            int(out_dim) if out_dim is not None else None,
+            str(post_act_fn) if post_act_fn is not None else None,
+            int(cond_proj_dim) if cond_proj_dim is not None else None,
         )
-        assert act_fn == "silu"
-        self.act = SiLU()
-        self.linear_2 = Linear(time_embed_dim, out_dim if out_dim else time_embed_dim)
-        self.post_act = SiLU() if post_act_fn == "silu" else None
 
     def forward(self, sample: Tensor, condition: Tensor | None = None) -> Tensor:
-        if condition is not None:
-            sample = sample + self.cond_proj(condition)
-        sample = self.act(self.linear_1(sample))
-        sample = self.linear_2(sample)
-        if self.post_act is not None:
-            sample = self.post_act(sample)
-        return sample
+        cond_var = condition._expr if condition is not None else None
+        return Tensor(_expr=self._forward(sample._expr, cond_var))
 
 
 # ===========================================================================
-# Timesteps  (pure Python)
+# Timesteps
 # ===========================================================================
 
 
-class Timesteps(Module):
-    """HF Timesteps layer."""
+@tvm_ffi.register_object("relax.frontend.nn.Timesteps")
+class Timesteps(tvm_ffi.Object, Module):
+    """HF Timesteps layer — backed by native C++."""
 
-    def __init__(self, num_channels, flip_sin_to_cos=False, downscale_freq_shift=1):
-        self.num_channels = num_channels
-        self.flip_sin_to_cos = flip_sin_to_cos
-        self.downscale_freq_shift = downscale_freq_shift
-
-    def forward(self, x: Tensor) -> Tensor:
-        return op.get_timestep_embedding(
-            x,
-            embedding_dim=self.num_channels,
-            flip_sin_to_cos=self.flip_sin_to_cos,
-            downscale_freq_shift=self.downscale_freq_shift,
+    def __init__(self, num_channels, flip_sin_to_cos=False, downscale_freq_shift=1) -> None:
+        self.__init_handle_by_constructor__(
+            _ffi_api.MakeTimesteps,
+            int(num_channels),
+            bool(flip_sin_to_cos),
+            float(downscale_freq_shift),
         )
 
+    def forward(self, x: Tensor) -> Tensor:
+        return Tensor(_expr=self._forward(x._expr))
+
 
 # ===========================================================================
-# Attention  (pure Python)
+# Attention
 # ===========================================================================
 
 
-class Attention(Module):
-    """Cross-attention layer."""
+@tvm_ffi.register_object("relax.frontend.nn.Attention")
+class Attention(tvm_ffi.Object, Module):
+    """Cross-attention layer — backed by native C++."""
 
     def __init__(
         self,
@@ -698,32 +576,20 @@ class Attention(Module):
         bias=False,
         norm_num_groups=None,
         out_bias=True,
-        scale_qk=True,
-    ):
-        self.heads = heads
-        self.inner_dim = dim_head * heads
-        cross_dim = cross_attention_dim if cross_attention_dim else query_dim
-        self.to_q = Linear(query_dim, self.inner_dim, bias=bias)
-        self.to_k = Linear(cross_dim, self.inner_dim, bias=bias)
-        self.to_v = Linear(cross_dim, self.inner_dim, bias=bias)
-        self.group_norm = (
-            GroupNorm(num_channels=query_dim, num_groups=norm_num_groups, affine=True)
-            if norm_num_groups is not None
-            else None
+        scale_qk=True,  # kept for API compat, unused
+    ) -> None:
+        self.__init_handle_by_constructor__(
+            _ffi_api.MakeAttention,
+            int(query_dim),
+            int(cross_attention_dim) if cross_attention_dim is not None else None,
+            int(heads),
+            int(dim_head),
+            bool(bias),
+            int(norm_num_groups) if norm_num_groups is not None else None,
+            bool(out_bias),
         )
-        self.to_out = ModuleList([Linear(self.inner_dim, query_dim, bias=out_bias)])
 
     def forward(self, hidden_states, encoder_hidden_states=None, attention_mask=None, **kw):
         assert attention_mask is None
-        if self.group_norm is not None:
-            hidden_states = self.group_norm(hidden_states, channel_axis=2, axes=[1])
-        q = self.to_q(hidden_states)
-        enc = encoder_hidden_states if encoder_hidden_states is not None else hidden_states
-        k, v = self.to_k(enc), self.to_v(enc)
-        head_dim = int(self.inner_dim // self.heads)
-        q = op.reshape(q, [0, -1, self.heads, head_dim])
-        k = op.reshape(k, [0, -1, self.heads, head_dim])
-        v = op.reshape(v, [0, -1, self.heads, head_dim])
-        out = op.scaled_dot_product_attention(q, k, v, is_causal=False)
-        out = op.reshape(out, (0, -1, self.heads * head_dim))
-        return self.to_out[0](out)
+        enc = encoder_hidden_states._expr if encoder_hidden_states is not None else None
+        return Tensor(_expr=self._forward(hidden_states._expr, enc))

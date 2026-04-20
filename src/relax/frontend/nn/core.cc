@@ -32,6 +32,7 @@
 #include <tvm/relax/struct_info.h>
 #include <tvm/runtime/tensor.h>
 
+#include <sstream>
 #include <string>
 
 namespace tvm {
@@ -236,6 +237,61 @@ static ffi::Optional<BlockBuilder> GetCurrentBlockBuilder() {
   return bb;
 }
 
+// ---------------------------------------------------------------------------
+// Internal helper: recursively collect NNParameters from an ffi::Any value.
+// Mirrors Python's _attribute_finder logic:
+//   Case 1: ModuleList / ModuleDict  -> GetContainerParameters
+//   Case 2: native C++ Object        -> GetNativeParameters
+//   Case 3: NNModuleNode             -> recurse into its attrs map
+//   Case 4: NNParameter              -> yield directly
+// ---------------------------------------------------------------------------
+static void CollectParameters(const ffi::Any& val, const std::string& prefix,
+                              ffi::Map<ffi::String, NNParameter>& out) {
+  // Case 4: direct NNParameter
+  if (auto opt = val.try_cast<NNParameter>()) {
+    if (!prefix.empty()) out.Set(ffi::String(prefix), opt.value());
+    return;
+  }
+
+  auto opt_ref = val.try_cast<runtime::ObjectRef>();
+  if (!opt_ref.has_value() || !opt_ref.value().defined()) return;
+  runtime::ObjectRef obj = opt_ref.value();
+
+  // Case 1: ModuleList — iterate by index, recurse into each element
+  if (const auto* list = obj.as<ModuleListNode>()) {
+    for (int64_t i = 0; i < static_cast<int64_t>(list->modules.size()); ++i) {
+      std::string child = prefix.empty() ? std::to_string(i) : prefix + "." + std::to_string(i);
+      CollectParameters(list->modules[i], child, out);
+    }
+    return;
+  }
+
+  // Case 1b: ModuleDict — iterate by key, recurse into each element
+  if (const auto* dict = obj.as<ModuleDictNode>()) {
+    for (const auto& [k, v] : dict->modules) {
+      std::string child = prefix.empty() ? std::string(k) : prefix + "." + std::string(k);
+      CollectParameters(v, child, out);
+    }
+    return;
+  }
+
+  // Case 3: NNModuleNode (or any subclass) — recurse into its attrs map
+  if (const auto* mod = obj.as<NNModuleNode>()) {
+    for (const auto& [fname, fval] : mod->attrs) {
+      std::string child = prefix.empty() ? std::string(fname) : prefix + "." + std::string(fname);
+      CollectParameters(fval, child, out);
+    }
+    return;
+  }
+
+  // Case 2: any other native C++ Object — inspect its registered fields
+  auto params = GetNativeParameters(obj);
+  for (const auto& [fname, param] : params) {
+    std::string full = prefix.empty() ? std::string(fname) : prefix + "." + std::string(fname);
+    out.Set(ffi::String(full), param);
+  }
+}
+
 // ===========================================================================
 // GetNativeParameters
 // ===========================================================================
@@ -243,6 +299,12 @@ static ffi::Optional<BlockBuilder> GetCurrentBlockBuilder() {
 ffi::Map<ffi::String, NNParameter> GetNativeParameters(runtime::ObjectRef obj) {
   ffi::Map<ffi::String, NNParameter> result;
   if (!obj.defined()) return result;
+
+  // If the object is an NNModuleNode (or subclass), use NamedParameters
+  // which walks attrs — populated by Make* factories via PopulateAttrs.
+  if (const auto* mod = obj.as<NNModuleNode>()) {
+    return mod->NamedParameters(ffi::String(""));
+  }
 
   int32_t type_index = obj->type_index();
   const TVMFFITypeInfo* type_info = TVMFFIGetTypeInfo(type_index);
@@ -284,77 +346,111 @@ ffi::Map<ffi::String, NNParameter> GetContainerParameters(runtime::ObjectRef con
                                                           ffi::String prefix) {
   ffi::Map<ffi::String, NNParameter> result;
   if (!container.defined()) return result;
-
-  auto collect = [&](const ffi::String& key, const ffi::Any& elem) {
-    std::string child_prefix =
-        prefix.empty() ? std::string(key) : std::string(prefix) + "." + std::string(key);
-
-    if (auto opt = elem.try_cast<runtime::ObjectRef>()) {
-      runtime::ObjectRef child = opt.value();
-      if (!child.defined()) return;
-
-      if (child->IsInstance<ModuleListNode>()) {
-        auto sub = GetContainerParameters(child, ffi::String(child_prefix));
-        for (const auto& [k, v] : sub) result.Set(k, v);
-      } else if (child->IsInstance<ModuleDictNode>()) {
-        auto sub = GetContainerParameters(child, ffi::String(child_prefix));
-        for (const auto& [k, v] : sub) result.Set(k, v);
-      } else {
-        // Native C++ module: inspect its fields
-        auto params = GetNativeParameters(child);
-        for (const auto& [fname, param] : params) {
-          std::string full = child_prefix + "." + std::string(fname);
-          result.Set(ffi::String(full), param);
-        }
-      }
-    }
-  };
-
-  if (container->IsInstance<ModuleListNode>()) {
-    const auto* node = container.as<ModuleListNode>();
-    for (int64_t i = 0; i < static_cast<int64_t>(node->modules.size()); ++i) {
-      collect(ffi::String(std::to_string(i)), node->modules[i]);
-    }
-  } else if (container->IsInstance<ModuleDictNode>()) {
-    const auto* node = container.as<ModuleDictNode>();
-    for (const auto& [k, v] : node->modules) {
-      collect(k, v);
-    }
-  }
+  // Strip trailing '.' from prefix if present (Python _attribute_finder adds it)
+  std::string pfx = std::string(prefix);
+  if (!pfx.empty() && pfx.back() == '.') pfx.pop_back();
+  // Delegate entirely to CollectParameters which handles ModuleListNode,
+  // ModuleDictNode, NNModuleNode subclasses, and native C++ objects uniformly.
+  CollectParameters(ffi::Any(container), pfx, result);
   return result;
 }
 
 void ContainerApplyTo(runtime::ObjectRef container, ffi::String dtype) {
   if (!container.defined()) return;
-
-  auto apply_elem = [&](const ffi::Any& elem) {
-    if (auto opt = elem.try_cast<runtime::ObjectRef>()) {
-      runtime::ObjectRef child = opt.value();
-      if (!child.defined()) return;
-      if (child->IsInstance<ModuleListNode>() || child->IsInstance<ModuleDictNode>()) {
-        ContainerApplyTo(child, dtype);
-      } else {
-        // Native C++ module: call to() on each parameter
-        auto params = GetNativeParameters(child);
-        for (const auto& [_, param] : params) {
-          param->To(dtype);
-        }
-      }
-    }
-  };
-
-  if (container->IsInstance<ModuleListNode>()) {
-    const auto* node = container.as<ModuleListNode>();
-    for (const auto& elem : node->modules) apply_elem(elem);
-  } else if (container->IsInstance<ModuleDictNode>()) {
-    const auto* node = container.as<ModuleDictNode>();
-    for (const auto& [_, v] : node->modules) apply_elem(v);
+  // Walk via NNModuleNode::To if it is one, otherwise fall back to
+  // GetNativeParameters for plain native objects.
+  if (const auto* mod = container.as<NNModuleNode>()) {
+    mod->To(dtype);
+    return;
   }
+  auto params = GetNativeParameters(container);
+  for (const auto& [_, param] : params) param->To(dtype);
 }
 
 // ===========================================================================
-// Registration
+// NNModuleNode
 // ===========================================================================
+
+ffi::Map<ffi::String, NNParameter> NNModuleNode::NamedParameters(ffi::String prefix) const {
+  ffi::Map<ffi::String, NNParameter> result;
+  for (const auto& [name, val] : attrs) {
+    std::string child =
+        prefix.empty() ? std::string(name) : std::string(prefix) + "." + std::string(name);
+    CollectParameters(val, child, result);
+  }
+  return result;
+}
+
+ffi::Map<ffi::String, NNParameter> NNModuleNode::StateDict(ffi::String prefix) const {
+  return NamedParameters(prefix);
+}
+
+ffi::Array<ffi::Array<ffi::String>> NNModuleNode::LoadStateDict(
+    ffi::Map<ffi::String, NNParameter> state_dict, bool strict) const {
+  // Build current state dict
+  ffi::Map<ffi::String, NNParameter> self_sd = StateDict(ffi::String(""));
+
+  ffi::Array<ffi::String> missing;
+  ffi::Array<ffi::String> unexpected;
+
+  for (const auto& [key, value] : state_dict) {
+    if (!self_sd.count(key)) {
+      unexpected.push_back(key);
+      continue;
+    }
+    TVM_FFI_ICHECK(value->data.has_value())
+        << "LoadStateDict: parameter '" << key << "' has no concrete data";
+    self_sd.at(key)->data = value->data;
+    self_sd.erase(key);
+  }
+
+  for (const auto& [key, _] : self_sd) missing.push_back(key);
+
+  if (strict && (missing.size() > 0 || unexpected.size() > 0)) {
+    std::ostringstream oss;
+    oss << "LoadStateDict: Missing keys: [";
+    for (size_t i = 0; i < missing.size(); ++i) {
+      if (i) oss << ", ";
+      oss << missing[i];
+    }
+    oss << "]  Unexpected keys: [";
+    for (size_t i = 0; i < unexpected.size(); ++i) {
+      if (i) oss << ", ";
+      oss << unexpected[i];
+    }
+    oss << "]";
+    TVM_FFI_THROW(KeyError) << oss.str();
+  }
+
+  return {missing, unexpected};
+}
+
+void NNModuleNode::To(ffi::String dtype) const {
+  for (const auto& [name, val] : attrs) {
+    // NNParameter: call To() directly
+    if (auto opt = val.try_cast<NNParameter>()) {
+      opt.value()->To(dtype);
+      continue;
+    }
+    auto opt_ref = val.try_cast<runtime::ObjectRef>();
+    if (!opt_ref.has_value() || !opt_ref.value().defined()) continue;
+    runtime::ObjectRef obj = opt_ref.value();
+
+    // ModuleList / ModuleDict: delegate to ContainerApplyTo
+    if (obj->IsInstance<ModuleListNode>() || obj->IsInstance<ModuleDictNode>()) {
+      ContainerApplyTo(obj, dtype);
+      continue;
+    }
+    // Nested NNModuleNode: recurse
+    if (const auto* mod = obj.as<NNModuleNode>()) {
+      mod->To(dtype);
+      continue;
+    }
+    // Other native C++ object: apply to() on its parameters
+    auto params = GetNativeParameters(obj);
+    for (const auto& [_, param] : params) param->To(dtype);
+  }
+}
 
 TVM_FFI_STATIC_INIT_BLOCK() {
   // Register Object types
@@ -363,6 +459,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   NNObjectNode::RegisterReflection();
   ModuleListNode::RegisterReflection();
   ModuleDictNode::RegisterReflection();
+  NNModuleNode::RegisterReflection();
 
   // Register global helpers
   namespace refl = tvm::ffi::reflection;
@@ -392,7 +489,10 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def("relax.frontend.nn.GetNativeParameters", GetNativeParameters)
       // Container traversal helpers
       .def("relax.frontend.nn.GetContainerParameters", GetContainerParameters)
-      .def("relax.frontend.nn.ContainerApplyTo", ContainerApplyTo);
+      .def("relax.frontend.nn.ContainerApplyTo", ContainerApplyTo)
+      // NNModule construction
+      .def("relax.frontend.nn.MakeModule",
+           [](ffi::Map<ffi::String, ffi::Any> attrs) { return NNModule(std::move(attrs)); });
 }
 
 }  // namespace nn

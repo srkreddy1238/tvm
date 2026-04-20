@@ -62,20 +62,32 @@ namespace nn {
 // ===========================================================================
 NNParameter MakeParam(ffi::Array<ffi::Any> shape, ffi::String dtype);
 
+// ===========================================================================
+// Macro: declare a module node that inherits NNModuleNode.
+//
+// Each XxxModuleNode:
+//   - Inherits NNModuleNode (gains named_parameters, state_dict,
+//     load_state_dict, to, and the attrs map).
+//   - Stores NNParameter fields AND scalar hyper-parameters as direct C++
+//     members (for typed access in Forward()), AND mirrors every NNParameter
+//     into attrs so that NNModuleNode::NamedParameters() finds them.
+//   - The Make* factory populates attrs after construction.
+// ===========================================================================
+
 // ---------------------------------------------------------------------------
 // ReLU
 // ---------------------------------------------------------------------------
 
-class ReLUModuleNode : public runtime::Object {
+class ReLUModuleNode : public NNModuleNode {
  public:
   Var Forward(Var x) const;
 
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
-    refl::ObjectDef<ReLUModuleNode>().def(refl::init<>()).def("forward", &ReLUModuleNode::Forward);
+    refl::ObjectDef<ReLUModuleNode>().def(refl::init<>()).def("_forward", &ReLUModuleNode::Forward);
   }
   static constexpr bool _type_mutable = false;
-  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.frontend.nn.ReLU", ReLUModuleNode, runtime::Object);
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.frontend.nn.ReLU", ReLUModuleNode, NNModuleNode);
 };
 class ReLUModule : public runtime::ObjectRef {
  public:
@@ -87,16 +99,16 @@ class ReLUModule : public runtime::ObjectRef {
 // SiLU
 // ---------------------------------------------------------------------------
 
-class SiLUModuleNode : public runtime::Object {
+class SiLUModuleNode : public NNModuleNode {
  public:
   Var Forward(Var x) const;
 
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
-    refl::ObjectDef<SiLUModuleNode>().def(refl::init<>()).def("forward", &SiLUModuleNode::Forward);
+    refl::ObjectDef<SiLUModuleNode>().def(refl::init<>()).def("_forward", &SiLUModuleNode::Forward);
   }
   static constexpr bool _type_mutable = false;
-  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.frontend.nn.SiLU", SiLUModuleNode, runtime::Object);
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.frontend.nn.SiLU", SiLUModuleNode, NNModuleNode);
 };
 class SiLUModule : public runtime::ObjectRef {
  public:
@@ -108,7 +120,7 @@ class SiLUModule : public runtime::ObjectRef {
 // GELU
 // ---------------------------------------------------------------------------
 
-class GELUModuleNode : public runtime::Object {
+class GELUModuleNode : public NNModuleNode {
  public:
   ffi::String approximate;  //!< "" (exact) or "tanh"
 
@@ -120,10 +132,10 @@ class GELUModuleNode : public runtime::Object {
     refl::ObjectDef<GELUModuleNode>()
         .def(refl::init<ffi::String>())
         .def_ro("approximate", &GELUModuleNode::approximate)
-        .def("forward", &GELUModuleNode::Forward);
+        .def("_forward", &GELUModuleNode::Forward);
   }
   static constexpr bool _type_mutable = false;
-  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.frontend.nn.GELU", GELUModuleNode, runtime::Object);
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.frontend.nn.GELU", GELUModuleNode, NNModuleNode);
 };
 class GELUModule : public runtime::ObjectRef {
  public:
@@ -135,7 +147,7 @@ class GELUModule : public runtime::ObjectRef {
 // Linear
 // ---------------------------------------------------------------------------
 
-class LinearModuleNode : public runtime::Object {
+class LinearModuleNode : public NNModuleNode {
  public:
   NNParameter weight;               //!< shape [out_features, in_features]
   ffi::Optional<NNParameter> bias;  //!< shape [out_features], or nullopt
@@ -154,10 +166,10 @@ class LinearModuleNode : public runtime::Object {
         .def_ro("weight", &LinearModuleNode::weight)
         .def_ro("bias", &LinearModuleNode::bias)
         .def_ro("out_dtype", &LinearModuleNode::out_dtype)
-        .def("forward", &LinearModuleNode::Forward);
+        .def("_forward", &LinearModuleNode::Forward);
   }
   static constexpr bool _type_mutable = false;
-  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.frontend.nn.Linear", LinearModuleNode, runtime::Object);
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.frontend.nn.Linear", LinearModuleNode, NNModuleNode);
 };
 class LinearModule : public runtime::ObjectRef {
  public:
@@ -173,7 +185,7 @@ LinearModule MakeLinear(ffi::Any in_features, ffi::Any out_features, bool bias,
 // Embedding
 // ---------------------------------------------------------------------------
 
-class EmbeddingModuleNode : public runtime::Object {
+class EmbeddingModuleNode : public NNModuleNode {
  public:
   NNParameter weight;  //!< shape [num_embeddings, embedding_dim]
 
@@ -185,11 +197,11 @@ class EmbeddingModuleNode : public runtime::Object {
     refl::ObjectDef<EmbeddingModuleNode>()
         .def(refl::init<NNParameter>())
         .def_ro("weight", &EmbeddingModuleNode::weight)
-        .def("forward", &EmbeddingModuleNode::Forward);
+        .def("_forward", &EmbeddingModuleNode::Forward);
   }
   static constexpr bool _type_mutable = false;
   TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.frontend.nn.Embedding", EmbeddingModuleNode,
-                                    runtime::Object);
+                                    NNModuleNode);
 };
 class EmbeddingModule : public runtime::ObjectRef {
  public:
@@ -204,7 +216,7 @@ EmbeddingModule MakeEmbedding(ffi::Any num, ffi::Any dim, ffi::Optional<ffi::Str
 // LayerNorm
 // ---------------------------------------------------------------------------
 
-class LayerNormModuleNode : public runtime::Object {
+class LayerNormModuleNode : public NNModuleNode {
  public:
   ffi::Optional<NNParameter> weight;  //!< gamma, or nullopt when !elementwise_affine
   ffi::Optional<NNParameter> bias;    //!< beta,  or nullopt when !elementwise_affine
@@ -232,11 +244,11 @@ class LayerNormModuleNode : public runtime::Object {
         .def_ro("axes", &LayerNormModuleNode::axes)
         .def_ro("epsilon", &LayerNormModuleNode::epsilon)
         .def_ro("elementwise_affine", &LayerNormModuleNode::elementwise_affine)
-        .def("forward", &LayerNormModuleNode::Forward);
+        .def("_forward", &LayerNormModuleNode::Forward);
   }
   static constexpr bool _type_mutable = false;
   TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.frontend.nn.LayerNorm", LayerNormModuleNode,
-                                    runtime::Object);
+                                    NNModuleNode);
 };
 class LayerNormModule : public runtime::ObjectRef {
  public:
@@ -253,7 +265,7 @@ LayerNormModule MakeLayerNorm(ffi::Any normalized_shape, double eps, bool elemen
 // RMSNorm
 // ---------------------------------------------------------------------------
 
-class RMSNormModuleNode : public runtime::Object {
+class RMSNormModuleNode : public NNModuleNode {
  public:
   NNParameter weight;
   ffi::Optional<NNParameter> bias;
@@ -274,11 +286,10 @@ class RMSNormModuleNode : public runtime::Object {
         .def_ro("bias", &RMSNormModuleNode::bias)
         .def_ro("axes", &RMSNormModuleNode::axes)
         .def_ro("epsilon", &RMSNormModuleNode::epsilon)
-        .def("forward", &RMSNormModuleNode::Forward);
+        .def("_forward", &RMSNormModuleNode::Forward);
   }
   static constexpr bool _type_mutable = false;
-  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.frontend.nn.RMSNorm", RMSNormModuleNode,
-                                    runtime::Object);
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.frontend.nn.RMSNorm", RMSNormModuleNode, NNModuleNode);
 };
 class RMSNormModule : public runtime::ObjectRef {
  public:
@@ -288,14 +299,14 @@ class RMSNormModule : public runtime::ObjectRef {
                                                 RMSNormModuleNode);
 };
 /*! \brief Factory: creates Parameters internally. */
-RMSNormModule MakeRMSNorm(int64_t hidden_size, ffi::Array<Integer> axes, double epsilon,
+RMSNormModule MakeRMSNorm(ffi::Any hidden_size, ffi::Array<Integer> axes, double epsilon,
                           bool has_bias, ffi::Optional<ffi::String> dtype);
 
 // ---------------------------------------------------------------------------
 // GroupNorm
 // ---------------------------------------------------------------------------
 
-class GroupNormModuleNode : public runtime::Object {
+class GroupNormModuleNode : public NNModuleNode {
  public:
   int64_t num_groups;
   ffi::Optional<NNParameter> weight;
@@ -319,11 +330,11 @@ class GroupNormModuleNode : public runtime::Object {
         .def_ro("weight", &GroupNormModuleNode::weight)
         .def_ro("bias", &GroupNormModuleNode::bias)
         .def_ro("epsilon", &GroupNormModuleNode::epsilon)
-        .def("forward", &GroupNormModuleNode::Forward);
+        .def("_forward", &GroupNormModuleNode::Forward);
   }
   static constexpr bool _type_mutable = false;
   TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.frontend.nn.GroupNorm", GroupNormModuleNode,
-                                    runtime::Object);
+                                    NNModuleNode);
 };
 class GroupNormModule : public runtime::ObjectRef {
  public:
@@ -333,14 +344,14 @@ class GroupNormModule : public runtime::ObjectRef {
                                                 GroupNormModuleNode);
 };
 /*! \brief Factory: creates Parameters internally. */
-GroupNormModule MakeGroupNorm(int64_t num_groups, int64_t num_channels, double eps, bool affine,
+GroupNormModule MakeGroupNorm(int64_t num_groups, ffi::Any num_channels, double eps, bool affine,
                               ffi::Optional<ffi::String> dtype);
 
 // ---------------------------------------------------------------------------
 // Conv1D
 // ---------------------------------------------------------------------------
 
-class Conv1DModuleNode : public runtime::Object {
+class Conv1DModuleNode : public NNModuleNode {
  public:
   NNParameter weight;
   ffi::Optional<NNParameter> bias;
@@ -368,10 +379,10 @@ class Conv1DModuleNode : public runtime::Object {
         .def_ro("padding", &Conv1DModuleNode::padding)
         .def_ro("dilation", &Conv1DModuleNode::dilation)
         .def_ro("groups", &Conv1DModuleNode::groups)
-        .def("forward", &Conv1DModuleNode::Forward);
+        .def("_forward", &Conv1DModuleNode::Forward);
   }
   static constexpr bool _type_mutable = false;
-  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.frontend.nn.Conv1D", Conv1DModuleNode, runtime::Object);
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.frontend.nn.Conv1D", Conv1DModuleNode, NNModuleNode);
 };
 class Conv1DModule : public runtime::ObjectRef {
  public:
@@ -380,7 +391,7 @@ class Conv1DModule : public runtime::ObjectRef {
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(Conv1DModule, runtime::ObjectRef, Conv1DModuleNode);
 };
 /*! \brief Factory: creates Parameters internally. */
-Conv1DModule MakeConv1D(int64_t in_channels, int64_t out_channels, int64_t kernel_size,
+Conv1DModule MakeConv1D(ffi::Any in_channels, ffi::Any out_channels, ffi::Any kernel_size,
                         int64_t stride, int64_t padding, int64_t dilation, int64_t groups,
                         bool has_bias, ffi::Optional<ffi::String> dtype);
 
@@ -388,7 +399,7 @@ Conv1DModule MakeConv1D(int64_t in_channels, int64_t out_channels, int64_t kerne
 // Conv2D
 // ---------------------------------------------------------------------------
 
-class Conv2DModuleNode : public runtime::Object {
+class Conv2DModuleNode : public NNModuleNode {
  public:
   NNParameter weight;
   ffi::Optional<NNParameter> bias;
@@ -419,10 +430,10 @@ class Conv2DModuleNode : public runtime::Object {
         .def_ro("dilation", &Conv2DModuleNode::dilation)
         .def_ro("groups", &Conv2DModuleNode::groups)
         .def_ro("data_layout", &Conv2DModuleNode::data_layout)
-        .def("forward", &Conv2DModuleNode::Forward);
+        .def("_forward", &Conv2DModuleNode::Forward);
   }
   static constexpr bool _type_mutable = false;
-  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.frontend.nn.Conv2D", Conv2DModuleNode, runtime::Object);
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.frontend.nn.Conv2D", Conv2DModuleNode, NNModuleNode);
 };
 class Conv2DModule : public runtime::ObjectRef {
  public:
@@ -431,15 +442,16 @@ class Conv2DModule : public runtime::ObjectRef {
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(Conv2DModule, runtime::ObjectRef, Conv2DModuleNode);
 };
 /*! \brief Factory: creates Parameters internally, handles kernel_size expansion. */
-Conv2DModule MakeConv2D(int64_t in_channels, int64_t out_channels, ffi::Array<Integer> kernel_size,
-                        int64_t stride, int64_t padding, int64_t dilation, int64_t groups,
-                        bool has_bias, ffi::Optional<ffi::String> dtype, ffi::String data_layout);
+Conv2DModule MakeConv2D(ffi::Any in_channels, ffi::Any out_channels,
+                        ffi::Array<Integer> kernel_size, int64_t stride, int64_t padding,
+                        int64_t dilation, int64_t groups, bool has_bias,
+                        ffi::Optional<ffi::String> dtype, ffi::String data_layout);
 
 // ---------------------------------------------------------------------------
 // Conv3D
 // ---------------------------------------------------------------------------
 
-class Conv3DModuleNode : public runtime::Object {
+class Conv3DModuleNode : public NNModuleNode {
  public:
   NNParameter weight;
   ffi::Optional<NNParameter> bias;
@@ -470,10 +482,10 @@ class Conv3DModuleNode : public runtime::Object {
         .def_ro("dilation", &Conv3DModuleNode::dilation)
         .def_ro("groups", &Conv3DModuleNode::groups)
         .def_ro("data_layout", &Conv3DModuleNode::data_layout)
-        .def("forward", &Conv3DModuleNode::Forward);
+        .def("_forward", &Conv3DModuleNode::Forward);
   }
   static constexpr bool _type_mutable = false;
-  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.frontend.nn.Conv3D", Conv3DModuleNode, runtime::Object);
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.frontend.nn.Conv3D", Conv3DModuleNode, NNModuleNode);
 };
 class Conv3DModule : public runtime::ObjectRef {
  public:
@@ -482,15 +494,16 @@ class Conv3DModule : public runtime::ObjectRef {
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(Conv3DModule, runtime::ObjectRef, Conv3DModuleNode);
 };
 /*! \brief Factory: creates Parameters internally, handles kernel_size expansion. */
-Conv3DModule MakeConv3D(int64_t in_channels, int64_t out_channels, ffi::Array<Integer> kernel_size,
-                        int64_t stride, int64_t padding, int64_t dilation, int64_t groups,
-                        bool has_bias, ffi::Optional<ffi::String> dtype, ffi::String data_layout);
+Conv3DModule MakeConv3D(ffi::Any in_channels, ffi::Any out_channels,
+                        ffi::Array<Integer> kernel_size, int64_t stride, int64_t padding,
+                        int64_t dilation, int64_t groups, bool has_bias,
+                        ffi::Optional<ffi::String> dtype, ffi::String data_layout);
 
 // ---------------------------------------------------------------------------
 // ConvTranspose1D
 // ---------------------------------------------------------------------------
 
-class ConvTranspose1DModuleNode : public runtime::Object {
+class ConvTranspose1DModuleNode : public NNModuleNode {
  public:
   NNParameter weight;
   ffi::Optional<NNParameter> bias;
@@ -521,11 +534,11 @@ class ConvTranspose1DModuleNode : public runtime::Object {
         .def_ro("output_padding", &ConvTranspose1DModuleNode::output_padding)
         .def_ro("dilation", &ConvTranspose1DModuleNode::dilation)
         .def_ro("groups", &ConvTranspose1DModuleNode::groups)
-        .def("forward", &ConvTranspose1DModuleNode::Forward);
+        .def("_forward", &ConvTranspose1DModuleNode::Forward);
   }
   static constexpr bool _type_mutable = false;
   TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.frontend.nn.ConvTranspose1D", ConvTranspose1DModuleNode,
-                                    runtime::Object);
+                                    NNModuleNode);
 };
 class ConvTranspose1DModule : public runtime::ObjectRef {
  public:
@@ -536,10 +549,282 @@ class ConvTranspose1DModule : public runtime::ObjectRef {
                                                 ConvTranspose1DModuleNode);
 };
 /*! \brief Factory: creates Parameters internally. */
-ConvTranspose1DModule MakeConvTranspose1D(int64_t in_channels, int64_t out_channels,
-                                          int64_t kernel_size, int64_t stride, int64_t padding,
+ConvTranspose1DModule MakeConvTranspose1D(ffi::Any in_channels, ffi::Any out_channels,
+                                          ffi::Any kernel_size, int64_t stride, int64_t padding,
                                           int64_t output_padding, int64_t dilation, int64_t groups,
                                           bool has_bias, ffi::Optional<ffi::String> dtype);
+
+// ---------------------------------------------------------------------------
+// Identity
+// ---------------------------------------------------------------------------
+
+class IdentityModuleNode : public NNModuleNode {
+ public:
+  Var Forward(Var x) const;
+
+  static void RegisterReflection() {
+    namespace refl = tvm::ffi::reflection;
+    refl::ObjectDef<IdentityModuleNode>()
+        .def(refl::init<>())
+        .def("_forward", &IdentityModuleNode::Forward);
+  }
+  static constexpr bool _type_mutable = false;
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.frontend.nn.Identity", IdentityModuleNode, NNModuleNode);
+};
+class IdentityModule : public runtime::ObjectRef {
+ public:
+  explicit IdentityModule();
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(IdentityModule, runtime::ObjectRef,
+                                                IdentityModuleNode);
+};
+
+// ---------------------------------------------------------------------------
+// IOEffect
+// ---------------------------------------------------------------------------
+
+/*!
+ * \brief Native C++ IOEffect: models the IO side-effect token (_io).
+ *
+ * Holds a single relax::Var (the current _io token).  The four Effect
+ * protocol methods are exposed as FFI methods so Python can call them.
+ */
+class IOEffectModuleNode : public NNModuleNode {
+ public:
+  /*! \brief The current _io Var, or undefined when not active. */
+  ffi::Optional<Var> effect;
+
+  IOEffectModuleNode() = default;
+
+  /*! \brief emit_init: emit null_value() into bb, return [io_var]. */
+  ffi::Array<Var> EmitInit(ffi::String name_hint, BlockBuilder bb) const;
+  /*! \brief create: create a placeholder Var for the _io token. */
+  ffi::Array<Var> Create(ffi::String name_hint);
+  /*! \brief set_state: update the stored _io Var from state_vars[0]. */
+  void SetState(ffi::Array<Var> state_vars);
+  /*! \brief finalize: return [effect] and clear it. */
+  ffi::Array<Var> Finalize();
+
+  static void RegisterReflection() {
+    namespace refl = tvm::ffi::reflection;
+    refl::ObjectDef<IOEffectModuleNode>()
+        .def(refl::init<>())
+        .def_rw("effect", &IOEffectModuleNode::effect)
+        .def("_cpp_emit_init", &IOEffectModuleNode::EmitInit)
+        .def("_cpp_create", &IOEffectModuleNode::Create)
+        .def("_cpp_set_state", &IOEffectModuleNode::SetState)
+        .def("_cpp_finalize", &IOEffectModuleNode::Finalize);
+  }
+  static constexpr bool _type_mutable = true;
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.frontend.nn.IOEffect", IOEffectModuleNode, NNModuleNode);
+};
+class IOEffectModule : public runtime::ObjectRef {
+ public:
+  explicit IOEffectModule();
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(IOEffectModule, runtime::ObjectRef,
+                                                IOEffectModuleNode);
+};
+
+// ---------------------------------------------------------------------------
+// KVCache
+// ---------------------------------------------------------------------------
+
+/*!
+ * \brief Native C++ KVCache effect module.
+ *
+ * Mirrors Python KVCache: holds init_seq_len, unit_shape, dtype, and the
+ * current cache Var.  Provides emit_init / create / set_state / finalize
+ * (Effect protocol) plus view() and append().
+ */
+class KVCacheModuleNode : public NNModuleNode {
+ public:
+  int64_t init_seq_len;
+  ffi::Array<Integer> unit_shape;  //!< per-token shape dims
+  ffi::String dtype;
+  ffi::Optional<Var> cache;  //!< current cache Var (ObjectStructInfo)
+
+  KVCacheModuleNode(int64_t init_seq_len, ffi::Array<Integer> unit_shape, ffi::String dtype)
+      : init_seq_len(init_seq_len), unit_shape(std::move(unit_shape)), dtype(std::move(dtype)) {}
+
+  ffi::Array<Var> EmitInit(ffi::String name_hint, BlockBuilder bb) const;
+  ffi::Array<Var> Create(ffi::String name_hint);
+  void SetState(ffi::Array<Var> state_vars);
+  ffi::Array<Var> Finalize();
+  void To(ffi::String new_dtype);
+  NNTensor View(int64_t seq_len) const;
+  void Append(NNTensor new_element);
+
+  static void RegisterReflection() {
+    namespace refl = tvm::ffi::reflection;
+    refl::ObjectDef<KVCacheModuleNode>()
+        .def(refl::init<int64_t, ffi::Array<Integer>, ffi::String>())
+        .def_ro("init_seq_len", &KVCacheModuleNode::init_seq_len)
+        .def_ro("unit_shape", &KVCacheModuleNode::unit_shape)
+        .def_rw("dtype", &KVCacheModuleNode::dtype)
+        .def_rw("cache", &KVCacheModuleNode::cache)
+        .def("_cpp_emit_init", &KVCacheModuleNode::EmitInit)
+        .def("_cpp_create", &KVCacheModuleNode::Create)
+        .def("_cpp_set_state", &KVCacheModuleNode::SetState)
+        .def("_cpp_finalize", &KVCacheModuleNode::Finalize)
+        .def("_cpp_to", &KVCacheModuleNode::To)
+        .def("_view", &KVCacheModuleNode::View)
+        .def("_append", &KVCacheModuleNode::Append);
+  }
+  static constexpr bool _type_mutable = true;
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.frontend.nn.KVCache", KVCacheModuleNode, NNModuleNode);
+};
+class KVCacheModule : public runtime::ObjectRef {
+ public:
+  explicit KVCacheModule(int64_t init_seq_len, ffi::Array<Integer> unit_shape, ffi::String dtype);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(KVCacheModule, runtime::ObjectRef,
+                                                KVCacheModuleNode);
+};
+
+// ---------------------------------------------------------------------------
+// Timesteps
+// ---------------------------------------------------------------------------
+
+class TimestepsModuleNode : public NNModuleNode {
+ public:
+  int64_t num_channels;
+  bool flip_sin_to_cos;
+  double downscale_freq_shift;
+
+  TimestepsModuleNode(int64_t num_channels, bool flip_sin_to_cos, double downscale_freq_shift)
+      : num_channels(num_channels),
+        flip_sin_to_cos(flip_sin_to_cos),
+        downscale_freq_shift(downscale_freq_shift) {}
+
+  Var Forward(Var x) const;
+
+  static void RegisterReflection() {
+    namespace refl = tvm::ffi::reflection;
+    refl::ObjectDef<TimestepsModuleNode>()
+        .def(refl::init<int64_t, bool, double>())
+        .def_ro("num_channels", &TimestepsModuleNode::num_channels)
+        .def_ro("flip_sin_to_cos", &TimestepsModuleNode::flip_sin_to_cos)
+        .def_ro("downscale_freq_shift", &TimestepsModuleNode::downscale_freq_shift)
+        .def("_forward", &TimestepsModuleNode::Forward);
+  }
+  static constexpr bool _type_mutable = false;
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.frontend.nn.Timesteps", TimestepsModuleNode,
+                                    NNModuleNode);
+};
+class TimestepsModule : public runtime::ObjectRef {
+ public:
+  explicit TimestepsModule(int64_t num_channels, bool flip_sin_to_cos, double downscale_freq_shift);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(TimestepsModule, runtime::ObjectRef,
+                                                TimestepsModuleNode);
+};
+
+// ---------------------------------------------------------------------------
+// TimestepEmbedding
+// ---------------------------------------------------------------------------
+
+class TimestepEmbeddingModuleNode : public NNModuleNode {
+ public:
+  LinearModule linear_1;
+  ffi::Optional<LinearModule> cond_proj;
+  SiLUModule act;
+  LinearModule linear_2;
+  ffi::Optional<SiLUModule> post_act;
+
+  TimestepEmbeddingModuleNode(LinearModule linear_1, ffi::Optional<LinearModule> cond_proj,
+                              SiLUModule act, LinearModule linear_2,
+                              ffi::Optional<SiLUModule> post_act)
+      : linear_1(std::move(linear_1)),
+        cond_proj(std::move(cond_proj)),
+        act(std::move(act)),
+        linear_2(std::move(linear_2)),
+        post_act(std::move(post_act)) {}
+
+  Var Forward(Var sample, ffi::Optional<Var> condition) const;
+
+  static void RegisterReflection() {
+    namespace refl = tvm::ffi::reflection;
+    refl::ObjectDef<TimestepEmbeddingModuleNode>()
+        .def(refl::init<LinearModule, ffi::Optional<LinearModule>, SiLUModule, LinearModule,
+                        ffi::Optional<SiLUModule>>())
+        .def_ro("linear_1", &TimestepEmbeddingModuleNode::linear_1)
+        .def_ro("cond_proj", &TimestepEmbeddingModuleNode::cond_proj)
+        .def_ro("act", &TimestepEmbeddingModuleNode::act)
+        .def_ro("linear_2", &TimestepEmbeddingModuleNode::linear_2)
+        .def_ro("post_act", &TimestepEmbeddingModuleNode::post_act)
+        .def("_forward", &TimestepEmbeddingModuleNode::Forward);
+  }
+  static constexpr bool _type_mutable = false;
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.frontend.nn.TimestepEmbedding",
+                                    TimestepEmbeddingModuleNode, NNModuleNode);
+};
+class TimestepEmbeddingModule : public runtime::ObjectRef {
+ public:
+  explicit TimestepEmbeddingModule(LinearModule linear_1, ffi::Optional<LinearModule> cond_proj,
+                                   SiLUModule act, LinearModule linear_2,
+                                   ffi::Optional<SiLUModule> post_act);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(TimestepEmbeddingModule, runtime::ObjectRef,
+                                                TimestepEmbeddingModuleNode);
+};
+TimestepEmbeddingModule MakeTimestepEmbedding(int64_t in_channels, int64_t time_embed_dim,
+                                              ffi::String act_fn, ffi::Optional<int64_t> out_dim,
+                                              ffi::Optional<ffi::String> post_act_fn,
+                                              ffi::Optional<int64_t> cond_proj_dim);
+
+// ---------------------------------------------------------------------------
+// Attention
+// ---------------------------------------------------------------------------
+
+class AttentionModuleNode : public NNModuleNode {
+ public:
+  int64_t heads;
+  int64_t inner_dim;
+  LinearModule to_q;
+  LinearModule to_k;
+  LinearModule to_v;
+  ffi::Optional<GroupNormModule> group_norm;
+  ModuleList to_out;  //!< [Linear(inner_dim, query_dim)]
+
+  AttentionModuleNode(int64_t heads, int64_t inner_dim, LinearModule to_q, LinearModule to_k,
+                      LinearModule to_v, ffi::Optional<GroupNormModule> group_norm,
+                      ModuleList to_out)
+      : heads(heads),
+        inner_dim(inner_dim),
+        to_q(std::move(to_q)),
+        to_k(std::move(to_k)),
+        to_v(std::move(to_v)),
+        group_norm(std::move(group_norm)),
+        to_out(std::move(to_out)) {}
+
+  /*! \brief forward(hidden_states, encoder_hidden_states=nullopt). */
+  Var Forward(Var hidden_states, ffi::Optional<Var> encoder_hidden_states) const;
+
+  static void RegisterReflection() {
+    namespace refl = tvm::ffi::reflection;
+    refl::ObjectDef<AttentionModuleNode>()
+        .def(refl::init<int64_t, int64_t, LinearModule, LinearModule, LinearModule,
+                        ffi::Optional<GroupNormModule>, ModuleList>())
+        .def_ro("heads", &AttentionModuleNode::heads)
+        .def_ro("inner_dim", &AttentionModuleNode::inner_dim)
+        .def_ro("to_q", &AttentionModuleNode::to_q)
+        .def_ro("to_k", &AttentionModuleNode::to_k)
+        .def_ro("to_v", &AttentionModuleNode::to_v)
+        .def_ro("group_norm", &AttentionModuleNode::group_norm)
+        .def_ro("to_out", &AttentionModuleNode::to_out)
+        .def("_forward", &AttentionModuleNode::Forward);
+  }
+  static constexpr bool _type_mutable = false;
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.frontend.nn.Attention", AttentionModuleNode,
+                                    NNModuleNode);
+};
+class AttentionModule : public runtime::ObjectRef {
+ public:
+  explicit AttentionModule(int64_t heads, int64_t inner_dim, LinearModule to_q, LinearModule to_k,
+                           LinearModule to_v, ffi::Optional<GroupNormModule> group_norm,
+                           ModuleList to_out);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(AttentionModule, runtime::ObjectRef,
+                                                AttentionModuleNode);
+};
+AttentionModule MakeAttention(int64_t query_dim, ffi::Optional<int64_t> cross_attention_dim,
+                              int64_t heads, int64_t dim_head, bool bias,
+                              ffi::Optional<int64_t> norm_num_groups, bool out_bias);
 
 }  // namespace nn
 }  // namespace frontend

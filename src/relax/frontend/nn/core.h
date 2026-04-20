@@ -213,6 +213,79 @@ class NNObject : public runtime::ObjectRef {
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(NNObject, runtime::ObjectRef, NNObjectNode);
 };
 
+// ===========================================================================
+// NNModuleNode  -  C++ base for nn.Module
+// ===========================================================================
+
+/*!
+ * \brief C++ base class for nn.Module.
+ *
+ * Holds the module's named sub-modules and parameters in a string-keyed map
+ * (mirroring Python's __dict__) and provides:
+ *   - named_parameters() / parameters()  via recursive _attribute_finder logic
+ *   - state_dict() / load_state_dict()   parameter serialization
+ *   - to(dtype)                          recursive dtype conversion
+ *   - __call__ / forward dispatch        via a registered FFI forward function
+ *
+ * export_tvm() and jit() remain Python-only because they depend on
+ * VirtualMachine, Target, Exporter and other Python-only infrastructure.
+ */
+class NNModuleNode : public runtime::Object {
+ public:
+  /*! \brief Named children: sub-modules, parameters, and other attributes. */
+  ffi::Map<ffi::String, ffi::Any> attrs;
+
+  NNModuleNode() = default;
+  explicit NNModuleNode(ffi::Map<ffi::String, ffi::Any> attrs) : attrs(std::move(attrs)) {}
+
+  // ---- parameter traversal -----------------------------------------------
+
+  /*! \brief Return all (dotted_name, NNParameter) pairs in this module. */
+  ffi::Map<ffi::String, NNParameter> NamedParameters(ffi::String prefix) const;
+
+  // ---- state dict ---------------------------------------------------------
+
+  /*! \brief Return an ordered map of all parameters keyed by dotted name. */
+  ffi::Map<ffi::String, NNParameter> StateDict(ffi::String prefix) const;
+
+  /*!
+   * \brief Load parameters from state_dict into this module.
+   * \param state_dict  Map of dotted-name -> NNParameter with bound data.
+   * \param strict      If true, raise on missing or unexpected keys.
+   * \return Pair (missing_keys, unexpected_keys) as Array<String>.
+   */
+  ffi::Array<ffi::Array<ffi::String>> LoadStateDict(ffi::Map<ffi::String, NNParameter> state_dict,
+                                                    bool strict) const;
+
+  // ---- dtype conversion --------------------------------------------------
+
+  /*! \brief Recursively convert all parameters and sub-modules to dtype. */
+  void To(ffi::String dtype) const;
+
+  static void RegisterReflection() {
+    namespace refl = tvm::ffi::reflection;
+    refl::ObjectDef<NNModuleNode>()
+        .def(refl::init<ffi::Map<ffi::String, ffi::Any>>())
+        .def_rw("attrs", &NNModuleNode::attrs)
+        .def("named_parameters", &NNModuleNode::NamedParameters)
+        .def("state_dict", &NNModuleNode::StateDict)
+        .def("load_state_dict", &NNModuleNode::LoadStateDict)
+        .def("to", &NNModuleNode::To);
+  }
+
+  static constexpr bool _type_mutable = true;
+  TVM_FFI_DECLARE_OBJECT_INFO("relax.frontend.nn.Module", NNModuleNode, runtime::Object);
+};
+
+class NNModule : public runtime::ObjectRef {
+ public:
+  NNModule() { data_ = ffi::make_object<NNModuleNode>(); }
+  explicit NNModule(ffi::Map<ffi::String, ffi::Any> attrs) {
+    data_ = ffi::make_object<NNModuleNode>(std::move(attrs));
+  }
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(NNModule, runtime::ObjectRef, NNModuleNode);
+};
+
 // ---------------------------------------------------------------------------
 // ModuleListNode
 // ---------------------------------------------------------------------------
@@ -224,7 +297,7 @@ class NNObject : public runtime::ObjectRef {
  * native C++ module objects and pure-Python Module instances can be stored.
  * Python wrappers provide __iter__, __getitem__, __len__, append, etc.
  */
-class ModuleListNode : public runtime::Object {
+class ModuleListNode : public NNModuleNode {
  public:
   /*! \brief The ordered list of sub-modules (each element is a Module-like object). */
   ffi::Array<ffi::Any> modules;
@@ -240,8 +313,7 @@ class ModuleListNode : public runtime::Object {
   }
 
   static constexpr bool _type_mutable = true;
-  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.frontend.nn.ModuleList", ModuleListNode,
-                                    runtime::Object);
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.frontend.nn.ModuleList", ModuleListNode, NNModuleNode);
 };
 
 class ModuleList : public runtime::ObjectRef {
@@ -260,7 +332,7 @@ class ModuleList : public runtime::ObjectRef {
  * Holds an ordered string-keyed map of sub-module objects as ffi::Any.
  * Python wrappers provide dict-like access (__getitem__, keys, items, etc.).
  */
-class ModuleDictNode : public runtime::Object {
+class ModuleDictNode : public NNModuleNode {
  public:
   /*! \brief The ordered map of sub-modules. */
   ffi::Map<ffi::String, ffi::Any> modules;
@@ -276,8 +348,7 @@ class ModuleDictNode : public runtime::Object {
   }
 
   static constexpr bool _type_mutable = true;
-  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.frontend.nn.ModuleDict", ModuleDictNode,
-                                    runtime::Object);
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.frontend.nn.ModuleDict", ModuleDictNode, NNModuleNode);
 };
 
 class ModuleDict : public runtime::ObjectRef {
@@ -285,10 +356,6 @@ class ModuleDict : public runtime::ObjectRef {
   explicit ModuleDict(ffi::Map<ffi::String, ffi::Any> modules);
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(ModuleDict, runtime::ObjectRef, ModuleDictNode);
 };
-
-// ---------------------------------------------------------------------------
-// Free functions (also registered as FFI globals)
-// ---------------------------------------------------------------------------
 
 /*! \ brief Get the thread-local default dtype string. */
 ffi::String GetDefaultDtype();

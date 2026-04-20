@@ -53,16 +53,23 @@ namespace nn {
 // ===========================================================================
 
 struct BBScope {
-  BlockBuilder* prev;
-  explicit BBScope(BlockBuilder& bb) : prev(nullptr) {
+  ffi::Optional<BlockBuilder> prev;
+  explicit BBScope(BlockBuilder& bb) {
     // Save whatever was current and install the new one
     BlockBuilder cur = BlockBuilder_Current();
-    prev = cur.defined() ? new BlockBuilder(cur) : nullptr;
+    prev = cur.defined() ? ffi::Optional<BlockBuilder>(cur) : std::nullopt;
     BlockBuilder_SetCurrent(&bb);
   }
   ~BBScope() {
-    BlockBuilder_SetCurrent(prev);
-    delete prev;
+    if (prev.has_value()) {
+      // Restore previous BB: we need a stable address for the duration of
+      // BlockBuilder_SetCurrent, so store it in a local and point to that.
+      static thread_local BlockBuilder t_prev;  // NOLINT(*)
+      t_prev = prev.value();
+      BlockBuilder_SetCurrent(&t_prev);
+    } else {
+      BlockBuilder_SetCurrent(nullptr);
+    }
   }
 };
 
@@ -174,9 +181,57 @@ static void EmitInitializeEffect(BlockBuilder& bb) {
   bb->AddFunction(func, "_initialize_effect");
 }
 
-// ===========================================================================
-// EmitMethod
-// ===========================================================================
+/*!
+ * \brief Recursively build StructInfo for a SpecTuple.
+ */
+static StructInfo BuildSpecTupleStructInfo(const SpecTupleNode* st,
+                                           std::unordered_map<std::string, tir::Var>& str2var) {
+  ffi::Array<StructInfo> fields;
+  for (const ffi::Any& elem : st->elements) {
+    auto opt = elem.try_cast<runtime::ObjectRef>();
+    TVM_FFI_ICHECK(opt.has_value()) << "SpecTuple element is not an ObjectRef";
+    runtime::ObjectRef e = opt.value();
+    if (e->IsInstance<SpecTensorNode>()) {
+      const auto* s = e.as<SpecTensorNode>();
+      ShapeExpr shape = BuildSpecShape(s->shape, str2var);
+      fields.push_back(TensorStructInfo(shape, DataType(ffi::StringToDLDataType(s->dtype))));
+    } else if (e->IsInstance<SpecTupleNode>()) {
+      fields.push_back(BuildSpecTupleStructInfo(e.as<SpecTupleNode>(), str2var));
+    } else {
+      TVM_FFI_THROW(TypeError) << "SpecTuple element has unsupported type: " << e->GetTypeKey();
+      TVM_FFI_UNREACHABLE();
+    }
+  }
+  return TupleStructInfo(fields);
+}
+
+/*!
+ * \brief Recursively build the ffi::Any input value for a SpecTuple.
+ *
+ * Returns an ffi::Array<ffi::Any> (a Python list/tuple of NNTensors or
+ * nested arrays) that forward() receives as its tuple argument.
+ * Also emits TupleGetItem bindings into bb for each leaf tensor.
+ */
+static ffi::Any BuildSpecTupleInput(const SpecTupleNode* st, Var tuple_var, BlockBuilder& bb) {
+  ffi::Array<ffi::Any> result;
+  for (size_t i = 0; i < st->elements.size(); ++i) {
+    auto opt = st->elements[i].try_cast<runtime::ObjectRef>();
+    TVM_FFI_ICHECK(opt.has_value());
+    runtime::ObjectRef e = opt.value();
+    // Emit TupleGetItem to extract element i from the tuple var
+    Var elem_var = bb->Emit(TupleGetItem(tuple_var, static_cast<int>(i)),
+                            std::string(st->name) + "_" + std::to_string(i));
+    if (e->IsInstance<SpecTensorNode>()) {
+      result.push_back(ffi::Any(NNTensor(elem_var)));
+    } else if (e->IsInstance<SpecTupleNode>()) {
+      result.push_back(BuildSpecTupleInput(e.as<SpecTupleNode>(), elem_var, bb));
+    } else {
+      TVM_FFI_THROW(TypeError) << "SpecTuple element has unsupported type: " << e->GetTypeKey();
+      TVM_FFI_UNREACHABLE();
+    }
+  }
+  return ffi::Any(result);
+}
 
 static void EmitMethod(BlockBuilder& bb, const ffi::String& method_name, const MethodSpecNode* ms,
                        const ffi::Map<ffi::String, NNParameter>& named_params, bool debug) {
@@ -208,6 +263,17 @@ static void EmitMethod(BlockBuilder& bb, const ffi::String& method_name, const M
         Var v(std::string(arg_name), ShapeStructInfo(ffi::Array<PrimExpr>{tvar}));
         input_vars.push_back(v);
         explicit_inputs.push_back(ffi::Any(v));
+
+      } else if (spec_obj->IsInstance<SpecTupleNode>()) {
+        const auto* st = spec_obj.as<SpecTupleNode>();
+        StructInfo sinfo = BuildSpecTupleStructInfo(st, str2var);
+        Var v(std::string(arg_name), sinfo);
+        input_vars.push_back(v);
+        // Defer TupleGetItem extraction to after BeginDataflowBlock.
+        // Store a sentinel: the SpecTuple ObjectRef paired with the Var.
+        // We use a 2-element Array<Any>: [SpecTuple, Var].
+        ffi::Array<ffi::Any> deferred{ffi::Any(spec_obj), ffi::Any(v)};
+        explicit_inputs.push_back(ffi::Any(deferred));
 
       } else {
         TVM_FFI_THROW(TypeError) << "EmitMethod: unsupported arg_spec type: "
@@ -329,14 +395,46 @@ static void EmitMethod(BlockBuilder& bb, const ffi::String& method_name, const M
     }
   }
 
+  // Resolve deferred SpecTuple inputs: emit TupleGetItem extractions now
+  // that we are inside the dataflow block.
+  for (size_t i = 0; i < explicit_inputs.size(); ++i) {
+    if (auto arr_opt = explicit_inputs[i].try_cast<ffi::Array<ffi::Any>>()) {
+      ffi::Array<ffi::Any> deferred = arr_opt.value();
+      // Sentinel: [SpecTuple ObjectRef, tuple Var]
+      if (deferred.size() == 2) {
+        if (auto st_opt = deferred[0].try_cast<SpecTuple>()) {
+          if (auto v_opt = deferred[1].try_cast<Var>()) {
+            explicit_inputs[i] = BuildSpecTupleInput(st_opt.value().get(), v_opt.value(), bb);
+          }
+        }
+      }
+    }
+  }
+
   // Build named_args map for forward()
   ffi::Map<ffi::String, ffi::Any> named_args;
   for (size_t i = 0; i < ms->arg_names.size(); ++i) {
     named_args.Set(ms->arg_names[i], explicit_inputs[i]);
   }
 
-  // Call the forward function
-  ffi::Any raw_out = ms->forward(named_args);
+  // Call the forward function — if it throws, close the open BB blocks first
+  // to avoid the "BlockBuilder destroyed with remaining blocks" warning and
+  // the dangling-pointer segfault in the next test.
+  ffi::Any raw_out;
+  try {
+    raw_out = ms->forward(named_args);
+  } catch (...) {
+    // Close the dataflow block and function scope before propagating.
+    try {
+      bb->EndBlock();
+    } catch (...) {
+    }
+    try {
+      bb->EndScope();
+    } catch (...) {
+    }
+    throw;
+  }
   Expr out_expr = UnwrapReturn(raw_out);
 
   // Wrap effect output if use_effect -- use the (possibly updated) _io var

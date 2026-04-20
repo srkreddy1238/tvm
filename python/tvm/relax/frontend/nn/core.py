@@ -602,13 +602,17 @@ class Module(SubroutineMixin):
             isinstance(s, _spec.Object) for ms in module_spec.method_specs for s in ms.arg_specs
         )
 
-        if has_object_spec or allow_extern:
+        # Check whether the module has any Effects (Python exporter handles them)
+        has_effects = any(
+            isinstance(item, Effect)
+            for _, item in _attribute_finder(self, "", lambda x: isinstance(x, Effect))
+        )
+
+        if has_object_spec or allow_extern or has_effects:
             # Fall back to Python Exporter (handles spec.Object, ExternModules)
             from .exporter import Exporter  # pylint: disable=import-outside-toplevel
 
-            mod, params, ext_mods = Exporter(debug=debug).build(
-                _spec._PythonModuleSpec(module_spec)
-            )
+            mod, params, ext_mods = Exporter(debug=debug).build(module_spec)
             if allow_extern:
                 return mod, params, ext_mods
             if ext_mods:
