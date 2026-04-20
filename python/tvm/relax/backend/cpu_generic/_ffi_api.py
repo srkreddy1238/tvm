@@ -1,4 +1,3 @@
-#!/bin/bash
 # Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
 # distributed with this work for additional information
@@ -14,27 +13,8 @@
 # "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
-# under the License.
+"""FFI APIs for CPU Generic"""
 
-set -euxo pipefail
+import tvm.ffi
 
-BUILD_DIR=$1
-mkdir -p "$BUILD_DIR"
-cd "$BUILD_DIR"
-cp ../cmake/config.cmake .
-
-echo set\(USE_OPENCL_GTEST /googletest\) >> config.cmake
-echo set\(USE_VULKAN_GTEST /googletest\) >> config.cmake
-
-if [ -f "${ADRENO_OPENCL}/CL/cl_qcom_ml_ops.h" ] ; then
-echo set\(USE_CLML ${ADRENO_OPENCL}\) >> config.cmake
-fi
-echo set\(USE_OPENCL ON\) >> config.cmake
-echo set\(USE_RPC ON\) >> config.cmake
-echo set\(USE_LIBBACKTRACE AUTO\) >> config.cmake
-echo set\(USE_LLVM ON\) >> config.cmake
-echo set\(USE_VULKAN ON\) >> config.cmake
-if [ ${CPP_COMPILER_CI} == "ON" ]; then
-  echo set\(USE_CPP_COMPILER ON\) >> config.cmake
-  echo set\(USE_CPP_COMPILER_TESTS \"/googletest\"\) >> config.cmake
-fi
+tvm.ffi.init_ffi_api("relax.backend.cpu_generic", __name__)

@@ -64,8 +64,7 @@ ref_target = tvm.target.Target("opencl")
 
 
 def verify_clml_codegen(clml_mod, clml_codegen):
-    clml_mod = OpenCLMLOffLoadForLLM(clml_target)(clml_mod)
-    clml_mod = OpenCLMLOffLoad()(clml_mod)
+    clml_mod = relax.backend.adreno.library_dispatch_passes(clml_target)[0](clml_mod)
 
     source = clml_mod.attrs["external_mods"][0].inspect_source()
     codegen = json.loads(source)["nodes"]

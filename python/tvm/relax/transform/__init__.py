@@ -86,6 +86,7 @@ from .transform import (
     VMShapeLower,
     SpecializePrimFuncBasedOnCallSite,
     FoldBatchnormToConv2D,
+    ApplyDlightSchedule,
     dataflowblock_pass,
     function_pass,
 )

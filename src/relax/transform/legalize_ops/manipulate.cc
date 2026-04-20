@@ -61,7 +61,16 @@ TVM_LEGALIZE_MANIPULATE_RESHAPE(reshape, topi.reshape, reshape, false);
 TVM_LEGALIZE_MANIPULATE_RESHAPE(collapse_sum_like, topi.collapse_sum, collapse_sum, true);
 TVM_LEGALIZE_MANIPULATE_RESHAPE(collapse_sum_to, topi.collapse_sum, collapse_sum, false);
 
-// Concat
+/*!
+ * \brief Legalize relax.concat to call_tir via topi.concatenate.
+ *
+ * Unpacks the tuple argument into individual tensors before forwarding
+ * to the TOPI handler.
+ *
+ * \param bb The block builder.
+ * \param call The relax.concat call to legalize.
+ * \return The legalized call_tir expression.
+ */
 Expr LegalizeConcat(const BlockBuilder& bb, const Call& call) {
   auto m_te = MakeCallTE(bb, call);
   relax::Expr t = call->args[0];
@@ -98,7 +107,17 @@ Expr LegalizeConcat(const BlockBuilder& bb, const Call& call) {
 TVM_REGISTER_OP("relax.concat")
     .set_attr<FLegalize>("FLegalize", LegalizeConcat, TVM_LEGALIZE_CPP_LEVEL);
 
-// ExpandDims
+/*!
+ * \brief Legalize relax.expand_dims to call_tir.
+ *
+ * Uses FInferStructInfo to determine the output shape after inserting the
+ * requested axes, then builds a TE compute that maps output indices back
+ * to input indices.
+ *
+ * \param bb The block builder.
+ * \param call The relax.expand_dims call to legalize.
+ * \return The legalized call_tir expression.
+ */
 Expr LegalizeExpandDims(const BlockBuilder& bb, const Call& call) {
   const auto* attrs = call->attrs.as<ExpandDimsAttrs>();
   auto m_te = MakeCallTE(bb, call);
@@ -164,7 +183,13 @@ Expr LegalizeExpandDims(const BlockBuilder& bb, const Call& call) {
 TVM_REGISTER_OP("relax.expand_dims")
     .set_attr<FLegalize>("FLegalize", LegalizeExpandDims, TVM_LEGALIZE_CPP_LEVEL);
 
-// Flatten
+/*!
+ * \brief Legalize relax.flatten to call_tir via topi.reshape.
+ *
+ * \param bb The block builder.
+ * \param call The relax.flatten call to legalize.
+ * \return The legalized call_tir expression.
+ */
 Expr LegalizeFlatten(const BlockBuilder& bb, const Call& call) {
   auto m_te = MakeCallTE(bb, call);
   tvm::ffi::Array<tvm::ffi::Any> args;
@@ -177,7 +202,13 @@ Expr LegalizeFlatten(const BlockBuilder& bb, const Call& call) {
 TVM_REGISTER_OP("relax.flatten")
     .set_attr<FLegalize>("FLegalize", LegalizeFlatten, TVM_LEGALIZE_CPP_LEVEL);
 
-// PermuteDims
+/*!
+ * \brief Legalize relax.permute_dims to call_tir via topi.transpose.
+ *
+ * \param bb The block builder.
+ * \param call The relax.permute_dims call to legalize.
+ * \return The legalized call_tir expression.
+ */
 Expr LegalizePermuteDims(const BlockBuilder& bb, const Call& call) {
   const auto* attrs = call->attrs.as<PermuteDimsAttrs>();
   auto m_te = MakeCallTE(bb, call);
@@ -190,7 +221,16 @@ Expr LegalizePermuteDims(const BlockBuilder& bb, const Call& call) {
 TVM_REGISTER_OP("relax.permute_dims")
     .set_attr<FLegalize>("FLegalize", LegalizePermuteDims, TVM_LEGALIZE_CPP_LEVEL);
 
-// Split
+/*!
+ * \brief Legalize relax.split to call_tir.
+ *
+ * Dispatches to topi::split_n_sections when `indices_or_sections` is an
+ * integer, or to topi::split_indices_array when it is an array.
+ *
+ * \param bb The block builder.
+ * \param call The relax.split call to legalize.
+ * \return The legalized call_tir expression.
+ */
 Expr LegalizeSplit(const BlockBuilder& bb, const Call& call) {
   const auto* attrs = call->attrs.as<SplitAttrs>();
   auto m_te = MakeCallTE(bb, call);
@@ -215,7 +255,13 @@ Expr LegalizeSplit(const BlockBuilder& bb, const Call& call) {
 TVM_REGISTER_OP("relax.split")
     .set_attr<FLegalize>("FLegalize", LegalizeSplit, TVM_LEGALIZE_CPP_LEVEL);
 
-// Squeeze
+/*!
+ * \brief Legalize relax.squeeze to call_tir via topi.squeeze.
+ *
+ * \param bb The block builder.
+ * \param call The relax.squeeze call to legalize.
+ * \return The legalized call_tir expression.
+ */
 Expr LegalizeSqueeze(const BlockBuilder& bb, const Call& call) {
   const auto* attrs = call->attrs.as<SqueezeAttrs>();
   auto m_te = MakeCallTE(bb, call);
@@ -228,7 +274,16 @@ Expr LegalizeSqueeze(const BlockBuilder& bb, const Call& call) {
 TVM_REGISTER_OP("relax.squeeze")
     .set_attr<FLegalize>("FLegalize", LegalizeSqueeze, TVM_LEGALIZE_CPP_LEVEL);
 
-// Stack
+/*!
+ * \brief Legalize relax.stack to call_tir via topi.stack.
+ *
+ * Unpacks the tuple argument into individual tensors before forwarding
+ * to the TOPI handler.
+ *
+ * \param bb The block builder.
+ * \param call The relax.stack call to legalize.
+ * \return The legalized call_tir expression.
+ */
 Expr LegalizeStack(const BlockBuilder& bb, const Call& call) {
   auto m_te = MakeCallTE(bb, call);
   relax::Expr t = call->args[0];
@@ -265,7 +320,16 @@ Expr LegalizeStack(const BlockBuilder& bb, const Call& call) {
 TVM_REGISTER_OP("relax.stack")
     .set_attr<FLegalize>("FLegalize", LegalizeStack, TVM_LEGALIZE_CPP_LEVEL);
 
-// Repeat
+/*!
+ * \brief Legalize relax.repeat to call_tir via topi::repeat.
+ *
+ * When no axis is specified the input is first flattened to 1-D before
+ * repeating.
+ *
+ * \param bb The block builder.
+ * \param call The relax.repeat call to legalize.
+ * \return The legalized call_tir expression.
+ */
 Expr LegalizeRepeat(const BlockBuilder& bb, const Call& call) {
   const auto* attrs = call->attrs.as<RepeatAttrs>();
   auto m_te = MakeCallTE(bb, call);
@@ -293,7 +357,13 @@ Expr LegalizeRepeat(const BlockBuilder& bb, const Call& call) {
 TVM_REGISTER_OP("relax.repeat")
     .set_attr<FLegalize>("FLegalize", LegalizeRepeat, TVM_LEGALIZE_CPP_LEVEL);
 
-// Tile
+/*!
+ * \brief Legalize relax.tile to call_tir via topi.tile.
+ *
+ * \param bb The block builder.
+ * \param call The relax.tile call to legalize.
+ * \return The legalized call_tir expression.
+ */
 Expr LegalizeTile(const BlockBuilder& bb, const Call& call) {
   const auto* attrs = call->attrs.as<TileAttrs>();
   auto m_te = MakeCallTE(bb, call);
@@ -306,7 +376,13 @@ Expr LegalizeTile(const BlockBuilder& bb, const Call& call) {
 TVM_REGISTER_OP("relax.tile")
     .set_attr<FLegalize>("FLegalize", LegalizeTile, TVM_LEGALIZE_CPP_LEVEL);
 
-// Flip
+/*!
+ * \brief Legalize relax.flip to call_tir via topi.flip.
+ *
+ * \param bb The block builder.
+ * \param call The relax.flip call to legalize.
+ * \return The legalized call_tir expression.
+ */
 Expr LegalizeFlip(const BlockBuilder& bb, const Call& call) {
   const auto* attrs = call->attrs.as<FlipAttrs>();
   auto m_te = MakeCallTE(bb, call);
@@ -319,7 +395,13 @@ Expr LegalizeFlip(const BlockBuilder& bb, const Call& call) {
 TVM_REGISTER_OP("relax.flip")
     .set_attr<FLegalize>("FLegalize", LegalizeFlip, TVM_LEGALIZE_CPP_LEVEL);
 
-// Gather Elements
+/*!
+ * \brief Legalize relax.gather_elements to call_tir via topi.gather.
+ *
+ * \param bb The block builder.
+ * \param call The relax.gather_elements call to legalize.
+ * \return The legalized call_tir expression.
+ */
 Expr LegalizeGatherElements(const BlockBuilder& bb, const Call& call) {
   const auto* attrs = call->attrs.as<GatherElementsAttrs>();
   auto m_te = MakeCallTE(bb, call);
@@ -333,7 +415,16 @@ Expr LegalizeGatherElements(const BlockBuilder& bb, const Call& call) {
 TVM_REGISTER_OP("relax.gather_elements")
     .set_attr<FLegalize>("FLegalize", LegalizeGatherElements, TVM_LEGALIZE_CPP_LEVEL);
 
-// Gather ND
+/*!
+ * \brief Legalize relax.gather_nd to call_tir via topi::gather_nd.
+ *
+ * Transposes the indices tensor from (..., M) to (M, ...) layout before
+ * forwarding to the TOPI handler.
+ *
+ * \param bb The block builder.
+ * \param call The relax.gather_nd call to legalize.
+ * \return The legalized call_tir expression.
+ */
 Expr LegalizeGatherND(const BlockBuilder& bb, const Call& call) {
   const auto* attrs = call->attrs.as<GatherNDAttrs>();
   auto m_te = MakeCallTE(bb, call);
@@ -361,7 +452,13 @@ Expr LegalizeGatherND(const BlockBuilder& bb, const Call& call) {
 TVM_REGISTER_OP("relax.gather_nd")
     .set_attr<FLegalize>("FLegalize", LegalizeGatherND, TVM_LEGALIZE_CPP_LEVEL);
 
-// IndexTensor
+/*!
+ * \brief Legalize relax.index_tensor to call_tir via topi.index_tensor.
+ *
+ * \param bb The block builder.
+ * \param call The relax.index_tensor call to legalize.
+ * \return The legalized call_tir expression.
+ */
 Expr LegalizeIndexTensor(const BlockBuilder& bb, const Call& call) {
   auto m_te = MakeCallTE(bb, call);
   tvm::ffi::Array<tvm::ffi::Any> args;
@@ -379,7 +476,13 @@ Expr LegalizeIndexTensor(const BlockBuilder& bb, const Call& call) {
 TVM_REGISTER_OP("relax.index_tensor")
     .set_attr<FLegalize>("FLegalize", LegalizeIndexTensor, TVM_LEGALIZE_CPP_LEVEL);
 
-// IndexPut
+/*!
+ * \brief Legalize relax.index_put to call_tir via topi.index_put.
+ *
+ * \param bb The block builder.
+ * \param call The relax.index_put call to legalize.
+ * \return The legalized call_tir expression.
+ */
 Expr LegalizeIndexPut(const BlockBuilder& bb, const Call& call) {
   const auto* attrs = call->attrs.as<IndexPutAttrs>();
   auto m_te = MakeCallTE(bb, call);
@@ -406,7 +509,16 @@ Expr LegalizeIndexPut(const BlockBuilder& bb, const Call& call) {
 TVM_REGISTER_OP("relax.index_put")
     .set_attr<FLegalize>("FLegalize", LegalizeIndexPut, TVM_LEGALIZE_CPP_LEVEL);
 
-// Meshgrid
+/*!
+ * \brief Legalize relax.meshgrid to call_tir via topi.meshgrid.
+ *
+ * Unpacks the tuple argument into individual tensors before forwarding
+ * to the TOPI handler.
+ *
+ * \param bb The block builder.
+ * \param call The relax.meshgrid call to legalize.
+ * \return The legalized call_tir expression.
+ */
 Expr LegalizeMeshgrid(const BlockBuilder& bb, const Call& call) {
   auto m_te = MakeCallTE(bb, call);
   relax::Expr t = call->args[0];
@@ -444,7 +556,13 @@ Expr LegalizeMeshgrid(const BlockBuilder& bb, const Call& call) {
 TVM_REGISTER_OP("relax.meshgrid")
     .set_attr<FLegalize>("FLegalize", LegalizeMeshgrid, TVM_LEGALIZE_CPP_LEVEL);
 
-// ScatterElements
+/*!
+ * \brief Legalize relax.scatter_elements to call_tir via topi::scatter_elements.
+ *
+ * \param bb The block builder.
+ * \param call The relax.scatter_elements call to legalize.
+ * \return The legalized call_tir expression.
+ */
 Expr LegalizeScatterElements(const BlockBuilder& bb, const Call& call) {
   const auto* attrs = call->attrs.as<ScatterElementsAttrs>();
   auto m_te = MakeCallTE(bb, call);
@@ -469,9 +587,16 @@ Expr LegalizeScatterElements(const BlockBuilder& bb, const Call& call) {
 TVM_REGISTER_OP("relax.scatter_elements")
     .set_attr<FLegalize>("FLegalize", LegalizeScatterElements, TVM_LEGALIZE_CPP_LEVEL);
 
-// Scatter ND
-// The Relax op passes indices in (..., M) layout; topi::scatter_nd expects
-// (M, ...).  We transpose here before calling the native C++ implementation.
+/*!
+ * \brief Legalize relax.scatter_nd to call_tir via topi::scatter_nd.
+ *
+ * The Relax op passes indices in (..., M) layout; topi::scatter_nd expects
+ * (M, ...). The indices are transposed inside the TE handler.
+ *
+ * \param bb The block builder.
+ * \param call The relax.scatter_nd call to legalize.
+ * \return The legalized call_tir expression.
+ */
 Expr LegalizeScatterND(const BlockBuilder& bb, const Call& call) {
   const auto* attrs = call->attrs.as<ScatterNDAttrs>();
   auto m_te = MakeCallTE(bb, call);
@@ -500,7 +625,13 @@ Expr LegalizeScatterND(const BlockBuilder& bb, const Call& call) {
 TVM_REGISTER_OP("relax.scatter_nd")
     .set_attr<FLegalize>("FLegalize", LegalizeScatterND, TVM_LEGALIZE_CPP_LEVEL);
 
-// SliceScatter
+/*!
+ * \brief Legalize relax.slice_scatter to call_tir via topi::slice_scatter.
+ *
+ * \param bb The block builder.
+ * \param call The relax.slice_scatter call to legalize.
+ * \return The legalized call_tir expression.
+ */
 Expr LegalizeSliceScatter(const BlockBuilder& bb, const Call& call) {
   const auto* attrs = call->attrs.as<SliceScatterAttrs>();
   auto m_te = MakeCallTE(bb, call);
@@ -525,7 +656,13 @@ Expr LegalizeSliceScatter(const BlockBuilder& bb, const Call& call) {
 TVM_REGISTER_OP("relax.slice_scatter")
     .set_attr<FLegalize>("FLegalize", LegalizeSliceScatter, TVM_LEGALIZE_CPP_LEVEL);
 
-// OneHot
+/*!
+ * \brief Legalize relax.one_hot to call_tir via topi.one_hot.
+ *
+ * \param bb The block builder.
+ * \param call The relax.one_hot call to legalize.
+ * \return The legalized call_tir expression.
+ */
 Expr LegalizeOneHot(const BlockBuilder& bb, const Call& call) {
   const auto* attrs = call->attrs.as<OneHotAttrs>();
   auto m_te = MakeCallTE(bb, call);
@@ -550,7 +687,16 @@ Expr LegalizeOneHot(const BlockBuilder& bb, const Call& call) {
 TVM_REGISTER_OP("relax.one_hot")
     .set_attr<FLegalize>("FLegalize", LegalizeOneHot, TVM_LEGALIZE_CPP_LEVEL);
 
-// LayoutTransform
+/*!
+ * \brief Legalize relax.layout_transform to call_tir.
+ *
+ * Applies the index map via s_tir::Schedule::TransformLayout and optionally
+ * sets axis separators for packed layouts.
+ *
+ * \param bb The block builder.
+ * \param call The relax.layout_transform call to legalize.
+ * \return The legalized call_tir expression.
+ */
 Expr LegalizeLayoutTransform(const BlockBuilder& bb, const Call& call) {
   const auto* attrs = call->attrs.as<LayoutTransformAttrs>();
   auto m_te = MakeCallTE(bb, call);

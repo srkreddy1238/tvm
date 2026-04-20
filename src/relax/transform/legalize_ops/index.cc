@@ -30,7 +30,13 @@
 namespace tvm {
 namespace relax {
 
-// Take
+/*!
+ * \brief Legalize relax.take to call_tir via topi.take.
+ *
+ * \param bb The block builder.
+ * \param call The relax.take call to legalize.
+ * \return The legalized call_tir expression.
+ */
 Expr LegalizeTake(const BlockBuilder& bb, const Call& call) {
   const auto* attrs = call->attrs.as<TakeAttrs>();
   auto m_te = MakeCallTE(bb, call);
@@ -48,7 +54,13 @@ Expr LegalizeTake(const BlockBuilder& bb, const Call& call) {
 TVM_REGISTER_OP("relax.take")
     .set_attr<FLegalize>("FLegalize", LegalizeTake, TVM_LEGALIZE_CPP_LEVEL);
 
-// Strided slice
+/*!
+ * \brief Legalize relax.strided_slice to call_tir via topi.strided_slice.
+ *
+ * \param bb The block builder.
+ * \param call The relax.strided_slice call to legalize.
+ * \return The legalized call_tir expression.
+ */
 Expr LegalizeStridedSlice(const BlockBuilder& bb, const Call& call) {
   const auto* attrs = call->attrs.as<StridedSliceAttrs>();
   auto m_te = MakeCallTE(bb, call);
@@ -76,7 +88,18 @@ Expr LegalizeStridedSlice(const BlockBuilder& bb, const Call& call) {
 TVM_REGISTER_OP("relax.strided_slice")
     .set_attr<FLegalize>("FLegalize", LegalizeStridedSlice, TVM_LEGALIZE_CPP_LEVEL);
 
-// Dynamic strided slice
+/*!
+ * \brief Canonicalize a slice index into the valid range for the given stride.
+ *
+ * Negative indices are wrapped by adding `extent`. The result is then clamped
+ * to [begin_range, end_range] where the range depends on the sign of `stride`.
+ *
+ * \param index The raw slice index.
+ * \param extent The size of the dimension being sliced.
+ * \param stride The slice stride (may be negative).
+ * \param dtype The integer data type to use for constants.
+ * \return The canonicalized index expression.
+ */
 inline PrimExpr CanonicalizeIndex(PrimExpr index, PrimExpr extent, PrimExpr stride,
                                   DataType dtype) {
   PrimExpr begin_range =
@@ -88,6 +111,16 @@ inline PrimExpr CanonicalizeIndex(PrimExpr index, PrimExpr extent, PrimExpr stri
   return tvm::tir::Min(tvm::tir::Max(index, begin_range), end_range);
 }
 
+/*!
+ * \brief Compute the number of elements produced by a single slice dimension.
+ *
+ * \param begin Canonicalized begin index.
+ * \param end Canonicalized end index.
+ * \param stride Slice stride (may be negative).
+ * \param extent Size of the dimension.
+ * \param dtype Integer data type for constants.
+ * \return The number of output elements along this dimension.
+ */
 inline PrimExpr GetLength(PrimExpr begin, PrimExpr end, PrimExpr stride, PrimExpr extent,
                           DataType dtype) {
   begin = CanonicalizeIndex(begin, extent, stride, dtype);
@@ -97,6 +130,18 @@ inline PrimExpr GetLength(PrimExpr begin, PrimExpr end, PrimExpr stride, PrimExp
                           ceildiv(end - begin, stride));
 }
 
+/*!
+ * \brief Compute the output shape tensor for a dynamic strided slice.
+ *
+ * For each dynamic axis `i`, the output shape at position `i` is
+ * `GetLength(begin[i], end[i], strides[i], data->shape[i])`.
+ *
+ * \param data The tensor being sliced.
+ * \param begin 1-D tensor of begin indices.
+ * \param end 1-D tensor of end indices.
+ * \param strides 1-D tensor of stride values.
+ * \return A 1-D tensor whose values are the per-axis output lengths.
+ */
 inline te::Tensor dynamic_strided_slice_shape(const te::Tensor& data, const te::Tensor& begin,
                                               const te::Tensor& end, const te::Tensor& strides) {
   DataType index_dtype = begin->shape[0]->dtype;
@@ -119,6 +164,12 @@ inline te::Tensor dynamic_strided_slice_shape(const te::Tensor& data, const te::
       "T_dynamic_strided_slice_shape_func");
 }
 
+/*!
+ * \brief TE handler that wraps dynamic_strided_slice_shape for use with MakeCallTE.
+ *
+ * \param args Packed argument list: [data, begin, end, strides].
+ * \return A single-element array containing the output-shape tensor.
+ */
 ffi::Array<te::Tensor> dynamic_strided_slice_shape_func(const ffi::Array<ffi::Any> args) {
   te::Tensor x = args[0].cast<te::Tensor>();
   te::Tensor begin = args[1].cast<te::Tensor>();
@@ -128,6 +179,16 @@ ffi::Array<te::Tensor> dynamic_strided_slice_shape_func(const ffi::Array<ffi::An
   return {dynamic_strided_slice_shape(x, begin, end, strides)};
 }
 
+/*!
+ * \brief Legalize relax.dynamic_strided_slice to call_tir.
+ *
+ * First emits a shape-inference call to determine the output shape at
+ * runtime, then emits the actual slice via topi.relax_dynamic_strided_slice.
+ *
+ * \param bb The block builder.
+ * \param call The relax.dynamic_strided_slice call to legalize.
+ * \return The legalized call_tir expression.
+ */
 Expr LegalizeDynamicStridedSlice(const BlockBuilder& bb, const Call& call) {
   TVM_FFI_ICHECK(call->args.size() == 4) << "Expected 4 args to dynamic strided slice";
   auto m_te = MakeCallTE(bb, call);

@@ -77,13 +77,27 @@ TVM_LEGALIZE_UNARY_OP(cast)
 TVM_LEGALIZE_UNARY_OP(reinterpret)
 TVM_LEGALIZE_UNARY_OP(elementwise_sum)
 
-// square: x * x
+/*!
+ * \brief TE handler for the square element-wise operation.
+ *
+ * Computes `x * x` element-wise.
+ *
+ * \param args Packed argument list: [x].
+ * \return A single-element array containing the squared output tensor.
+ */
 ffi::Array<te::Tensor> SquareTE(const ffi::Array<ffi::Any> args) {
   auto x = args[0].cast<te::Tensor>();
   return {tvm::te::compute(
       x->shape, [&](const ffi::Array<tvm::tir::Var>& i) { return x(i) * x(i); }, "tir_square",
       topi::kElementWise)};
 }
+/*!
+ * \brief Legalize relax.square to call_tir via SquareTE.
+ *
+ * \param bb The block builder.
+ * \param call The relax.square call to legalize.
+ * \return The legalized call_tir expression.
+ */
 Expr UnaryLegalizeSquare(const BlockBuilder& bb, const Call& call) {
   auto m_te = MakeCallTE(bb, call);
   return m_te.Make(tvm::ffi::Array<tvm::ffi::Any>({call->args[0]}), FTOPIHandler(SquareTE),
@@ -92,7 +106,15 @@ Expr UnaryLegalizeSquare(const BlockBuilder& bb, const Call& call) {
 TVM_REGISTER_OP("relax.square")
     .set_attr<FLegalize>("FLegalize", UnaryLegalizeSquare, TVM_LEGALIZE_CPP_LEVEL);
 
-// erf: float16 inputs are cast to float32, erf computed, then cast back.
+/*!
+ * \brief TE handler for the error function (erf).
+ *
+ * For float16 inputs the computation is promoted to float32 and the result
+ * is cast back to float16.
+ *
+ * \param args Packed argument list: [x].
+ * \return A single-element array containing the erf output tensor.
+ */
 ffi::Array<te::Tensor> ErfTE(const ffi::Array<ffi::Any> args) {
   auto x = args[0].cast<te::Tensor>();
   if (x->dtype == DataType::Float(16)) {
@@ -102,6 +124,13 @@ ffi::Array<te::Tensor> ErfTE(const ffi::Array<ffi::Any> args) {
   }
   return {topi::erf(x)};
 }
+/*!
+ * \brief Legalize relax.erf to call_tir via ErfTE.
+ *
+ * \param bb The block builder.
+ * \param call The relax.erf call to legalize.
+ * \return The legalized call_tir expression.
+ */
 Expr UnaryLegalizeErf(const BlockBuilder& bb, const Call& call) {
   auto m_te = MakeCallTE(bb, call);
   return m_te.Make(tvm::ffi::Array<tvm::ffi::Any>({call->args[0]}), FTOPIHandler(ErfTE),
@@ -110,6 +139,13 @@ Expr UnaryLegalizeErf(const BlockBuilder& bb, const Call& call) {
 TVM_REGISTER_OP("relax.erf")
     .set_attr<FLegalize>("FLegalize", UnaryLegalizeErf, TVM_LEGALIZE_CPP_LEVEL);
 
+/*!
+ * \brief Legalize relax.clip to call_tir via topi.clip.
+ *
+ * \param bb The block builder.
+ * \param call The relax.clip call to legalize.
+ * \return The legalized call_tir expression.
+ */
 Expr UnaryLegalizeClip(const BlockBuilder& bb, const Call& call) {
   auto m_te = MakeCallTE(bb, call);
   auto call_ret =

@@ -44,8 +44,8 @@ IRModule GPURelaxPipeline::Legalize(IRModule mod) {
   mod = relax::transform::FoldConstant()(mod);
   mod = relax::transform::FuseOps()(mod);
   mod = relax::transform::FuseTIR()(mod);
-  // Only fallback is ported to cpp
-  ffi::Array<ffi::String> rules = {"dl.gpu.Fallback"};
+  ffi::Array<ffi::String> rules = {"dl.gpu.Matmul", "dl.gpu.GEMV", "dl.gpu.Reduction",
+                                   "dl.gpu.GeneralReduction", "dl.gpu.Fallback"};
   mod = relax::transform::ApplyDlightSchedule(rules)(mod);
   return mod;
 }

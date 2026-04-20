@@ -33,6 +33,13 @@ namespace relax {
 // ---------------------------------------------------------------------------
 // Shared helper: convert an Array<int64_t> attribute to Array<PrimExpr>
 // ---------------------------------------------------------------------------
+/*!
+ * \brief Convert an Array<int64_t> attribute to Array<PrimExpr> with the given dtype.
+ *
+ * \param arr The integer array to convert.
+ * \param dtype The target PrimExpr integer data type.
+ * \return The converted PrimExpr array.
+ */
 static ffi::Array<tvm::PrimExpr> Int64ArrayToPrimExpr(const ffi::Array<int64_t>& arr,
                                                       const DataType& dtype) {
   ffi::Array<tvm::PrimExpr> out;
@@ -253,6 +260,22 @@ ffi::Array<te::Tensor> AdaptiveAvgPool3DTE(const ffi::Array<ffi::Any> args) {
 // Shared helper: build the args array and call MakeCallTE for regular pooling.
 // Used by all six max/avg pool 1-D/2-D/3-D legalizers.
 // ---------------------------------------------------------------------------
+/*!
+ * \brief Shared legalizer for regular (non-adaptive) pooling operators.
+ *
+ * Builds the argument list from the operator attributes and forwards to the
+ * provided TE handler. Returns the original call unchanged if the input and
+ * output layouts differ.
+ *
+ * \tparam AttrsT The concrete pooling attribute type (e.g. Pool2DAttrs).
+ * \param bb The block builder.
+ * \param call The pooling call to legalize.
+ * \param op_name Human-readable operator name used in warning messages.
+ * \param te_handler The TE compute handler for this pooling variant.
+ * \param pool_type_str Either "max" or "avg".
+ * \return The legalized call_tir expression, or the original call if the
+ *         layout constraint is not satisfied.
+ */
 template <typename AttrsT>
 static Expr LegalizePool(const BlockBuilder& bb, const Call& call, const char* op_name,
                          FTOPIHandler te_handler, const ffi::String& pool_type_str) {
@@ -287,7 +310,13 @@ static Expr LegalizePool(const BlockBuilder& bb, const Call& call, const char* o
 // Legalizers
 // ---------------------------------------------------------------------------
 
-// max_pool1d
+/*!
+ * \brief Legalize relax.nn.max_pool1d to call_tir via Pool1DTE.
+ *
+ * \param bb The block builder.
+ * \param call The relax.nn.max_pool1d call to legalize.
+ * \return The legalized call_tir expression.
+ */
 Expr LegalizeNNMaxPool1D(const BlockBuilder& bb, const Call& call) {
   return LegalizePool<Pool1DAttrs>(bb, call, "max_pool1d", FTOPIHandler(Pool1DTE),
                                    ffi::String("max"));
@@ -295,7 +324,13 @@ Expr LegalizeNNMaxPool1D(const BlockBuilder& bb, const Call& call) {
 TVM_REGISTER_OP("relax.nn.max_pool1d")
     .set_attr<FLegalize>("FLegalize", LegalizeNNMaxPool1D, TVM_LEGALIZE_CPP_LEVEL);
 
-// max_pool2d
+/*!
+ * \brief Legalize relax.nn.max_pool2d to call_tir via Pool2DTE.
+ *
+ * \param bb The block builder.
+ * \param call The relax.nn.max_pool2d call to legalize.
+ * \return The legalized call_tir expression.
+ */
 Expr LegalizeNNMaxPool2D(const BlockBuilder& bb, const Call& call) {
   return LegalizePool<Pool2DAttrs>(bb, call, "max_pool2d", FTOPIHandler(Pool2DTE),
                                    ffi::String("max"));
@@ -303,7 +338,13 @@ Expr LegalizeNNMaxPool2D(const BlockBuilder& bb, const Call& call) {
 TVM_REGISTER_OP("relax.nn.max_pool2d")
     .set_attr<FLegalize>("FLegalize", LegalizeNNMaxPool2D, TVM_LEGALIZE_CPP_LEVEL);
 
-// max_pool3d
+/*!
+ * \brief Legalize relax.nn.max_pool3d to call_tir via Pool3DTE.
+ *
+ * \param bb The block builder.
+ * \param call The relax.nn.max_pool3d call to legalize.
+ * \return The legalized call_tir expression.
+ */
 Expr LegalizeNNMaxPool3D(const BlockBuilder& bb, const Call& call) {
   return LegalizePool<Pool3DAttrs>(bb, call, "max_pool3d", FTOPIHandler(Pool3DTE),
                                    ffi::String("max"));
@@ -311,7 +352,13 @@ Expr LegalizeNNMaxPool3D(const BlockBuilder& bb, const Call& call) {
 TVM_REGISTER_OP("relax.nn.max_pool3d")
     .set_attr<FLegalize>("FLegalize", LegalizeNNMaxPool3D, TVM_LEGALIZE_CPP_LEVEL);
 
-// avg_pool1d
+/*!
+ * \brief Legalize relax.nn.avg_pool1d to call_tir via Pool1DTE.
+ *
+ * \param bb The block builder.
+ * \param call The relax.nn.avg_pool1d call to legalize.
+ * \return The legalized call_tir expression.
+ */
 Expr LegalizeNNAvgPool1D(const BlockBuilder& bb, const Call& call) {
   return LegalizePool<Pool1DAttrs>(bb, call, "avg_pool1d", FTOPIHandler(Pool1DTE),
                                    ffi::String("avg"));
@@ -319,7 +366,13 @@ Expr LegalizeNNAvgPool1D(const BlockBuilder& bb, const Call& call) {
 TVM_REGISTER_OP("relax.nn.avg_pool1d")
     .set_attr<FLegalize>("FLegalize", LegalizeNNAvgPool1D, TVM_LEGALIZE_CPP_LEVEL);
 
-// avg_pool2d
+/*!
+ * \brief Legalize relax.nn.avg_pool2d to call_tir via Pool2DTE.
+ *
+ * \param bb The block builder.
+ * \param call The relax.nn.avg_pool2d call to legalize.
+ * \return The legalized call_tir expression.
+ */
 Expr LegalizeNNAvgPool2D(const BlockBuilder& bb, const Call& call) {
   return LegalizePool<Pool2DAttrs>(bb, call, "avg_pool2d", FTOPIHandler(Pool2DTE),
                                    ffi::String("avg"));
@@ -327,7 +380,13 @@ Expr LegalizeNNAvgPool2D(const BlockBuilder& bb, const Call& call) {
 TVM_REGISTER_OP("relax.nn.avg_pool2d")
     .set_attr<FLegalize>("FLegalize", LegalizeNNAvgPool2D, TVM_LEGALIZE_CPP_LEVEL);
 
-// avg_pool3d
+/*!
+ * \brief Legalize relax.nn.avg_pool3d to call_tir via Pool3DTE.
+ *
+ * \param bb The block builder.
+ * \param call The relax.nn.avg_pool3d call to legalize.
+ * \return The legalized call_tir expression.
+ */
 Expr LegalizeNNAvgPool3D(const BlockBuilder& bb, const Call& call) {
   return LegalizePool<Pool3DAttrs>(bb, call, "avg_pool3d", FTOPIHandler(Pool3DTE),
                                    ffi::String("avg"));
@@ -335,7 +394,14 @@ Expr LegalizeNNAvgPool3D(const BlockBuilder& bb, const Call& call) {
 TVM_REGISTER_OP("relax.nn.avg_pool3d")
     .set_attr<FLegalize>("FLegalize", LegalizeNNAvgPool3D, TVM_LEGALIZE_CPP_LEVEL);
 
-// adaptive_avg_pool1d
+/*!
+ * \brief Legalize relax.nn.adaptive_avg_pool1d to call_tir via AdaptiveAvgPool1DTE.
+ *
+ * \param bb The block builder.
+ * \param call The relax.nn.adaptive_avg_pool1d call to legalize.
+ * \return The legalized call_tir expression, or the original call if the
+ *         layout constraint is not satisfied.
+ */
 Expr LegalizeNNAdaptiveAvgPool1D(const BlockBuilder& bb, const Call& call) {
   const auto* attrs = call->attrs.as<AdaptivePool1DAttrs>();
 
@@ -357,7 +423,14 @@ Expr LegalizeNNAdaptiveAvgPool1D(const BlockBuilder& bb, const Call& call) {
 TVM_REGISTER_OP("relax.nn.adaptive_avg_pool1d")
     .set_attr<FLegalize>("FLegalize", LegalizeNNAdaptiveAvgPool1D, TVM_LEGALIZE_CPP_LEVEL);
 
-// adaptive_avg_pool2d
+/*!
+ * \brief Legalize relax.nn.adaptive_avg_pool2d to call_tir via AdaptiveAvgPool2DTE.
+ *
+ * \param bb The block builder.
+ * \param call The relax.nn.adaptive_avg_pool2d call to legalize.
+ * \return The legalized call_tir expression, or the original call if the
+ *         layout constraint is not satisfied.
+ */
 Expr LegalizeNNAdaptiveAvgPool2D(const BlockBuilder& bb, const Call& call) {
   const auto* attrs = call->attrs.as<AdaptivePool2DAttrs>();
 
@@ -379,7 +452,14 @@ Expr LegalizeNNAdaptiveAvgPool2D(const BlockBuilder& bb, const Call& call) {
 TVM_REGISTER_OP("relax.nn.adaptive_avg_pool2d")
     .set_attr<FLegalize>("FLegalize", LegalizeNNAdaptiveAvgPool2D, TVM_LEGALIZE_CPP_LEVEL);
 
-// adaptive_avg_pool3d
+/*!
+ * \brief Legalize relax.nn.adaptive_avg_pool3d to call_tir via AdaptiveAvgPool3DTE.
+ *
+ * \param bb The block builder.
+ * \param call The relax.nn.adaptive_avg_pool3d call to legalize.
+ * \return The legalized call_tir expression, or the original call if the
+ *         layout constraint is not satisfied.
+ */
 Expr LegalizeNNAdaptiveAvgPool3D(const BlockBuilder& bb, const Call& call) {
   const auto* attrs = call->attrs.as<AdaptivePool3DAttrs>();
 

@@ -1645,6 +1645,17 @@ def FoldBatchnormToConv2D() -> tvm.ir.transform.Pass:
     return _ffi_api.FoldBatchnormToConv2D()  # type: ignore
 
 
+def ApplyDlightSchedule(rule_list: list[str]) -> tvm.ir.transform.Pass:
+    """Apply given list of dlight schedules
+
+    Returns
+    -------
+    ret: tvm.ir.transform.Pass
+        ApplyDlightSchedule pass.
+    """
+    return _ffi_api.ApplyDlightSchedule(rule_list)  # type: ignore
+
+
 def _wrap_class_function_pass(pass_cls, pass_info):
     """Wrap a python class as function pass."""
 

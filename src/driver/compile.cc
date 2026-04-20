@@ -137,7 +137,7 @@ ffi::Module Compile(IRModule mod, ffi::Any target, ffi::Map<Any, ObjectRef> para
   };
 
   // Relax Pipeline
-  mod = apply_module_pass_(mod, ffi::String("relax.pipeline.") + relax_pipeline_);
+  mod = apply_module_pass_(mod, ffi::String("relax.backend.") + relax_pipeline_ + ".Pipeline");
 
   // LOG(WARNING) << "Relax Mod:" << mod;
 
@@ -174,19 +174,19 @@ ffi::Module Compile(IRModule mod, ffi::Any target, ffi::Map<Any, ObjectRef> para
   tir_mod = tir::transform::BindTarget(target_)(tir_mod);
 
   tir_mod = apply_module_pass_(
-      tir_mod, ffi::String("s_tir.pipeline.") + tir_pipeline_ + ffi::String(".Base"));
+      tir_mod, ffi::String("s_tir.backend.") + tir_pipeline_ + ffi::String(".PipelineBase"));
 
   // Split host and device
   auto [host_mod, device_mod_dict] = SplitHostDeviceMods(tir_mod);
 
   // TIR Host
   host_mod = apply_module_pass_(
-      host_mod, ffi::String("s_tir.pipeline.") + tir_pipeline_ + ffi::String(".Host"));
+      host_mod, ffi::String("s_tir.backend.") + tir_pipeline_ + ffi::String(".PipelineHost"));
 
   // TIR Device
   for (auto [tgt, dmod] : device_mod_dict) {
     dmod = apply_module_pass_(
-        dmod, ffi::String("s_tir.pipeline.") + tir_pipeline_ + ffi::String(".Device"));
+        dmod, ffi::String("s_tir.backend.") + tir_pipeline_ + ffi::String(".PipelineDevice"));
     device_mod_dict.Set(tgt, dmod);
   }
 

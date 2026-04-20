@@ -41,39 +41,42 @@ using tvm::transform::CreateModulePass;
 #define JOIN(x, y) x##y
 #define MAKE_NAME(a, b) JOIN(a, b)
 
-#define TVM_S_TIR_BACKEND_PIPELINE(Backend, PipelineClass)                                         \
-  Pass MAKE_NAME(PipelineClass, Base)(Target target) {                                             \
-    auto pass_func = [=](IRModule mod, PassContext pc) {                                           \
-      auto pipeline = PipelineClass(target);                                                       \
-      mod = pipeline.Base(mod);                                                                    \
-      return mod;                                                                                  \
-    };                                                                                             \
-    return CreateModulePass(/*pass_function=*/pass_func, /*opt_level=*/0,                          \
-                            /*pass_name=*/#PipelineClass "Base", /*required=*/{});                 \
-  }                                                                                                \
-  Pass MAKE_NAME(PipelineClass, Host)(Target target) {                                             \
-    auto pass_func = [=](IRModule mod, PassContext pc) {                                           \
-      auto pipeline = PipelineClass(target);                                                       \
-      mod = pipeline.Host(mod);                                                                    \
-      return mod;                                                                                  \
-    };                                                                                             \
-    return CreateModulePass(/*pass_function=*/pass_func, /*opt_level=*/0,                          \
-                            /*pass_name=*/#PipelineClass "Host", /*required=*/{});                 \
-  }                                                                                                \
-  Pass MAKE_NAME(PipelineClass, Device)(Target target) {                                           \
-    auto pass_func = [=](IRModule mod, PassContext pc) {                                           \
-      auto pipeline = PipelineClass(target);                                                       \
-      mod = pipeline.Device(mod);                                                                  \
-      return mod;                                                                                  \
-    };                                                                                             \
-    return CreateModulePass(/*pass_function=*/pass_func, /*opt_level=*/0,                          \
-                            /*pass_name=*/#PipelineClass "Device", /*required=*/{});               \
-  }                                                                                                \
-  TVM_FFI_STATIC_INIT_BLOCK() {                                                                    \
-    namespace refl = tvm::ffi::reflection;                                                         \
-    refl::GlobalDef().def("s_tir.pipeline." #Backend ".Base", MAKE_NAME(PipelineClass, Base));     \
-    refl::GlobalDef().def("s_tir.pipeline." #Backend ".Host", MAKE_NAME(PipelineClass, Host));     \
-    refl::GlobalDef().def("s_tir.pipeline." #Backend ".Device", MAKE_NAME(PipelineClass, Device)); \
+#define TVM_S_TIR_BACKEND_PIPELINE(Backend, PipelineClass)                           \
+  Pass MAKE_NAME(PipelineClass, Base)(Target target) {                               \
+    auto pass_func = [=](IRModule mod, PassContext pc) {                             \
+      auto pipeline = PipelineClass(target);                                         \
+      mod = pipeline.Base(mod);                                                      \
+      return mod;                                                                    \
+    };                                                                               \
+    return CreateModulePass(/*pass_function=*/pass_func, /*opt_level=*/0,            \
+                            /*pass_name=*/#PipelineClass "Base", /*required=*/{});   \
+  }                                                                                  \
+  Pass MAKE_NAME(PipelineClass, Host)(Target target) {                               \
+    auto pass_func = [=](IRModule mod, PassContext pc) {                             \
+      auto pipeline = PipelineClass(target);                                         \
+      mod = pipeline.Host(mod);                                                      \
+      return mod;                                                                    \
+    };                                                                               \
+    return CreateModulePass(/*pass_function=*/pass_func, /*opt_level=*/0,            \
+                            /*pass_name=*/#PipelineClass "Host", /*required=*/{});   \
+  }                                                                                  \
+  Pass MAKE_NAME(PipelineClass, Device)(Target target) {                             \
+    auto pass_func = [=](IRModule mod, PassContext pc) {                             \
+      auto pipeline = PipelineClass(target);                                         \
+      mod = pipeline.Device(mod);                                                    \
+      return mod;                                                                    \
+    };                                                                               \
+    return CreateModulePass(/*pass_function=*/pass_func, /*opt_level=*/0,            \
+                            /*pass_name=*/#PipelineClass "Device", /*required=*/{}); \
+  }                                                                                  \
+  TVM_FFI_STATIC_INIT_BLOCK() {                                                      \
+    namespace refl = tvm::ffi::reflection;                                           \
+    refl::GlobalDef().def("s_tir.backend." #Backend ".PipelineBase",                 \
+                          MAKE_NAME(PipelineClass, Base));                           \
+    refl::GlobalDef().def("s_tir.backend." #Backend ".PipelineHost",                 \
+                          MAKE_NAME(PipelineClass, Host));                           \
+    refl::GlobalDef().def("s_tir.backend." #Backend ".PipelineDevice",               \
+                          MAKE_NAME(PipelineClass, Device));                         \
   }
 
 // Generic S-TIR Pipeline that can be extended by any backend

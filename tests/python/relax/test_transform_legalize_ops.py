@@ -16,6 +16,8 @@
 # under the License.
 # ruff: noqa: E501
 
+import os
+
 import pytest
 
 import tvm
@@ -272,7 +274,11 @@ def test_matmul_legalization_requires_known_dtype():
         def main(A: R.Tensor([16, 32]), B: R.Tensor([32, 8])) -> R.Tensor([16, 8]):
             return R.matmul(A, B)
 
-    with pytest.raises(tvm.error.InternalError):
+    with pytest.raises(
+        AssertionError
+        if os.environ.get("CPP_COMPILER_CI", "OFF") == "OFF"
+        else tvm.error.InternalError
+    ):
         LegalizeOps()(ArbitraryDtype)
 
 

@@ -16,6 +16,12 @@
  * specific language governing permissions and limitations
  * under the License.
  */
+
+/*!
+ * \file src/dlight/gpu/fallback.cc
+ * \brief Fallback schedule rule for GPU operators.
+ */
+
 #include <tvm/dlight/dlight_rule.h>
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/s_tir/schedule/schedule.h>
@@ -29,7 +35,6 @@ namespace dlight {
 
 class ApplyFallbackRuleNode : public DlightRuleNode {
  public:
-  // Inherited from DlightRuleNode
   ffi::Optional<s_tir::Schedule> Apply(const tir::PrimFunc& func, const tvm::Target& target) final {
     if (!target->HasKey("gpu")) {
       return std::nullopt;

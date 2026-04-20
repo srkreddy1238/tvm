@@ -23,6 +23,7 @@
 
 #include <tvm/relax/backend/adreno/transform.h>
 #include <tvm/relax/backend/pipeline.h>
+#include <tvm/relax/transform.h>
 
 namespace tvm {
 namespace relax {
@@ -45,16 +46,22 @@ class AdrenoRelaxPipeline : GPURelaxPipeline {
 
   IRModule Legalize(IRModule mod) {
     bool is_texture = Target::Current(true)->HasKey("texture");
+    bool is_coopmat = Target::Current(true)
+                          ->GetAttr<Bool>("supports_khr_cooperative_matrix", Bool(false))
+                          .value();
     mod = relax::transform::DecomposeOpsForInference(std::nullopt)(mod);
-    if (is_texture) {
-      ffi::Map<ffi::String, ffi::Array<ffi::String>> desired_layouts = {
-          {"relax.nn.conv2d", {"NCHW4c", "OIHW4o", "NCHW4c"}}};
+    if (is_texture || is_coopmat) {
       ffi::Array<ffi::String> skip_ops = {
           "relax.nn.conv2d",
           "relax.nn.max_pool2d",
           "relax.nn.adaptive_avg_pool2d",
       };
-      mod = relax::transform::ConvertLayout(desired_layouts, nullptr)(mod);
+      auto cb_fn = ffi::Function::GetGlobal("relax.backend.adreno.legalize.conv2d_convert_layout");
+      TVM_FFI_ICHECK(cb_fn)
+          << "Global function not found : relax.backend.adreno.legalize.conv2d_convert_layout";
+      auto layout_cb = (*cb_fn)(is_coopmat).cast<ffi::Function>();
+      mod = relax::transform::ConvertLayout(ffi::Map<ffi::String, ffi::Array<ffi::String>>({}),
+                                            layout_cb)(mod);
       mod = relax::transform::Normalize()(mod);
       mod = relax::transform::FoldConstant()(mod);
       mod = relax::transform::LegalizeOps(std::nullopt, skip_ops)(mod);
@@ -65,8 +72,18 @@ class AdrenoRelaxPipeline : GPURelaxPipeline {
     mod = relax::transform::LegalizeOps()(mod);
 
     if (is_texture) {
-      // TODO(Siva): {"relax.nn.conv2d": legalize_adreno.conv2d_NCHWc_OIHWo}
       ffi::Map<ffi::String, ffi::Function> cmap;
+      auto gf = ffi::Function::GetGlobal("relax.backend.adreno.legalize.conv2d_NCHWc_OIHWo");
+      TVM_FFI_ICHECK(gf)
+          << "Global function not found : relax.backend.adreno.legalize.conv2d_NCHWc_OIHWo";
+      cmap.Set("relax.nn.conv2d", *gf);
+      mod = relax::transform::LegalizeOps(cmap)(mod);
+    } else if (is_coopmat) {
+      ffi::Map<ffi::String, ffi::Function> cmap;
+      auto gf = ffi::Function::GetGlobal("relax.backend.adreno.legalize.conv2d_matmul");
+      TVM_FFI_ICHECK(gf)
+          << "Global function not found : relax.backend.adreno.legalize.conv2d_matmul";
+      cmap.Set("relax.nn.conv2d", *gf);
       mod = relax::transform::LegalizeOps(cmap)(mod);
     }
 
@@ -84,9 +101,19 @@ class AdrenoRelaxPipeline : GPURelaxPipeline {
 
     mod = relax::transform::Normalize()(mod);
 
-    ffi::Array<ffi::String> rules = {"dl.adreno.Conv2D",        "dl.adreno.LayoutTransform",
-                                     "dl.adreno.Pool2D",        "dl.gpu.Reduction",
-                                     "dl.gpu.GeneralReduction", "dl.gpu.Fallback"};
+    ffi::Array<ffi::String> rules;
+    if (is_coopmat) {
+      rules.push_back("dl.adreno.DequantMatmulTensorization");
+      rules.push_back("dl.adreno.MatmulTensorization");
+    }
+    rules.push_back("dl.adreno.Conv2D");
+    rules.push_back("dl.adreno.LayoutTransform");
+    rules.push_back("dl.adreno.Pool2D");
+    rules.push_back("dl.adreno.Fallback");
+    rules.push_back("dl.gpu.Matmul");
+    rules.push_back("dl.gpu.Reduction");
+    rules.push_back("dl.gpu.GeneralReduction");
+    rules.push_back("dl.gpu.Fallback");
     mod = relax::transform::ApplyDlightSchedule(rules)(mod);
 
     return mod;

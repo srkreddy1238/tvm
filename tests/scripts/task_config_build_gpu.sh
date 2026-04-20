@@ -42,4 +42,7 @@ echo set\(USE_CUTLASS ON\) >> config.cmake
 echo set\(USE_MSC ON\) >> config.cmake
 echo set\(CMAKE_CUDA_ARCHITECTURES 75\) >> config.cmake
 echo set\(USE_CLML ON\) >> config.cmake
-echo set\(USE_CPP_COMPILER_TESTS \"/googletest\"\) >> config.cmake
+if [ ${CPP_COMPILER_CI} == "ON" ]; then
+  echo set\(USE_CPP_COMPILER ON\) >> config.cmake
+  echo set\(USE_CPP_COMPILER_TESTS \"/googletest\"\) >> config.cmake
+fi

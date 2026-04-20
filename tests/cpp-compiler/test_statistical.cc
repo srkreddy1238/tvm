@@ -67,6 +67,7 @@ TEST_P(Statistical, All) {
   ffi::Array<relax::Var> tvm_args;
   tvm_args.push_back(input);
   ffi::ObjectPtr<relax::StatisticalAttrs> attrs = ffi::make_object<relax::StatisticalAttrs>();
+  attrs->keepdims = true;
 
   // Graph
   auto ctx_ = BuilderSetup(tvm_args);
@@ -98,10 +99,8 @@ INSTANTIATE_TEST_SUITE_P(
         ::testing::ValuesIn(
             std::vector<std::tuple<DLDeviceType, std::string, std::string, std::string>>{
                 std::make_tuple(kDLCPU, "llvm", "cpu_generic", "generic"),
-                // std::make_tuple(kDLOpenCL, "opencl", "gpu_generic", "generic"), // Reduction
-                // Schedule not available std::make_tuple(kDLOpenCL, "qcom/adreno-opencl", "adreno",
-                // "adreno") // Reduction Schedule not available
-            }),
+                std::make_tuple(kDLOpenCL, "opencl", "gpu_generic", "generic"),
+                std::make_tuple(kDLOpenCL, "qcom/adreno-opencl", "adreno", "adreno")}),
         ::testing::ValuesIn(std::vector<std::tuple<DLDataType, std::string>>{
             std::make_tuple(DLDataType({kDLFloat, 32, 1}), "min"),
             std::make_tuple(DLDataType({kDLInt, 32, 1}), "min"),

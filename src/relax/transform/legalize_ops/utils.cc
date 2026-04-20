@@ -187,6 +187,14 @@ ffi::Array<tvm::te::Tensor> MakeCallTE::CallTEHandler(
   }
 }
 
+/*!
+ * \brief Collect TIR variables that appear in `args` or `extras` but are not
+ *        bound by any tensor shape in `args`.
+ *
+ * \param args Primary TE argument list (tensors and PrimExprs).
+ * \param extras Additional PrimExpr arguments that may reference free vars.
+ * \return The list of unbound TIR variables.
+ */
 ffi::Array<ObjectRef> GetUnboundTIRVars(const ffi::Array<ObjectRef>& args,
                                         const ffi::Array<ObjectRef>& extras) {
   ffi::Array<ObjectRef> bound_vars;
@@ -303,7 +311,8 @@ MakeCallTE::GenCallTirInputs(const ffi::Array<ffi::Any>& args,
 }
 
 Call MakeCallTE::Make(const ffi::Array<ffi::Any>& args,
-                      ffi::Variant<FTOPIHandler, ffi::String> topi_handler, std::string fname) {
+                      ffi::Variant<FTOPIHandler, ffi::String> topi_handler, std::string fname,
+                      ffi::Optional<StructInfo> out_sinfo_override) {
   auto [tir_func, call_tir_args, output_sinfo, tir_vars] =
       GenCallTirInputs(args, topi_handler, fname);
 
@@ -316,6 +325,13 @@ Call MakeCallTE::Make(const ffi::Array<ffi::Any>& args,
     call_args.push_back(ShapeExpr(tir_vars));
   }
 
+  // If the caller supplied an explicit output StructInfo (mirrors Python's
+  // sinfo_args parameter in bb.call_te), use it instead of the one derived
+  // from the TE compute output shape.
+  if (out_sinfo_override.defined()) {
+    return Call(call_tir_op_, call_args, tvm::Attrs(), {out_sinfo_override.value()});
+  }
+
   if (output_sinfo.size() == 1) {
     return Call(call_tir_op_, call_args, tvm::Attrs(), {output_sinfo[0]});
   } else {
@@ -324,6 +340,15 @@ Call MakeCallTE::Make(const ffi::Array<ffi::Any>& args,
   }
 }
 
+/*!
+ * \brief Convert a float16 bit-pattern stored as uint16 to a float32 value.
+ *
+ * Implements the IEEE 754 half-precision to single-precision conversion
+ * using only integer arithmetic, with denormals mapped to zero.
+ *
+ * \param out Pointer to the float32 destination.
+ * \param in The float16 bit-pattern to convert.
+ */
 void float32(float* __restrict out, const uint16_t in) {
   uint32_t t1;
   uint32_t t2;

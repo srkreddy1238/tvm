@@ -43,8 +43,29 @@
 namespace tvm {
 namespace relax {
 
+/*!
+ * \brief TE handler for N-D convolution (conv1d, conv2d, conv3d, grouped variants).
+ *
+ * Implements the full convolution compute including layout permutation,
+ * padding, dilation, and grouped channel splitting. The layout is inferred
+ * from the `data_layout` and `kernel_layout` strings passed in `args`.
+ *
+ * \param args Packed argument list; see convolution.cc for the exact layout.
+ * \return A single-element array containing the convolution output tensor.
+ */
 ffi::Array<te::Tensor> ConvTE(const ffi::Array<ffi::Any> args);
 
+/*!
+ * \brief TE handler for constant-value padding.
+ *
+ * Pads `data` with `pad_value` using the given per-axis `pad_before` and
+ * `pad_after` extents. Axes with zero padding are passed through without
+ * introducing a predicate.
+ *
+ * \param args Packed argument list: [data, pad_before, pad_after, pad_value,
+ *             optional name, optional attrs].
+ * \return A single-element array containing the padded output tensor.
+ */
 ffi::Array<te::Tensor> PadTE(const ffi::Array<ffi::Any> args);
 
 }  // namespace relax

@@ -55,5 +55,34 @@ void DlightTryInline(const s_tir::Schedule& sch, ffi::Array<DlightSBlockInfo>* b
   }
 }
 
+void DlightTryInlineContiguousSpatial(const s_tir::Schedule& sch,
+                                      ffi::Array<DlightSBlockInfo>* blk_info) {
+  ffi::Array<DlightSBlockInfo> results;
+  ffi::Array<DlightSBlockInfo> spatial_blocks;
+
+  for (const DlightSBlockInfo& block : *blk_info) {
+    const bool is_injective = std::string(block->DomKind()).find('R') == std::string::npos;
+
+    if (is_injective) {
+      spatial_blocks.push_back(block);
+    } else {
+      if (!spatial_blocks.empty()) {
+        DlightTryInline(sch, &spatial_blocks);
+        for (const DlightSBlockInfo& b : spatial_blocks) results.push_back(b);
+        spatial_blocks.clear();
+      }
+      results.push_back(block);
+    }
+  }
+
+  // Flush trailing spatial blocks.
+  if (!spatial_blocks.empty()) {
+    DlightTryInline(sch, &spatial_blocks);
+    for (const DlightSBlockInfo& b : spatial_blocks) results.push_back(b);
+  }
+
+  *blk_info = results;
+}
+
 }  // namespace dlight
 }  // namespace tvm

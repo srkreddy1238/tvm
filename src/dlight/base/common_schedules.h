@@ -33,7 +33,26 @@
 
 namespace tvm {
 namespace dlight {
+
+/*!
+ * \brief Try to inline all blocks in \p blk_info, removing successfully
+ *        inlined entries from the list.
+ *
+ * \param sch       The TIR schedule.
+ * \param blk_info  In/out: block-info list; inlined blocks are removed.
+ */
 void DlightTryInline(const s_tir::Schedule& sch, ffi::Array<DlightSBlockInfo>* blk_info);
+
+/*!
+ * \brief Try to inline contiguous runs of spatial (injective) blocks,
+ *        leaving non-injective blocks in place.
+ *
+ * \param sch       The TIR schedule.
+ * \param blk_info  In/out: block-info list; inlined blocks are removed.
+ */
+void DlightTryInlineContiguousSpatial(const s_tir::Schedule& sch,
+                                      ffi::Array<DlightSBlockInfo>* blk_info);
+
 }  // namespace dlight
 }  // namespace tvm
 

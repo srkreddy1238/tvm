@@ -58,66 +58,66 @@ class TVM_DLL RelaxPipeline {
 #define JOIN(x, y) x##y
 #define MAKE_NAME(a, b) JOIN(a, b)
 
-#define TVM_RELAX_BACKEND_PIPELINE(Backend, PipelineClass)                             \
-  Pass MAKE_NAME(PipelineClass, All)(Target target) {                                  \
-    auto pass_func = [=](IRModule mod, PassContext pc) {                               \
-      auto pipeline = PipelineClass(target);                                           \
-      mod = pipeline.Library(mod);                                                     \
-      mod = pipeline.Legalize(mod);                                                    \
-      mod = pipeline.Dataflow(mod);                                                    \
-      mod = pipeline.Finalize(mod);                                                    \
-      return mod;                                                                      \
-    };                                                                                 \
-    return CreateModulePass(/*pass_function=*/pass_func, /*opt_level=*/0,              \
-                            /*pass_name=*/#PipelineClass, /*required=*/{});            \
-  }                                                                                    \
-  Pass MAKE_NAME(PipelineClass, Library)(Target target) {                              \
-    auto pass_func = [=](IRModule mod, PassContext pc) {                               \
-      auto pipeline = PipelineClass(target);                                           \
-      mod = pipeline.Library(mod);                                                     \
-      return mod;                                                                      \
-    };                                                                                 \
-    return CreateModulePass(/*pass_function=*/pass_func, /*opt_level=*/0,              \
-                            /*pass_name=*/#PipelineClass "Library", /*required=*/{});  \
-  }                                                                                    \
-  Pass MAKE_NAME(PipelineClass, Legalize)(Target target) {                             \
-    auto pass_func = [=](IRModule mod, PassContext pc) {                               \
-      auto pipeline = PipelineClass(target);                                           \
-      mod = pipeline.Legalize(mod);                                                    \
-      return mod;                                                                      \
-    };                                                                                 \
-    return CreateModulePass(/*pass_function=*/pass_func, /*opt_level=*/0,              \
-                            /*pass_name=*/#PipelineClass "Legalize", /*required=*/{}); \
-  }                                                                                    \
-  Pass MAKE_NAME(PipelineClass, Dataflow)(Target target) {                             \
-    auto pass_func = [=](IRModule mod, PassContext pc) {                               \
-      auto pipeline = PipelineClass(target);                                           \
-      mod = pipeline.Dataflow(mod);                                                    \
-      return mod;                                                                      \
-    };                                                                                 \
-    return CreateModulePass(/*pass_function=*/pass_func, /*opt_level=*/0,              \
-                            /*pass_name=*/#PipelineClass "Dataflow", /*required=*/{}); \
-  }                                                                                    \
-  Pass MAKE_NAME(PipelineClass, Finalize)(Target target) {                             \
-    auto pass_func = [=](IRModule mod, PassContext pc) {                               \
-      auto pipeline = PipelineClass(target);                                           \
-      mod = pipeline.Finalize(mod);                                                    \
-      return mod;                                                                      \
-    };                                                                                 \
-    return CreateModulePass(/*pass_function=*/pass_func, /*opt_level=*/0,              \
-                            /*pass_name=*/#PipelineClass "Finalize", /*required=*/{}); \
-  }                                                                                    \
-  TVM_FFI_STATIC_INIT_BLOCK() {                                                        \
-    namespace refl = tvm::ffi::reflection;                                             \
-    refl::GlobalDef().def("relax.pipeline." #Backend, MAKE_NAME(PipelineClass, All));  \
-    refl::GlobalDef().def("relax.pipeline." #Backend ".Library",                       \
-                          MAKE_NAME(PipelineClass, Library));                          \
-    refl::GlobalDef().def("relax.pipeline." #Backend ".Legalize",                      \
-                          MAKE_NAME(PipelineClass, Legalize));                         \
-    refl::GlobalDef().def("relax.pipeline." #Backend ".Dataflow",                      \
-                          MAKE_NAME(PipelineClass, Dataflow));                         \
-    refl::GlobalDef().def("relax.pipeline." #Backend ".Finalize",                      \
-                          MAKE_NAME(PipelineClass, Finalize));                         \
+#define TVM_RELAX_BACKEND_PIPELINE(Backend, PipelineClass)                                       \
+  Pass MAKE_NAME(PipelineClass, All)(Target target) {                                            \
+    auto pass_func = [=](IRModule mod, PassContext pc) {                                         \
+      auto pipeline = PipelineClass(target);                                                     \
+      mod = pipeline.Library(mod);                                                               \
+      mod = pipeline.Legalize(mod);                                                              \
+      mod = pipeline.Dataflow(mod);                                                              \
+      mod = pipeline.Finalize(mod);                                                              \
+      return mod;                                                                                \
+    };                                                                                           \
+    return CreateModulePass(/*pass_function=*/pass_func, /*opt_level=*/0,                        \
+                            /*pass_name=*/#PipelineClass, /*required=*/{});                      \
+  }                                                                                              \
+  Pass MAKE_NAME(PipelineClass, Library)(Target target) {                                        \
+    auto pass_func = [=](IRModule mod, PassContext pc) {                                         \
+      auto pipeline = PipelineClass(target);                                                     \
+      mod = pipeline.Library(mod);                                                               \
+      return mod;                                                                                \
+    };                                                                                           \
+    return CreateModulePass(/*pass_function=*/pass_func, /*opt_level=*/0,                        \
+                            /*pass_name=*/#PipelineClass "Library", /*required=*/{});            \
+  }                                                                                              \
+  Pass MAKE_NAME(PipelineClass, Legalize)(Target target) {                                       \
+    auto pass_func = [=](IRModule mod, PassContext pc) {                                         \
+      auto pipeline = PipelineClass(target);                                                     \
+      mod = pipeline.Legalize(mod);                                                              \
+      return mod;                                                                                \
+    };                                                                                           \
+    return CreateModulePass(/*pass_function=*/pass_func, /*opt_level=*/0,                        \
+                            /*pass_name=*/#PipelineClass "Legalize", /*required=*/{});           \
+  }                                                                                              \
+  Pass MAKE_NAME(PipelineClass, Dataflow)(Target target) {                                       \
+    auto pass_func = [=](IRModule mod, PassContext pc) {                                         \
+      auto pipeline = PipelineClass(target);                                                     \
+      mod = pipeline.Dataflow(mod);                                                              \
+      return mod;                                                                                \
+    };                                                                                           \
+    return CreateModulePass(/*pass_function=*/pass_func, /*opt_level=*/0,                        \
+                            /*pass_name=*/#PipelineClass "Dataflow", /*required=*/{});           \
+  }                                                                                              \
+  Pass MAKE_NAME(PipelineClass, Finalize)(Target target) {                                       \
+    auto pass_func = [=](IRModule mod, PassContext pc) {                                         \
+      auto pipeline = PipelineClass(target);                                                     \
+      mod = pipeline.Finalize(mod);                                                              \
+      return mod;                                                                                \
+    };                                                                                           \
+    return CreateModulePass(/*pass_function=*/pass_func, /*opt_level=*/0,                        \
+                            /*pass_name=*/#PipelineClass "Finalize", /*required=*/{});           \
+  }                                                                                              \
+  TVM_FFI_STATIC_INIT_BLOCK() {                                                                  \
+    namespace refl = tvm::ffi::reflection;                                                       \
+    refl::GlobalDef().def("relax.backend." #Backend ".Pipeline", MAKE_NAME(PipelineClass, All)); \
+    refl::GlobalDef().def("relax.backend." #Backend ".PipelineLibrary",                          \
+                          MAKE_NAME(PipelineClass, Library));                                    \
+    refl::GlobalDef().def("relax.backend." #Backend ".PipelineLegalize",                         \
+                          MAKE_NAME(PipelineClass, Legalize));                                   \
+    refl::GlobalDef().def("relax.backend." #Backend ".PipelineDataflow",                         \
+                          MAKE_NAME(PipelineClass, Dataflow));                                   \
+    refl::GlobalDef().def("relax.backend." #Backend ".PipelineFinalize",                         \
+                          MAKE_NAME(PipelineClass, Finalize));                                   \
   }
 
 // Transform declarations exported

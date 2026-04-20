@@ -96,10 +96,9 @@ INSTANTIATE_TEST_SUITE_P(
     ::testing::Combine(
         ::testing::ValuesIn(
             std::vector<std::tuple<DLDeviceType, std::string, std::string, std::string>>{
-                std::make_tuple(kDLCPU, "llvm", "cpu_generic", "generic")
-                // std::make_tuple(kDLOpenCL, "opencl", "gpu_generic", "generic"), // Schedule
-                // std::make_tuple(kDLOpenCL, "qcom/adreno-opencl", "adreno", "adreno") // Schedule
-            }),
+                std::make_tuple(kDLCPU, "llvm", "cpu_generic", "generic"),
+                std::make_tuple(kDLOpenCL, "opencl", "gpu_generic", "generic"),
+                std::make_tuple(kDLOpenCL, "qcom/adreno-opencl", "adreno", "adreno")}),
         ::testing::ValuesIn(std::vector<DLDataType>{DLDataType({kDLFloat, 32, 1}),
                                                     DLDataType({kDLInt, 32, 1})}),
         ::testing::ValuesIn(std::vector<std::string>{"argmin", "argmax"}),

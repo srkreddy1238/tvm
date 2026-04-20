@@ -33,6 +33,14 @@
 namespace tvm {
 namespace relax {
 
+/*!
+ * \brief Compute the output shape after applying symmetric padding.
+ *
+ * \param data The tensor to be padded.
+ * \param pad_before Per-axis leading pad extents.
+ * \param pad_after Per-axis trailing pad extents.
+ * \return The padded output shape.
+ */
 ffi::Array<tvm::PrimExpr> GetPaddedShape(const te::Tensor& data,
                                          const ffi::Array<tvm::PrimExpr>& pad_before,
                                          const ffi::Array<tvm::PrimExpr>& pad_after) {
@@ -49,6 +57,15 @@ ffi::Array<tvm::PrimExpr> GetPaddedShape(const te::Tensor& data,
   return out_shape;
 }
 
+/*!
+ * \brief TE handler for reflect padding.
+ *
+ * Indices outside the original tensor are reflected back inward.
+ *
+ * \param args Packed argument list: [data, pad_before, pad_after,
+ *             optional name, optional attrs].
+ * \return A single-element array containing the padded output tensor.
+ */
 ffi::Array<te::Tensor> PadReflectTE(const ffi::Array<ffi::Any> args) {
   auto data = args[0].cast<te::Tensor>();
   auto pad_before = args[1].cast<ffi::Array<tvm::PrimExpr>>();
@@ -96,6 +113,15 @@ ffi::Array<te::Tensor> PadReflectTE(const ffi::Array<ffi::Any> args) {
       name, kInjective + ",pad", attrs)};
 }
 
+/*!
+ * \brief TE handler for replicate (edge) padding.
+ *
+ * Indices outside the original tensor are clamped to the nearest edge value.
+ *
+ * \param args Packed argument list: [data, pad_before, pad_after,
+ *             optional name, optional attrs].
+ * \return A single-element array containing the padded output tensor.
+ */
 ffi::Array<te::Tensor> PadReplicateTE(const ffi::Array<ffi::Any> args) {
   auto data = args[0].cast<te::Tensor>();
   auto pad_before = args[1].cast<ffi::Array<tvm::PrimExpr>>();
@@ -139,6 +165,15 @@ ffi::Array<te::Tensor> PadReplicateTE(const ffi::Array<ffi::Any> args) {
       name, kInjective + ",pad", attrs)};
 }
 
+/*!
+ * \brief TE handler for circular padding.
+ *
+ * Indices outside the original tensor are wrapped using floor-modulo.
+ *
+ * \param args Packed argument list: [data, pad_before, pad_after,
+ *             optional name, optional attrs].
+ * \return A single-element array containing the padded output tensor.
+ */
 ffi::Array<te::Tensor> PadCircularTE(const ffi::Array<ffi::Any> args) {
   auto data = args[0].cast<te::Tensor>();
   auto pad_before = args[1].cast<ffi::Array<tvm::PrimExpr>>();
@@ -230,7 +265,16 @@ ffi::Array<te::Tensor> PadTE(const ffi::Array<ffi::Any> args) {
       name, kInjective + ",pad", attrs)};
 }
 
-// Pad
+/*!
+ * \brief Legalize relax.nn.pad to call_tir.
+ *
+ * Dispatches to PadReflectTE, PadReplicateTE, PadCircularTE, or PadTE
+ * depending on the `pad_mode` attribute.
+ *
+ * \param bb The block builder.
+ * \param call The relax.nn.pad call to legalize.
+ * \return The legalized call_tir expression.
+ */
 Expr LegalizeNNPad(const BlockBuilder& bb, const Call& call) {
   const auto* attrs = call->attrs.as<PadAttrs>();
   ffi::Array<tvm::PrimExpr> pad_before;

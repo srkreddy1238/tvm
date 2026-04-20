@@ -619,6 +619,7 @@ generated = [
             "LD_LIBRARY_PATH": "/usr/local/cuda/lib64/",
             "VULKAN_SDK": "/adreno-vulkan",
             "ADRENO_OPENCL": "/adreno-opencl",
+            "CPP_COMPILER_CI": os.environ.get("CPP_COMPILER_CI", "OFF"),
         },
     ),
     generate_command(
@@ -706,6 +707,7 @@ generated = [
             "ADRENO_TARGET_COOP": os.environ.get("ADRENO_TARGET_COOP", "NO"),
             "CI_TEST_INVENTORY": "/Inventory",
             "ADRENO_LLVM": "/adreno-llvm",
+            "CPP_COMPILER_CI": os.environ.get("CPP_COMPILER_CI", "OFF"),
         },
         options={
             "adreno": (

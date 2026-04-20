@@ -33,7 +33,17 @@
 namespace tvm {
 namespace relax {
 
-// matmul
+/*!
+ * \brief Legalize relax.matmul to call_tir.
+ *
+ * Handles broadcasting batch dimensions and the 1-D vector cases by
+ * temporarily prepending or appending a size-1 dimension, then removing
+ * it from the output shape.
+ *
+ * \param bb The block builder.
+ * \param call The relax.matmul call to legalize.
+ * \return The legalized call_tir expression.
+ */
 Expr LegalizeMatmul(const BlockBuilder& bb, const Call& call) {
   const auto* attrs = call->attrs.as<MatmulAttrs>();
   auto m_te = MakeCallTE(bb, call);
@@ -143,7 +153,16 @@ Expr LegalizeMatmul(const BlockBuilder& bb, const Call& call) {
 TVM_REGISTER_OP("relax.matmul")
     .set_attr<FLegalize>("FLegalize", LegalizeMatmul, TVM_LEGALIZE_CPP_LEVEL);
 
-// einsum
+/*!
+ * \brief Legalize relax.einsum to call_tir via topi.einsum.
+ *
+ * Unpacks the tuple argument into individual tensors before forwarding
+ * to the TOPI handler.
+ *
+ * \param bb The block builder.
+ * \param call The relax.einsum call to legalize.
+ * \return The legalized call_tir expression.
+ */
 Expr LegalizeEinsum(const BlockBuilder& bb, const Call& call) {
   const auto* attrs = call->attrs.as<EinsumAttrs>();
   auto m_te = MakeCallTE(bb, call);
@@ -174,7 +193,12 @@ Expr LegalizeEinsum(const BlockBuilder& bb, const Call& call) {
 TVM_REGISTER_OP("relax.einsum")
     .set_attr<FLegalize>("FLegalize", LegalizeEinsum, TVM_LEGALIZE_CPP_LEVEL);
 
-// outer
+/*!
+ * \brief TE handler for the outer product of two 1-D tensors.
+ *
+ * \param args Packed argument list: [a, b] where both are 1-D tensors.
+ * \return A single-element array containing the 2-D outer-product tensor.
+ */
 ffi::Array<te::Tensor> OuterTE(const ffi::Array<ffi::Any> args) {
   te::Tensor a = args[0].cast<te::Tensor>();
   te::Tensor b = args[1].cast<te::Tensor>();
@@ -188,6 +212,13 @@ ffi::Array<te::Tensor> OuterTE(const ffi::Array<ffi::Any> args) {
       "outer")};
 }
 
+/*!
+ * \brief Legalize relax.outer to call_tir via OuterTE.
+ *
+ * \param bb The block builder.
+ * \param call The relax.outer call to legalize.
+ * \return The legalized call_tir expression.
+ */
 Expr LegalizeOuter(const BlockBuilder& bb, const Call& call) {
   auto m_te = MakeCallTE(bb, call);
   tvm::ffi::Array<tvm::ffi::Any> args;

@@ -16,6 +16,8 @@
 # under the License.
 # ruff: noqa: F401, F841
 
+import os
+
 import tvm
 import tvm.testing
 from tvm import relax
@@ -926,7 +928,10 @@ def test_conv2d_conv2d_fallback_to_buffer_conv2d():
             ["global"],
         ),
         "te_layout_transform4": (["global"], ["global"]),
-        "conv2d_opencl": (["global", "global"], ["global"]),
+        "conv2d_opencl" if os.environ.get("CPP_COMPILER_CI", "OFF") == "ON" else "conv2d": (
+            ["global", "global"],
+            ["global"],
+        ),
         "te_layout_transform5": (["global"], ["global"]),
         "concatenate": (["global", "global"], ["global"]),
     }

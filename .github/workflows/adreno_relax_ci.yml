@@ -35,7 +35,7 @@ concurrency:
 jobs:
   Lint:
     if: ${{ github.repository == 'gpgpu/apache-tvm' }}
-    runs-on:  tvm-linux-relax-ci
+    runs-on:  tvm-linux-relax-lint-ci
     steps:
       - uses: actions/checkout@v2
         with:
@@ -58,7 +58,7 @@ jobs:
            set -e
            # OpenCL GPU Texture Tests
            USE_SCCACHE=1 \
-           SCCACHE_SERVER_PORT=7969 \
+           SCCACHE_SERVER_PORT=8969 \
            python ./tests/scripts/ci.py gpu -d ci_adreno_gpu_v3 --adreno
       - name: Adreno Device Tests Over RPC - V3
         shell: bash -l {0}
@@ -97,6 +97,71 @@ jobs:
            ANDROID_SERIAL=`cat /etc/tvm-ci-device-coop` \
            ADRENO_LLVM=${ADRENO_LLVM} \
            python ./tests/scripts/ci.py adreno -d ci_adreno_gpu_v3 -a
+  Compiler-Tests:
+    needs: [Adreno-Tests]
+    if: ${{ github.repository == 'gpgpu/apache-tvm' }}
+    runs-on:  tvm-linux-relax-ci
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          submodules: 'recursive'
+      - name: Adreno Device Tests Over RPC - V3
+        shell: bash -l {0}
+        run: |
+           set -e
+           # Adreno RPC Tests
+           unset ADRENO_LLVM
+           CPP_COMPILER_CI=ON \
+           ADRENO_TARGET_CLML_VERSION=3 \
+           ADRENO_OPENCL=${ADRENO_OPENCL_V3} \
+           USE_SCCACHE=1 \
+           SCCACHE_SERVER_PORT=9769 \
+           ANDROID_SERIAL=`cat /etc/tvm-ci-device` \
+           python ./tests/scripts/ci.py adreno -d ci_adreno_gpu_v3 -a
+      - name: Adreno Device Tests Over RPC - V4
+        shell: bash -l {0}
+        run: |
+           set -e
+           # Adreno RPC Tests
+           CPP_COMPILER_CI=ON \
+           ADRENO_TARGET_CLML_VERSION=4 \
+           ADRENO_OPENCL=${ADRENO_OPENCL_V4} \
+           USE_SCCACHE=1 \
+           SCCACHE_SERVER_PORT=9769 \
+           ANDROID_SERIAL=`cat /etc/tvm-ci-device-v4` \
+           ADRENO_LLVM=${ADRENO_LLVM} \
+           python ./tests/scripts/ci.py adreno -d ci_adreno_gpu_v3 -a
+      - name: Adreno Device Tests Over RPC - CoOp
+        shell: bash -l {0}
+        run: |
+           set -e
+           # Adreno RPC Tests
+           CPP_COMPILER_CI=ON \
+           ADRENO_TARGET_CLML_VERSION=4 \
+           ADRENO_TARGET_COOP=YES \
+           ADRENO_OPENCL=${ADRENO_OPENCL_V4} \
+           USE_SCCACHE=1 \
+           SCCACHE_SERVER_PORT=9769 \
+           ANDROID_SERIAL=`cat /etc/tvm-ci-device-coop` \
+           ADRENO_LLVM=${ADRENO_LLVM} \
+           python ./tests/scripts/ci.py adreno -d ci_adreno_gpu_v3 -a
+  CPP-Compiler-GPU-Tests:
+    needs: [Lint]
+    if: ${{ github.repository == 'gpgpu/apache-tvm' }}
+    runs-on:  tvm-linux-relax-cpp-ci
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          submodules: 'recursive'
+      - name: OpenCL GPU Tests with CPP Compiler Path
+        shell: bash -l {0}
+        run: |
+           set -e
+           # OpenCL GPU Texture Tests
+           CPP_COMPILER_CI=ON \
+           USE_SCCACHE=1 \
+           SCCACHE_SERVER_PORT=7969 \
+           python ./tests/scripts/ci.py gpu -d ci_adreno_gpu_v3 --adreno
 
   Windows-Build:
     if: ${{ github.repository == 'gpgpu/apache-tvm' }}

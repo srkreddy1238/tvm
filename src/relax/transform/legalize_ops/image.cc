@@ -30,7 +30,13 @@
 namespace tvm {
 namespace relax {
 
-// relax.image.resize2d
+/*!
+ * \brief Legalize relax.image.resize2d to call_tir via topi.image.resize2d.
+ *
+ * \param bb The block builder.
+ * \param call The relax.image.resize2d call to legalize.
+ * \return The legalized call_tir expression.
+ */
 Expr LegalizeImageResize2D(const BlockBuilder& bb, const Call& call) {
   const auto* attrs = call->attrs.as<Resize2DAttrs>();
   auto m_te = MakeCallTE(bb, call);
@@ -50,7 +56,13 @@ Expr LegalizeImageResize2D(const BlockBuilder& bb, const Call& call) {
 TVM_REGISTER_OP("relax.image.resize2d")
     .set_attr<FLegalize>("FLegalize", LegalizeImageResize2D, TVM_LEGALIZE_CPP_LEVEL);
 
-// relax.image.grid_sample
+/*!
+ * \brief Legalize relax.image.grid_sample to call_tir via topi.image.grid_sample.
+ *
+ * \param bb The block builder.
+ * \param call The relax.image.grid_sample call to legalize.
+ * \return The legalized call_tir expression.
+ */
 Expr LegalizeImageGridSample(const BlockBuilder& bb, const Call& call) {
   const auto* attrs = call->attrs.as<GridSampleAttrs>();
   auto m_te = MakeCallTE(bb, call);

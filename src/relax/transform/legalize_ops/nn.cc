@@ -42,12 +42,24 @@
 namespace tvm {
 namespace relax {
 
-// relu
+/*!
+ * \brief TE handler for ReLU activation.
+ *
+ * \param args Packed argument list: [x].
+ * \return A single-element array containing the ReLU output tensor.
+ */
 ffi::Array<te::Tensor> ReluTE(const ffi::Array<ffi::Any> args) {
   auto x = args[0].cast<te::Tensor>();
   return {topi::relu<float>(x)};
 }
 
+/*!
+ * \brief Legalize relax.nn.relu to call_tir via ReluTE.
+ *
+ * \param bb The block builder.
+ * \param call The relax.nn.relu call to legalize.
+ * \return The legalized call_tir expression.
+ */
 Expr LegalizeNNRelu(const BlockBuilder& bb, const Call& call) {
   auto m_te = MakeCallTE(bb, call);
   tvm::ffi::Array<tvm::ffi::Any> args;
@@ -57,13 +69,25 @@ Expr LegalizeNNRelu(const BlockBuilder& bb, const Call& call) {
 TVM_REGISTER_OP("relax.nn.relu")
     .set_attr<FLegalize>("FLegalize", LegalizeNNRelu, TVM_LEGALIZE_CPP_LEVEL);
 
-// leakyrelu
+/*!
+ * \brief TE handler for Leaky ReLU activation.
+ *
+ * \param args Packed argument list: [x, alpha (double)].
+ * \return A single-element array containing the leaky ReLU output tensor.
+ */
 ffi::Array<te::Tensor> LeakyReluTE(const ffi::Array<ffi::Any> args) {
   auto x = args[0].cast<te::Tensor>();
   auto alpha = args[1].cast<double>();
   return {topi::leaky_relu(x, alpha)};
 }
 
+/*!
+ * \brief Legalize relax.nn.leakyrelu to call_tir via LeakyReluTE.
+ *
+ * \param bb The block builder.
+ * \param call The relax.nn.leakyrelu call to legalize.
+ * \return The legalized call_tir expression.
+ */
 Expr LegalizeNNLeakyRelu(const BlockBuilder& bb, const Call& call) {
   const auto* attrs = call->attrs.as<LeakyReluAttrs>();
   auto m_te = MakeCallTE(bb, call);
@@ -75,7 +99,15 @@ Expr LegalizeNNLeakyRelu(const BlockBuilder& bb, const Call& call) {
 TVM_REGISTER_OP("relax.nn.leakyrelu")
     .set_attr<FLegalize>("FLegalize", LegalizeNNLeakyRelu, TVM_LEGALIZE_CPP_LEVEL);
 
-// prelu
+/*!
+ * \brief TE handler for Parametric ReLU (PReLU) activation.
+ *
+ * Broadcasts the slope tensor to match the channel axis of the input if
+ * the slope has a single element.
+ *
+ * \param args Packed argument list: [x, slope, axis (int)].
+ * \return A single-element array containing the PReLU output tensor.
+ */
 ffi::Array<te::Tensor> PreluTE(const ffi::Array<ffi::Any> args) {
   auto x = args[0].cast<te::Tensor>();
   auto slope = args[1].cast<te::Tensor>();
@@ -111,6 +143,13 @@ ffi::Array<te::Tensor> PreluTE(const ffi::Array<ffi::Any> args) {
       "T_prelu", topi::kBroadcast)};
 }
 
+/*!
+ * \brief Legalize relax.nn.prelu to call_tir via PreluTE.
+ *
+ * \param bb The block builder.
+ * \param call The relax.nn.prelu call to legalize.
+ * \return The legalized call_tir expression.
+ */
 Expr LegalizeNNPrelu(const BlockBuilder& bb, const Call& call) {
   const auto* attrs = call->attrs.as<PReluAttrs>();
   auto m_te = MakeCallTE(bb, call);
@@ -123,7 +162,15 @@ Expr LegalizeNNPrelu(const BlockBuilder& bb, const Call& call) {
 TVM_REGISTER_OP("relax.nn.prelu")
     .set_attr<FLegalize>("FLegalize", LegalizeNNPrelu, TVM_LEGALIZE_CPP_LEVEL);
 
-// gelu
+/*!
+ * \brief TE handler for GELU activation (erf approximation).
+ *
+ * Computes `x * 0.5 * (1 + erf(x / sqrt(2)))`. For float16 inputs the
+ * erf is computed in float32 and cast back.
+ *
+ * \param args Packed argument list: [x].
+ * \return A single-element array containing the GELU output tensor.
+ */
 ffi::Array<te::Tensor> GeluTE(const ffi::Array<ffi::Any> args) {
   auto x = args[0].cast<te::Tensor>();
   auto dtype = x->dtype;
@@ -147,6 +194,13 @@ ffi::Array<te::Tensor> GeluTE(const ffi::Array<ffi::Any> args) {
       "T_gelu", topi::kElementWise)};
 }
 
+/*!
+ * \brief Legalize relax.nn.gelu to call_tir via GeluTE.
+ *
+ * \param bb The block builder.
+ * \param call The relax.nn.gelu call to legalize.
+ * \return The legalized call_tir expression.
+ */
 Expr LegalizeNNGelu(const BlockBuilder& bb, const Call& call) {
   auto m_te = MakeCallTE(bb, call);
   tvm::ffi::Array<tvm::ffi::Any> args;
@@ -156,7 +210,14 @@ Expr LegalizeNNGelu(const BlockBuilder& bb, const Call& call) {
 TVM_REGISTER_OP("relax.nn.gelu")
     .set_attr<FLegalize>("FLegalize", LegalizeNNGelu, TVM_LEGALIZE_CPP_LEVEL);
 
-// gelu_tanh
+/*!
+ * \brief TE handler for GELU activation (tanh approximation).
+ *
+ * Computes `0.5 * x * (1 + tanh(sqrt(2/pi) * x * (1 + 0.044715 * x^2)))`.
+ *
+ * \param args Packed argument list: [x].
+ * \return A single-element array containing the GELU-tanh output tensor.
+ */
 ffi::Array<te::Tensor> GeluTanhTE(const ffi::Array<ffi::Any> args) {
   auto x = args[0].cast<te::Tensor>();
   auto dtype = x->dtype;
@@ -176,6 +237,13 @@ ffi::Array<te::Tensor> GeluTanhTE(const ffi::Array<ffi::Any> args) {
       "T_gelu_tanh", topi::kElementWise)};
 }
 
+/*!
+ * \brief Legalize relax.nn.gelu_tanh to call_tir via GeluTanhTE.
+ *
+ * \param bb The block builder.
+ * \param call The relax.nn.gelu_tanh call to legalize.
+ * \return The legalized call_tir expression.
+ */
 Expr LegalizeNNGeluTanh(const BlockBuilder& bb, const Call& call) {
   auto m_te = MakeCallTE(bb, call);
   tvm::ffi::Array<tvm::ffi::Any> args;
@@ -185,7 +253,15 @@ Expr LegalizeNNGeluTanh(const BlockBuilder& bb, const Call& call) {
 TVM_REGISTER_OP("relax.nn.gelu_tanh")
     .set_attr<FLegalize>("FLegalize", LegalizeNNGeluTanh, TVM_LEGALIZE_CPP_LEVEL);
 
-// selu
+/*!
+ * \brief TE handler for SELU activation.
+ *
+ * Computes `scale * (max(0, x) + min(0, alpha * (exp(x) - 1)))` using the
+ * standard SELU constants alpha and scale.
+ *
+ * \param args Packed argument list: [x].
+ * \return A single-element array containing the SELU output tensor.
+ */
 ffi::Array<te::Tensor> SeluTE(const ffi::Array<ffi::Any> args) {
   auto x = args[0].cast<te::Tensor>();
   auto dtype = x->dtype;
@@ -219,6 +295,13 @@ ffi::Array<te::Tensor> SeluTE(const ffi::Array<ffi::Any> args) {
       "selu")};
 }
 
+/*!
+ * \brief Legalize relax.nn.selu to call_tir via SeluTE.
+ *
+ * \param bb The block builder.
+ * \param call The relax.nn.selu call to legalize.
+ * \return The legalized call_tir expression.
+ */
 Expr LegalizeNNSelu(const BlockBuilder& bb, const Call& call) {
   auto m_te = MakeCallTE(bb, call);
   tvm::ffi::Array<tvm::ffi::Any> args;
@@ -228,7 +311,14 @@ Expr LegalizeNNSelu(const BlockBuilder& bb, const Call& call) {
 TVM_REGISTER_OP("relax.nn.selu")
     .set_attr<FLegalize>("FLegalize", LegalizeNNSelu, TVM_LEGALIZE_CPP_LEVEL);
 
-// silu
+/*!
+ * \brief TE handler for SiLU (Sigmoid Linear Unit) activation.
+ *
+ * Computes `x * sigmoid(x)`.
+ *
+ * \param args Packed argument list: [x].
+ * \return A single-element array containing the SiLU output tensor.
+ */
 ffi::Array<te::Tensor> SiluTE(const ffi::Array<ffi::Any> args) {
   auto x = args[0].cast<te::Tensor>();
   auto sig = topi::sigmoid(x);
@@ -236,6 +326,13 @@ ffi::Array<te::Tensor> SiluTE(const ffi::Array<ffi::Any> args) {
       x->shape, [&](const ffi::Array<tvm::tir::Var>& i) { return x(i) * sig(i); }, "silu")};
 }
 
+/*!
+ * \brief Legalize relax.nn.silu to call_tir via SiluTE.
+ *
+ * \param bb The block builder.
+ * \param call The relax.nn.silu call to legalize.
+ * \return The legalized call_tir expression.
+ */
 Expr LegalizeNNSilu(const BlockBuilder& bb, const Call& call) {
   auto m_te = MakeCallTE(bb, call);
   tvm::ffi::Array<tvm::ffi::Any> args;
@@ -245,7 +342,15 @@ Expr LegalizeNNSilu(const BlockBuilder& bb, const Call& call) {
 TVM_REGISTER_OP("relax.nn.silu")
     .set_attr<FLegalize>("FLegalize", LegalizeNNSilu, TVM_LEGALIZE_CPP_LEVEL);
 
-// softplus
+/*!
+ * \brief TE handler for Softplus activation.
+ *
+ * Computes `(1/beta) * log(1 + exp(beta * x))` when `beta * x <= threshold`,
+ * and `x` otherwise (linear approximation).
+ *
+ * \param args Packed argument list: [x, beta (double), threshold (double)].
+ * \return A single-element array containing the Softplus output tensor.
+ */
 ffi::Array<te::Tensor> SoftplusTE(const ffi::Array<ffi::Any> args) {
   auto x = args[0].cast<te::Tensor>();
   auto beta = args[1].cast<double>();
@@ -266,6 +371,13 @@ ffi::Array<te::Tensor> SoftplusTE(const ffi::Array<ffi::Any> args) {
       "softplus")};
 }
 
+/*!
+ * \brief Legalize relax.nn.softplus to call_tir via SoftplusTE.
+ *
+ * \param bb The block builder.
+ * \param call The relax.nn.softplus call to legalize.
+ * \return The legalized call_tir expression.
+ */
 Expr LegalizeNNSoftplus(const BlockBuilder& bb, const Call& call) {
   const auto* attrs = call->attrs.as<SoftplusAttrs>();
   auto m_te = MakeCallTE(bb, call);
@@ -278,7 +390,14 @@ Expr LegalizeNNSoftplus(const BlockBuilder& bb, const Call& call) {
 TVM_REGISTER_OP("relax.nn.softplus")
     .set_attr<FLegalize>("FLegalize", LegalizeNNSoftplus, TVM_LEGALIZE_CPP_LEVEL);
 
-// softmax
+/*!
+ * \brief TE handler for softmax.
+ *
+ * Computes `exp(x - max(x)) / sum(exp(x - max(x)))` along the given axis.
+ *
+ * \param args Packed argument list: [x, axis (int)].
+ * \return A single-element array containing the softmax output tensor.
+ */
 ffi::Array<te::Tensor> SoftmaxTE(const ffi::Array<ffi::Any> args) {
   auto x = args[0].cast<te::Tensor>();
   int axis = args[1].cast<int>();
@@ -357,6 +476,13 @@ ffi::Array<te::Tensor> SoftmaxTE(const ffi::Array<ffi::Any> args) {
       "T_softmax_norm", "softmax_output", attrs)};
 }
 
+/*!
+ * \brief Legalize relax.nn.softmax to call_tir via SoftmaxTE.
+ *
+ * \param bb The block builder.
+ * \param call The relax.nn.softmax call to legalize.
+ * \return The legalized call_tir expression.
+ */
 Expr LegalizeNNSoftmax(const BlockBuilder& bb, const Call& call) {
   const auto* attrs = call->attrs.as<SoftmaxAttrs>();
   auto m_te = MakeCallTE(bb, call);
@@ -368,7 +494,14 @@ Expr LegalizeNNSoftmax(const BlockBuilder& bb, const Call& call) {
 TVM_REGISTER_OP("relax.nn.softmax")
     .set_attr<FLegalize>("FLegalize", LegalizeNNSoftmax, TVM_LEGALIZE_CPP_LEVEL);
 
-// log_softmax
+/*!
+ * \brief TE handler for log-softmax.
+ *
+ * Computes `x - max(x) - log(sum(exp(x - max(x))))` along the given axis.
+ *
+ * \param args Packed argument list: [x, axis (int)].
+ * \return A single-element array containing the log-softmax output tensor.
+ */
 ffi::Array<te::Tensor> LogSoftmaxTE(const ffi::Array<ffi::Any> args) {
   auto x = args[0].cast<te::Tensor>();
   int axis = args[1].cast<int>();
@@ -439,6 +572,13 @@ ffi::Array<te::Tensor> LogSoftmaxTE(const ffi::Array<ffi::Any> args) {
       "T_log_softmax_norm", "log_softmax_output", attrs)};
 }
 
+/*!
+ * \brief Legalize relax.nn.log_softmax to call_tir via LogSoftmaxTE.
+ *
+ * \param bb The block builder.
+ * \param call The relax.nn.log_softmax call to legalize.
+ * \return The legalized call_tir expression.
+ */
 Expr LegalizeNNLogSoftmax(const BlockBuilder& bb, const Call& call) {
   const auto* attrs = call->attrs.as<SoftmaxAttrs>();
   auto m_te = MakeCallTE(bb, call);
@@ -450,7 +590,14 @@ Expr LegalizeNNLogSoftmax(const BlockBuilder& bb, const Call& call) {
 TVM_REGISTER_OP("relax.nn.log_softmax")
     .set_attr<FLegalize>("FLegalize", LegalizeNNLogSoftmax, TVM_LEGALIZE_CPP_LEVEL);
 
-// cross_entropy_with_logits
+/*!
+ * \brief TE handler for cross-entropy with logits.
+ *
+ * Computes `-sum(x * y) / batch_size` (or `-sum(x * y)` for 1-D inputs).
+ *
+ * \param args Packed argument list: [x (logits), y (targets)].
+ * \return A single-element array containing the scalar loss tensor.
+ */
 ffi::Array<te::Tensor> CrossEntropyWithLogitsTE(const ffi::Array<ffi::Any> args) {
   auto x = args[0].cast<te::Tensor>();
   auto y = args[1].cast<te::Tensor>();
@@ -476,6 +623,13 @@ ffi::Array<te::Tensor> CrossEntropyWithLogitsTE(const ffi::Array<ffi::Any> args)
   return {neg_sum};
 }
 
+/*!
+ * \brief Legalize relax.nn.cross_entropy_with_logits to call_tir.
+ *
+ * \param bb The block builder.
+ * \param call The relax.nn.cross_entropy_with_logits call to legalize.
+ * \return The legalized call_tir expression.
+ */
 Expr LegalizeNNCrossEntropyWithLogits(const BlockBuilder& bb, const Call& call) {
   auto m_te = MakeCallTE(bb, call);
   tvm::ffi::Array<tvm::ffi::Any> args;
@@ -487,7 +641,12 @@ Expr LegalizeNNCrossEntropyWithLogits(const BlockBuilder& bb, const Call& call) 
 TVM_REGISTER_OP("relax.nn.cross_entropy_with_logits")
     .set_attr<FLegalize>("FLegalize", LegalizeNNCrossEntropyWithLogits, TVM_LEGALIZE_CPP_LEVEL);
 
-// layer_norm
+/*!
+ * \brief TE handler for layer normalization.
+ *
+ * \param args Packed argument list: [data, gamma, beta, axes, epsilon].
+ * \return A single-element array containing the normalized output tensor.
+ */
 ffi::Array<te::Tensor> LayerNormTE(const ffi::Array<ffi::Any> args) {
   auto data = args[0].cast<te::Tensor>();
   auto gamma = args[1].cast<te::Tensor>();
@@ -497,6 +656,13 @@ ffi::Array<te::Tensor> LayerNormTE(const ffi::Array<ffi::Any> args) {
   return {topi::nn::layer_norm(data, gamma, beta, axis, epsilon)};
 }
 
+/*!
+ * \brief Legalize relax.nn.layer_norm to call_tir via LayerNormTE.
+ *
+ * \param bb The block builder.
+ * \param call The relax.nn.layer_norm call to legalize.
+ * \return The legalized call_tir expression.
+ */
 Expr LegalizeNNLayerNorm(const BlockBuilder& bb, const Call& call) {
   const auto* attrs = call->attrs.as<LayerNormAttrs>();
   auto m_te = MakeCallTE(bb, call);
@@ -511,7 +677,13 @@ Expr LegalizeNNLayerNorm(const BlockBuilder& bb, const Call& call) {
 TVM_REGISTER_OP("relax.nn.layer_norm")
     .set_attr<FLegalize>("FLegalize", LegalizeNNLayerNorm, TVM_LEGALIZE_CPP_LEVEL);
 
-// group_norm
+/*!
+ * \brief TE handler for group normalization.
+ *
+ * \param args Packed argument list: [data, gamma, beta, num_groups,
+ *             channel_axis, axes, epsilon].
+ * \return A single-element array containing the normalized output tensor.
+ */
 ffi::Array<te::Tensor> GroupNormTE(const ffi::Array<ffi::Any> args) {
   auto data = args[0].cast<te::Tensor>();
   auto gamma = args[1].cast<te::Tensor>();
@@ -523,6 +695,13 @@ ffi::Array<te::Tensor> GroupNormTE(const ffi::Array<ffi::Any> args) {
   return {topi::nn::group_norm(data, gamma, beta, num_groups, channel_axis, axes, epsilon)};
 }
 
+/*!
+ * \brief Legalize relax.nn.group_norm to call_tir via GroupNormTE.
+ *
+ * \param bb The block builder.
+ * \param call The relax.nn.group_norm call to legalize.
+ * \return The legalized call_tir expression.
+ */
 Expr LegalizeNNGroupNorm(const BlockBuilder& bb, const Call& call) {
   const auto* attrs = call->attrs.as<GroupNormAttrs>();
   auto m_te = MakeCallTE(bb, call);
@@ -539,7 +718,13 @@ Expr LegalizeNNGroupNorm(const BlockBuilder& bb, const Call& call) {
 TVM_REGISTER_OP("relax.nn.group_norm")
     .set_attr<FLegalize>("FLegalize", LegalizeNNGroupNorm, TVM_LEGALIZE_CPP_LEVEL);
 
-// instance_norm
+/*!
+ * \brief TE handler for instance normalization.
+ *
+ * \param args Packed argument list: [data, gamma, beta, channel_axis,
+ *             axes, epsilon].
+ * \return A single-element array containing the normalized output tensor.
+ */
 ffi::Array<te::Tensor> InstanceNormTE(const ffi::Array<ffi::Any> args) {
   auto data = args[0].cast<te::Tensor>();
   auto gamma = args[1].cast<te::Tensor>();
@@ -550,6 +735,13 @@ ffi::Array<te::Tensor> InstanceNormTE(const ffi::Array<ffi::Any> args) {
   return {topi::nn::instance_norm(data, gamma, beta, channel_axis, axis, epsilon)};
 }
 
+/*!
+ * \brief Legalize relax.nn.instance_norm to call_tir via InstanceNormTE.
+ *
+ * \param bb The block builder.
+ * \param call The relax.nn.instance_norm call to legalize.
+ * \return The legalized call_tir expression.
+ */
 Expr LegalizeNNInstanceNorm(const BlockBuilder& bb, const Call& call) {
   const auto* attrs = call->attrs.as<InstanceNormAttrs>();
   auto m_te = MakeCallTE(bb, call);
@@ -565,7 +757,12 @@ Expr LegalizeNNInstanceNorm(const BlockBuilder& bb, const Call& call) {
 TVM_REGISTER_OP("relax.nn.instance_norm")
     .set_attr<FLegalize>("FLegalize", LegalizeNNInstanceNorm, TVM_LEGALIZE_CPP_LEVEL);
 
-// rms_norm
+/*!
+ * \brief TE handler for RMS normalization.
+ *
+ * \param args Packed argument list: [data, weight, axes, epsilon].
+ * \return A single-element array containing the normalized output tensor.
+ */
 ffi::Array<te::Tensor> RmsNormTE(const ffi::Array<ffi::Any> args) {
   auto data = args[0].cast<te::Tensor>();
   auto weight = args[1].cast<te::Tensor>();
@@ -574,6 +771,13 @@ ffi::Array<te::Tensor> RmsNormTE(const ffi::Array<ffi::Any> args) {
   return {topi::nn::rms_norm(data, weight, axis, epsilon)};
 }
 
+/*!
+ * \brief Legalize relax.nn.rms_norm to call_tir via RmsNormTE.
+ *
+ * \param bb The block builder.
+ * \param call The relax.nn.rms_norm call to legalize.
+ * \return The legalized call_tir expression.
+ */
 Expr LegalizeNNRmsNorm(const BlockBuilder& bb, const Call& call) {
   const auto* attrs = call->attrs.as<RMSNormAttrs>();
   auto m_te = MakeCallTE(bb, call);
@@ -587,7 +791,13 @@ Expr LegalizeNNRmsNorm(const BlockBuilder& bb, const Call& call) {
 TVM_REGISTER_OP("relax.nn.rms_norm")
     .set_attr<FLegalize>("FLegalize", LegalizeNNRmsNorm, TVM_LEGALIZE_CPP_LEVEL);
 
-// nll_loss
+/*!
+ * \brief TE handler for NLL loss with explicit weights.
+ *
+ * \param args Packed argument list: [predictions, targets, weights,
+ *             reduction (String), ignore_index (int)].
+ * \return A single-element array containing the loss tensor.
+ */
 ffi::Array<te::Tensor> NllLossTE(const ffi::Array<ffi::Any> args) {
   auto predictions = args[0].cast<te::Tensor>();
   auto targets = args[1].cast<te::Tensor>();
@@ -597,6 +807,16 @@ ffi::Array<te::Tensor> NllLossTE(const ffi::Array<ffi::Any> args) {
   return {topi::nll_loss(predictions, targets, weights, reduction, ignore_index)};
 }
 
+/*!
+ * \brief TE handler for NLL loss without explicit weights.
+ *
+ * Constructs a uniform weight tensor of ones before forwarding to
+ * topi::nll_loss.
+ *
+ * \param args Packed argument list: [predictions, targets,
+ *             reduction (String), ignore_index (int)].
+ * \return A single-element array containing the loss tensor.
+ */
 ffi::Array<te::Tensor> NllLossNoWeightTE(const ffi::Array<ffi::Any> args) {
   auto predictions = args[0].cast<te::Tensor>();
   auto targets = args[1].cast<te::Tensor>();
@@ -611,6 +831,16 @@ ffi::Array<te::Tensor> NllLossNoWeightTE(const ffi::Array<ffi::Any> args) {
   return {topi::nll_loss(predictions, targets, weights, reduction, ignore_index)};
 }
 
+/*!
+ * \brief Legalize relax.nn.nll_loss to call_tir.
+ *
+ * Dispatches to NllLossNoWeightTE when no weight tensor is provided, and
+ * to NllLossTE otherwise.
+ *
+ * \param bb The block builder.
+ * \param call The relax.nn.nll_loss call to legalize.
+ * \return The legalized call_tir expression.
+ */
 Expr LegalizeNNNllLoss(const BlockBuilder& bb, const Call& call) {
   const auto* attrs = call->attrs.as<NLLLossAttrs>();
   auto m_te = MakeCallTE(bb, call);
@@ -634,13 +864,28 @@ Expr LegalizeNNNllLoss(const BlockBuilder& bb, const Call& call) {
 TVM_REGISTER_OP("relax.nn.nll_loss")
     .set_attr<FLegalize>("FLegalize", LegalizeNNNllLoss, TVM_LEGALIZE_CPP_LEVEL);
 
-// batch_flatten
+/*!
+ * \brief TE handler for batch_flatten (implemented as reshape).
+ *
+ * \param args Packed argument list: [data, new_shape].
+ * \return A single-element array containing the reshaped output tensor.
+ */
 ffi::Array<te::Tensor> BatchFlattenTE(const ffi::Array<ffi::Any> args) {
   auto data = args[0].cast<te::Tensor>();
   auto new_shape = args[1].cast<ffi::Array<tvm::PrimExpr>>();
   return {topi::reshape(data, new_shape)};
 }
 
+/*!
+ * \brief Legalize relax.nn.batch_flatten to call_tir via topi.reshape.
+ *
+ * Returns the original call unchanged if the output shape is not statically
+ * known.
+ *
+ * \param bb The block builder.
+ * \param call The relax.nn.batch_flatten call to legalize.
+ * \return The legalized call_tir expression, or the original call.
+ */
 Expr LegalizeNNBatchFlatten(const BlockBuilder& bb, const Call& call) {
   auto sinfo = GetStructInfo(call).as<TensorStructInfoNode>();
   if (!sinfo || !sinfo->shape.defined()) {
@@ -657,7 +902,13 @@ Expr LegalizeNNBatchFlatten(const BlockBuilder& bb, const Call& call) {
 TVM_REGISTER_OP("relax.nn.batch_flatten")
     .set_attr<FLegalize>("FLegalize", LegalizeNNBatchFlatten, TVM_LEGALIZE_CPP_LEVEL);
 
-// dropout
+/*!
+ * \brief Legalize relax.nn.dropout (no-op: handled by the frontend).
+ *
+ * \param bb The block builder.
+ * \param call The relax.nn.dropout call.
+ * \return The original call unchanged.
+ */
 Expr LegalizeNNDropout(const BlockBuilder& bb, const Call& call) {
   LOG(INFO) << "Dropout is handled by frontend translator at this moment and is not legalized.";
   return call;
@@ -665,7 +916,13 @@ Expr LegalizeNNDropout(const BlockBuilder& bb, const Call& call) {
 TVM_REGISTER_OP("relax.nn.dropout")
     .set_attr<FLegalize>("FLegalize", LegalizeNNDropout, TVM_LEGALIZE_CPP_LEVEL);
 
-// attention / attention_bias / attention_var_len
+/*!
+ * \brief Legalize relax.nn.attention_var_len (not supported).
+ *
+ * \param bb The block builder.
+ * \param call The relax.nn.attention_var_len call.
+ * \return Never returns; always calls LOG(FATAL).
+ */
 Expr LegalizeNNAttentionVarLen(const BlockBuilder& bb, const Call& call) {
   LOG(FATAL) << "Legalization of attention_var_len op is not supported yet.";
   return call;
@@ -673,7 +930,17 @@ Expr LegalizeNNAttentionVarLen(const BlockBuilder& bb, const Call& call) {
 TVM_REGISTER_OP("relax.nn.attention_var_len")
     .set_attr<FLegalize>("FLegalize", LegalizeNNAttentionVarLen, TVM_LEGALIZE_CPP_LEVEL);
 
-// batch_norm
+/*!
+ * \brief TE handler for batch normalization.
+ *
+ * Supports both training mode (computes batch statistics and updates moving
+ * averages) and inference mode (uses pre-computed moving mean and variance).
+ *
+ * \param args Packed argument list: [data, gamma, beta, moving_mean,
+ *             moving_var, axis, epsilon, center, scale, training, momentum].
+ * \return A three-element array: [normalized_output, new_moving_mean,
+ *         new_moving_var].
+ */
 ffi::Array<te::Tensor> BatchNormTE(const ffi::Array<ffi::Any> args) {
   auto data = args[0].cast<te::Tensor>();
   auto gamma = args[1].cast<te::Tensor>();
@@ -781,6 +1048,13 @@ ffi::Array<te::Tensor> BatchNormTE(const ffi::Array<ffi::Any> args) {
   return {out, ret_mean, ret_var};
 }
 
+/*!
+ * \brief Legalize relax.nn.batch_norm to call_tir via BatchNormTE.
+ *
+ * \param bb The block builder.
+ * \param call The relax.nn.batch_norm call to legalize.
+ * \return The legalized call_tir expression.
+ */
 Expr LegalizeNNBatchNorm(const BlockBuilder& bb, const Call& call) {
   const auto* attrs = call->attrs.as<BatchNormAttrs>();
   auto m_te = MakeCallTE(bb, call);

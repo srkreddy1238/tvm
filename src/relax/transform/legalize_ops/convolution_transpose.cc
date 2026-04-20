@@ -33,7 +33,20 @@
 namespace tvm {
 namespace relax {
 
-// Conv1DTranspose
+/*!
+ * \brief Preprocess data and kernel tensors for NCW conv1d_transpose.
+ *
+ * Dilates the input data by the stride, pads it to account for the kernel
+ * flip, and flips/transposes the kernel from IOW to OIW layout.
+ *
+ * \param data Input activation tensor in NCW layout.
+ * \param kernel Convolution kernel in IOW layout.
+ * \param strides_arr Stride values (length 1).
+ * \param padding Padding values.
+ * \param out_dtype Output data type.
+ * \param output_padding_arr Output padding values (length 1).
+ * \return A pair (padded_data, transformed_kernel) ready for direct convolution.
+ */
 std::pair<te::Tensor, te::Tensor> Conv1DTransposeNCWPreprocess(
     const te::Tensor& data, const te::Tensor& kernel, const ffi::Array<tvm::PrimExpr>& strides_arr,
     const ffi::Array<tvm::PrimExpr>& padding, const tvm::runtime::DataType& out_dtype,
@@ -82,6 +95,13 @@ std::pair<te::Tensor, te::Tensor> Conv1DTransposeNCWPreprocess(
   return std::make_pair(data_pad, kernel_dilate);
 }
 
+/*!
+ * \brief TE handler for NCW conv1d_transpose (groups == 1).
+ *
+ * \param args Packed argument list: [data, kernel, strides, padding,
+ *             out_dtype, output_padding].
+ * \return A single-element array containing the transposed-convolution output.
+ */
 ffi::Array<te::Tensor> Conv1DTransposeNCWTE(const ffi::Array<ffi::Any> args) {
   auto data = args[0].cast<te::Tensor>();
   auto kernel = args[1].cast<te::Tensor>();
@@ -137,6 +157,13 @@ ffi::Array<te::Tensor> Conv1DTransposeNCWTE(const ffi::Array<ffi::Any> args) {
       "conv1d_transpose_ncw")};
 }
 
+/*!
+ * \brief TE handler for grouped NCW conv1d_transpose.
+ *
+ * \param args Packed argument list: [data, kernel, strides, padding,
+ *             out_dtype, output_padding, groups].
+ * \return A single-element array containing the transposed-convolution output.
+ */
 ffi::Array<te::Tensor> GroupConv1DTransposeNCWTE(const ffi::Array<ffi::Any> args) {
   auto data = args[0].cast<te::Tensor>();
   auto kernel = args[1].cast<te::Tensor>();
@@ -215,6 +242,17 @@ ffi::Array<te::Tensor> GroupConv1DTransposeNCWTE(const ffi::Array<ffi::Any> args
       "group_conv1d_transpose_ncw")};
 }
 
+/*!
+ * \brief Legalize relax.nn.conv1d_transpose to call_tir.
+ *
+ * Only NCW/IOW layout with unit dilation is supported. Dispatches to
+ * Conv1DTransposeNCWTE for groups == 1 and GroupConv1DTransposeNCWTE otherwise.
+ *
+ * \param bb The block builder.
+ * \param call The relax.nn.conv1d_transpose call to legalize.
+ * \return The legalized call_tir expression, or the original call if the
+ *         layout or dilation constraints are not met.
+ */
 Expr LegalizeNNConv1DTranspose(const BlockBuilder& bb, const Call& call) {
   const auto* attrs = call->attrs.as<Conv1DTransposeAttrs>();
   auto m_te = MakeCallTE(bb, call);
@@ -254,7 +292,20 @@ Expr LegalizeNNConv1DTranspose(const BlockBuilder& bb, const Call& call) {
 TVM_REGISTER_OP("relax.nn.conv1d_transpose")
     .set_attr<FLegalize>("FLegalize", LegalizeNNConv1DTranspose, TVM_LEGALIZE_CPP_LEVEL);
 
-// Conv2DTranspose
+/*!
+ * \brief Preprocess data and kernel tensors for NCHW conv2d_transpose.
+ *
+ * Dilates the input data by the stride, pads it to account for the kernel
+ * flip, and flips/transposes the kernel from IOHW to OIHW layout.
+ *
+ * \param data Input activation tensor in NCHW layout.
+ * \param kernel Convolution kernel in IOHW layout.
+ * \param strides Stride values (length 2).
+ * \param padding Padding values.
+ * \param out_dtype Output data type.
+ * \param output_padding Output padding values (length 2).
+ * \return A pair (padded_data, transformed_kernel) ready for direct convolution.
+ */
 std::pair<te::Tensor, te::Tensor> Conv2DTransposeNCHWPreprocess(
     const te::Tensor& data, const te::Tensor& kernel, const ffi::Array<tvm::PrimExpr>& strides,
     const ffi::Array<tvm::PrimExpr>& padding, const tvm::runtime::DataType& out_dtype,
@@ -325,6 +376,13 @@ std::pair<te::Tensor, te::Tensor> Conv2DTransposeNCHWPreprocess(
   return std::make_pair(data_pad, kernel_dilate);
 }
 
+/*!
+ * \brief TE handler for grouped NCHW conv2d_transpose.
+ *
+ * \param args Packed argument list: [data, kernel, strides, padding,
+ *             out_dtype, output_padding, groups].
+ * \return A single-element array containing the transposed-convolution output.
+ */
 ffi::Array<te::Tensor> GroupConv2DTransposeNCHWTE(const ffi::Array<ffi::Any> args) {
   auto data = args[0].cast<te::Tensor>();
   auto kernel = args[1].cast<te::Tensor>();
@@ -408,6 +466,13 @@ ffi::Array<te::Tensor> GroupConv2DTransposeNCHWTE(const ffi::Array<ffi::Any> arg
       "group_conv2d_transpose_nchw")};
 }
 
+/*!
+ * \brief TE handler for NCHW conv2d_transpose (groups == 1).
+ *
+ * \param args Packed argument list: [data, kernel, strides, padding,
+ *             out_dtype, output_padding].
+ * \return A single-element array containing the transposed-convolution output.
+ */
 ffi::Array<te::Tensor> Conv2DTransposeNCHWTE(const ffi::Array<ffi::Any> args) {
   auto data = args[0].cast<te::Tensor>();
   auto kernel = args[1].cast<te::Tensor>();
@@ -470,6 +535,17 @@ ffi::Array<te::Tensor> Conv2DTransposeNCHWTE(const ffi::Array<ffi::Any> args) {
       "conv2d_transpose_nchw")};
 }
 
+/*!
+ * \brief Legalize relax.nn.conv2d_transpose to call_tir.
+ *
+ * Only NCHW/IOHW layout with unit dilation is supported. Dispatches to
+ * Conv2DTransposeNCHWTE for groups == 1 and GroupConv2DTransposeNCHWTE otherwise.
+ *
+ * \param bb The block builder.
+ * \param call The relax.nn.conv2d_transpose call to legalize.
+ * \return The legalized call_tir expression, or the original call if the
+ *         layout or dilation constraints are not met.
+ */
 Expr LegalizeNNConv2DTranspose(const BlockBuilder& bb, const Call& call) {
   const auto* attrs = call->attrs.as<Conv2DTransposeAttrs>();
   auto m_te = MakeCallTE(bb, call);

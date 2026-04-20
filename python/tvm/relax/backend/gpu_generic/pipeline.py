@@ -16,8 +16,12 @@
 # under the License.
 """The Relax generic GPU backend compilation pipeline and other passes."""
 
+import os
+
 import tvm
 from tvm import relax
+
+from . import _ffi_api
 
 
 def library_dispatch_passes(target: tvm.target.Target):  # pylint: disable=unused-argument
@@ -32,43 +36,52 @@ def legalize_passes(target: tvm.target.Target):  # pylint: disable=unused-argume
     """The default legalization passes for generic GPU backend."""
     from tvm.s_tir import dlight as dl  # pylint: disable=import-outside-toplevel
 
-    return [
-        tvm.relax.transform.LegalizeOps(),
-        tvm.relax.transform.AnnotateTIROpPattern(),
-        tvm.relax.transform.FoldConstant(),
-        tvm.relax.transform.FuseOps(),
-        tvm.relax.transform.FuseTIR(),
-        dl.ApplyDefaultSchedule(
-            dl.gpu.Matmul(),
-            dl.gpu.GEMV(),
-            dl.gpu.Reduction(),
-            dl.gpu.GeneralReduction(),
-            dl.gpu.Fallback(),
-        ),
-    ]
+    if os.getenv("CPP_COMPILER_CI", "OFF") == "ON":
+        return [_ffi_api.PipelineLegalize(target)]
+    else:
+        return [
+            tvm.relax.transform.LegalizeOps(),
+            tvm.relax.transform.AnnotateTIROpPattern(),
+            tvm.relax.transform.FoldConstant(),
+            tvm.relax.transform.FuseOps(),
+            tvm.relax.transform.FuseTIR(),
+            dl.ApplyDefaultSchedule(
+                dl.gpu.Matmul(),
+                dl.gpu.GEMV(),
+                dl.gpu.Reduction(),
+                dl.gpu.GeneralReduction(),
+                dl.gpu.Fallback(),
+            ),
+        ]
 
 
 def dataflow_lower_passes(target: tvm.target.Target):  # pylint: disable=unused-argument
     """The default dataflow lowering passes for generic GPU backend."""
-    return [
-        relax.transform.RewriteDataflowReshape(),
-        relax.transform.ToNonDataflow(),
-        relax.transform.RemovePurityChecking(),
-        relax.transform.CallTIRRewrite(),
-    ]
+    if os.getenv("CPP_COMPILER_CI", "OFF") == "ON":
+        return [_ffi_api.PipelineDataflow(target)]
+    else:
+        return [
+            relax.transform.RewriteDataflowReshape(),
+            relax.transform.ToNonDataflow(),
+            relax.transform.RemovePurityChecking(),
+            relax.transform.CallTIRRewrite(),
+        ]
 
 
 def finalize_passes(target: tvm.target.Target):  # pylint: disable=unused-argument
     """The default finalization passes for generic GPU backend."""
-    return [
-        relax.transform.StaticPlanBlockMemory(),
-        relax.transform.LowerAllocTensor(),
-        relax.transform.KillAfterLastUse(),
-        relax.transform.LowerRuntimeBuiltin(),
-        relax.transform.ComputePrimValue(),
-        relax.transform.VMShapeLower(),
-        relax.transform.AttachGlobalSymbol(),
-    ]
+    if os.getenv("CPP_COMPILER_CI", "OFF") == "ON":
+        return [_ffi_api.PipelineFinalize(target)]
+    else:
+        return [
+            relax.transform.StaticPlanBlockMemory(),
+            relax.transform.LowerAllocTensor(),
+            relax.transform.KillAfterLastUse(),
+            relax.transform.LowerRuntimeBuiltin(),
+            relax.transform.ComputePrimValue(),
+            relax.transform.VMShapeLower(),
+            relax.transform.AttachGlobalSymbol(),
+        ]
 
 
 def get_default_pipeline(target: tvm.target.Target):

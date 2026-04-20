@@ -15,6 +15,15 @@
 # specific language governing permissions and limitations
 # under the License.
 
+if(USE_CPP_COMPILER)
+  # Raise priority for all CPP legalizations
+  add_definitions(-DTVM_LEGALIZE_CPP_LEVEL=20)
+  message(STATUS "CppCompiler : Enabled")
+else()
+  add_definitions(-DTVM_LEGALIZE_CPP_LEVEL=5)
+  message(STATUS "CppCompiler : Disabled")
+endif(USE_CPP_COMPILER)
+
 if(USE_CPP_COMPILER_TESTS)
   if(EXISTS ${USE_CPP_COMPILER_TESTS})
     include(FetchContent)

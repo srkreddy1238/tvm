@@ -33,5 +33,7 @@ export TVM_BIND_THREADS=0
 export OMP_NUM_THREADS=1
 
 pushd "${BUILD_DIR}"
+if [ ${CPP_COMPILER_CI} == "ON" ]; then
 ./cpp-compiler-test
+fi
 popd

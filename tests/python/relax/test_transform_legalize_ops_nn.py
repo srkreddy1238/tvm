@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 # ruff: noqa: E501, F821, F841
+import os
 
 import pytest
 
@@ -1745,11 +1746,45 @@ def test_cross_entropy_with_logits():
                 vi = T.axis.spatial(1, T.int64(0))
                 T.reads(T_multiply_red[()])
                 T.writes(T_multiply[()])
+                T_multiply[()] = T_multiply_red[()] * T.float32(-1.0)
+
+    @tvm.script.ir_module
+    class ExpectedCPP:
+        @R.function
+        def main(x: R.Tensor((3,), dtype="float32"), y: R.Tensor((3,), dtype="float32")):
+            gv = R.call_tir(ExpectedCPP.cross_entropy_with_logits, (x, y), R.Tensor((), dtype="float32"))
+            return gv
+
+        @T.prim_func(private=True)
+        def cross_entropy_with_logits(x: T.Buffer((T.int64(3),), "float32"), y: T.Buffer((T.int64(3),), "float32"), T_multiply: T.Buffer((), "float32")):
+            T.func_attr({"tir.noalias": True})
+            T_multiply_1 = T.alloc_buffer((T.int64(3),))
+            T_multiply_red = T.alloc_buffer(())
+            for ax0 in range(T.int64(3)):
+                with T.sblock("T_multiply"):
+                    v_ax0 = T.axis.spatial(T.int64(3), ax0)
+                    T.reads(x[v_ax0], y[v_ax0])
+                    T.writes(T_multiply_1[v_ax0])
+                    T_multiply_1[v_ax0] = x[v_ax0] * y[v_ax0]
+            for k0 in range(T.int64(3)):
+                with T.sblock("T_multiply_red"):
+                    v_k0 = T.axis.reduce(T.int64(3), k0)
+                    T.reads(T_multiply_1[v_k0])
+                    T.writes(T_multiply_red[()])
+                    with T.init():
+                        T_multiply_red[()] = T.float32(0.0)
+                    T_multiply_red[()] = T_multiply_red[()] + T_multiply_1[v_k0]
+            with T.sblock("T_multiply_1"):
+                vi = T.axis.spatial(1, T.int64(0))
+                T.reads(T_multiply_red[()])
+                T.writes(T_multiply[()])
                 T_multiply[()] = T.float32(0.0) - T_multiply_red[()]
     # fmt: on
 
     mod = LegalizeOps()(CrossEntropyWithLogits)
-    tvm.ir.assert_structural_equal(mod, Expected)
+    tvm.ir.assert_structural_equal(
+        mod, ExpectedCPP if os.environ.get("CPP_COMPILER_CI", "OFF") == "ON" else Expected
+    )
 
 
 def test_cross_entropy_with_logits_batch():
@@ -1792,6 +1827,44 @@ def test_cross_entropy_with_logits_batch():
                 vi = T.axis.spatial(1, T.int64(0))
                 T.reads(T_multiply_red[()])
                 T.writes(T_multiply_1[()])
+                T_multiply_1[()] = T_multiply_red[()] * T.float32(-1.0)
+            with T.sblock("T_divide"):
+                vi = T.axis.spatial(1, T.int64(0))
+                T.reads(T_multiply_1[()])
+                T.writes(T_divide[()])
+                T_divide[()] = T_multiply_1[()] / T.float32(2)
+
+    @tvm.script.ir_module
+    class ExpectedCPP:
+        @R.function
+        def main(x: R.Tensor((2, 3), dtype="float32"), y: R.Tensor((2, 3), dtype="float32")):
+            gv = R.call_tir(ExpectedCPP.cross_entropy_with_logits, (x, y), R.Tensor((), dtype="float32"))
+            return gv
+
+        @T.prim_func(private=True)
+        def cross_entropy_with_logits(x: T.Buffer((T.int64(2), T.int64(3)), "float32"), y: T.Buffer((T.int64(2), T.int64(3)), "float32"), T_divide: T.Buffer((), "float32")):
+            T.func_attr({"tir.noalias": True})
+            T_multiply = T.alloc_buffer((T.int64(2), T.int64(3)))
+            T_multiply_red = T.alloc_buffer(())
+            T_multiply_1 = T.alloc_buffer(())
+            for ax0, ax1 in T.grid(T.int64(2), T.int64(3)):
+                with T.sblock("T_multiply"):
+                    v_ax0, v_ax1 = T.axis.remap("SS", [ax0, ax1])
+                    T.reads(x[v_ax0, v_ax1], y[v_ax0, v_ax1])
+                    T.writes(T_multiply[v_ax0, v_ax1])
+                    T_multiply[v_ax0, v_ax1] = x[v_ax0, v_ax1] * y[v_ax0, v_ax1]
+            for k0, k1 in T.grid(T.int64(2), T.int64(3)):
+                with T.sblock("T_multiply_red"):
+                    v_k0, v_k1 = T.axis.remap("RR", [k0, k1])
+                    T.reads(T_multiply[v_k0, v_k1])
+                    T.writes(T_multiply_red[()])
+                    with T.init():
+                        T_multiply_red[()] = T.float32(0.0)
+                    T_multiply_red[()] = T_multiply_red[()] + T_multiply[v_k0, v_k1]
+            with T.sblock("T_multiply_1"):
+                vi = T.axis.spatial(1, T.int64(0))
+                T.reads(T_multiply_red[()])
+                T.writes(T_multiply_1[()])
                 T_multiply_1[()] = T.float32(0.0) - T_multiply_red[()]
             with T.sblock("T_divide"):
                 vi = T.axis.spatial(1, T.int64(0))
@@ -1801,7 +1874,9 @@ def test_cross_entropy_with_logits_batch():
     # fmt: on
 
     mod = LegalizeOps()(CrossEntropyWithLogits)
-    tvm.ir.assert_structural_equal(mod, Expected)
+    tvm.ir.assert_structural_equal(
+        mod, ExpectedCPP if os.environ.get("CPP_COMPILER_CI", "OFF") == "ON" else Expected
+    )
 
 
 def test_cross_entropy_with_logits_batch_symbolic():
@@ -1849,6 +1924,47 @@ def test_cross_entropy_with_logits_batch_symbolic():
                 vi = T.axis.spatial(1, T.int64(0))
                 T.reads(T_multiply_red[()])
                 T.writes(T_multiply_1[()])
+                T_multiply_1[()] = T_multiply_red[()] * T.float32(-1.0)
+            with T.sblock("T_divide"):
+                vi = T.axis.spatial(1, T.int64(0))
+                T.reads(T_multiply_1[()])
+                T.writes(T_divide[()])
+                T_divide[()] = T_multiply_1[()] / T.Cast("float32", n)
+
+    @tvm.script.ir_module
+    class ExpectedCPP:
+        @R.function
+        def main(x: R.Tensor(("n", "m"), dtype="float32"), y: R.Tensor(("n", "m"), dtype="float32")):
+            gv = R.call_tir(ExpectedCPP.cross_entropy_with_logits, (x, y), R.Tensor((), dtype="float32"))
+            return gv
+
+        @T.prim_func(private=True)
+        def cross_entropy_with_logits(var_x: T.handle, var_y: T.handle, T_divide: T.Buffer((), "float32")):
+            T.func_attr({"tir.noalias": True})
+            m, n = T.int64(), T.int64()
+            x = T.match_buffer(var_x, (n, m))
+            y = T.match_buffer(var_y, (n, m))
+            T_multiply = T.alloc_buffer((n, m))
+            T_multiply_red = T.alloc_buffer(())
+            T_multiply_1 = T.alloc_buffer(())
+            for ax0, ax1 in T.grid(n, m):
+                with T.sblock("T_multiply"):
+                    v_ax0, v_ax1 = T.axis.remap("SS", [ax0, ax1])
+                    T.reads(x[v_ax0, v_ax1], y[v_ax0, v_ax1])
+                    T.writes(T_multiply[v_ax0, v_ax1])
+                    T_multiply[v_ax0, v_ax1] = x[v_ax0, v_ax1] * y[v_ax0, v_ax1]
+            for k0, k1 in T.grid(n, m):
+                with T.sblock("T_multiply_red"):
+                    v_k0, v_k1 = T.axis.remap("RR", [k0, k1])
+                    T.reads(T_multiply[v_k0, v_k1])
+                    T.writes(T_multiply_red[()])
+                    with T.init():
+                        T_multiply_red[()] = T.float32(0.0)
+                    T_multiply_red[()] = T_multiply_red[()] + T_multiply[v_k0, v_k1]
+            with T.sblock("T_multiply_1"):
+                vi = T.axis.spatial(1, T.int64(0))
+                T.reads(T_multiply_red[()])
+                T.writes(T_multiply_1[()])
                 T_multiply_1[()] = T.float32(0.0) - T_multiply_red[()]
             with T.sblock("T_divide"):
                 vi = T.axis.spatial(1, T.int64(0))
@@ -1858,7 +1974,9 @@ def test_cross_entropy_with_logits_batch_symbolic():
     # fmt: on
 
     mod = LegalizeOps()(CrossEntropyWithLogits)
-    tvm.ir.assert_structural_equal(mod, Expected)
+    tvm.ir.assert_structural_equal(
+        mod, ExpectedCPP if os.environ.get("CPP_COMPILER_CI", "OFF") == "ON" else Expected
+    )
 
 
 def test_batch_norm():
@@ -1870,8 +1988,283 @@ def test_batch_norm():
             gv: R.Tuple(R.Tensor((2, 3, 28, 28), "float32"), R.Tensor((3,), "float32"), R.Tensor((3,), "float32")) = R.nn.batch_norm(x, gamma, beta, moving_mean, moving_var, axis=1)
             return gv
 
-    @I.ir_module
+    @tvm.script.ir_module
     class Expected:
+        @T.prim_func(private=True)
+        def batch_norm(var_x: T.handle, var_gamma: T.handle, var_beta: T.handle, var_moving_mean: T.handle, var_moving_var: T.handle, var_T_add: T.handle, var_T_add_1: T.handle, var_T_add_2: T.handle):
+            T.func_attr({"tir.noalias": True})
+            x = T.match_buffer(var_x, (T.int64(2), T.int64(3), T.int64(28), T.int64(28)))
+            gamma = T.match_buffer(var_gamma, (T.int64(3),))
+            beta = T.match_buffer(var_beta, (T.int64(3),))
+            moving_mean = T.match_buffer(var_moving_mean, (T.int64(3),))
+            moving_var = T.match_buffer(var_moving_var, (T.int64(3),))
+            T_add = T.match_buffer(var_T_add, (T.int64(2), T.int64(3), T.int64(28), T.int64(28)))
+            T_add_1 = T.match_buffer(var_T_add_1, (T.int64(3),))
+            T_add_2 = T.match_buffer(var_T_add_2, (T.int64(3),))
+            with T.sblock("root"):
+                T.reads()
+                T.writes()
+                x_red = T.alloc_buffer((T.int64(3),))
+                T_divide = T.alloc_buffer((T.int64(3),))
+                T_reshape = T.alloc_buffer((T.int64(1), T.int64(3), T.int64(1), T.int64(1)))
+                T_subtract = T.alloc_buffer((T.int64(2), T.int64(3), T.int64(28), T.int64(28)))
+                T_subtract_1 = T.alloc_buffer((T.int64(2), T.int64(3), T.int64(28), T.int64(28)))
+                T_subtract_2 = T.alloc_buffer((T.int64(2), T.int64(3), T.int64(28), T.int64(28)))
+                T_multiply = T.alloc_buffer((T.int64(2), T.int64(3), T.int64(28), T.int64(28)))
+                T_multiply_red = T.alloc_buffer((T.int64(3),))
+                T_divide_1 = T.alloc_buffer((T.int64(3),))
+                T_reshape_1 = T.alloc_buffer((T.int64(1), T.int64(3), T.int64(1), T.int64(1)))
+                T_add_3 = T.alloc_buffer((T.int64(1), T.int64(3), T.int64(1), T.int64(1)))
+                compute = T.alloc_buffer((T.int64(1), T.int64(3), T.int64(1), T.int64(1)))
+                T_divide_2 = T.alloc_buffer((T.int64(2), T.int64(3), T.int64(28), T.int64(28)))
+                T_reshape_2 = T.alloc_buffer((T.int64(1), T.int64(3), T.int64(1), T.int64(1)))
+                T_multiply_1 = T.alloc_buffer((T.int64(2), T.int64(3), T.int64(28), T.int64(28)))
+                T_reshape_3 = T.alloc_buffer((T.int64(1), T.int64(3), T.int64(1), T.int64(1)))
+                T_multiply_2 = T.alloc_buffer((T.int64(3),))
+                T_multiply_3 = T.alloc_buffer((T.int64(3),))
+                T_multiply_4 = T.alloc_buffer((T.int64(3),))
+                T_multiply_5 = T.alloc_buffer((T.int64(3),))
+                for ax0 in range(T.int64(3)):
+                    for k0 in range(T.int64(2)):
+                        for k2 in range(T.int64(28)):
+                            for k3 in range(T.int64(28)):
+                                with T.sblock("x_red"):
+                                    v_ax0 = T.axis.spatial(T.int64(3), ax0)
+                                    v_k0 = T.axis.reduce(T.int64(2), k0)
+                                    v_k2 = T.axis.reduce(T.int64(28), k2)
+                                    v_k3 = T.axis.reduce(T.int64(28), k3)
+                                    T.reads(x[v_k0, v_ax0, v_k2, v_k3])
+                                    T.writes(x_red[v_ax0])
+                                    with T.init():
+                                        x_red[v_ax0] = T.float32(0.0)
+                                    x_red[v_ax0] = x_red[v_ax0] + x[v_k0, v_ax0, v_k2, v_k3]
+                for ax0 in range(T.int64(3)):
+                    with T.sblock("T_divide"):
+                        v_ax0 = T.axis.spatial(T.int64(3), ax0)
+                        T.reads(x_red[v_ax0])
+                        T.writes(T_divide[v_ax0])
+                        T_divide[v_ax0] = x_red[v_ax0] / T.float32(1568.0)
+                for ax0 in range(T.int64(1)):
+                    for ax1 in range(T.int64(3)):
+                        for ax2 in range(T.int64(1)):
+                            for ax3 in range(T.int64(1)):
+                                with T.sblock("T_reshape"):
+                                    v_ax0 = T.axis.spatial(T.int64(1), ax0)
+                                    v_ax1 = T.axis.spatial(T.int64(3), ax1)
+                                    v_ax2 = T.axis.spatial(T.int64(1), ax2)
+                                    v_ax3 = T.axis.spatial(T.int64(1), ax3)
+                                    T.reads(T_divide[(v_ax1 + v_ax2 + v_ax3) % T.int64(3)])
+                                    T.writes(T_reshape[v_ax0, v_ax1, v_ax2, v_ax3])
+                                    T_reshape[v_ax0, v_ax1, v_ax2, v_ax3] = T_divide[(v_ax1 + v_ax2 + v_ax3) % T.int64(3)]
+                for ax0 in range(T.int64(2)):
+                    for ax1 in range(T.int64(3)):
+                        for ax2 in range(T.int64(28)):
+                            for ax3 in range(T.int64(28)):
+                                with T.sblock("T_subtract"):
+                                    v_ax0 = T.axis.spatial(T.int64(2), ax0)
+                                    v_ax1 = T.axis.spatial(T.int64(3), ax1)
+                                    v_ax2 = T.axis.spatial(T.int64(28), ax2)
+                                    v_ax3 = T.axis.spatial(T.int64(28), ax3)
+                                    T.reads(x[v_ax0, v_ax1, v_ax2, v_ax3], T_reshape[T.int64(0), v_ax1, T.int64(0), T.int64(0)])
+                                    T.writes(T_subtract[v_ax0, v_ax1, v_ax2, v_ax3])
+                                    T_subtract[v_ax0, v_ax1, v_ax2, v_ax3] = x[v_ax0, v_ax1, v_ax2, v_ax3] - T_reshape[T.int64(0), v_ax1, T.int64(0), T.int64(0)]
+                for ax0 in range(T.int64(2)):
+                    for ax1 in range(T.int64(3)):
+                        for ax2 in range(T.int64(28)):
+                            for ax3 in range(T.int64(28)):
+                                with T.sblock("T_subtract_1"):
+                                    v_ax0 = T.axis.spatial(T.int64(2), ax0)
+                                    v_ax1 = T.axis.spatial(T.int64(3), ax1)
+                                    v_ax2 = T.axis.spatial(T.int64(28), ax2)
+                                    v_ax3 = T.axis.spatial(T.int64(28), ax3)
+                                    T.reads(x[v_ax0, v_ax1, v_ax2, v_ax3], T_reshape[T.int64(0), v_ax1, T.int64(0), T.int64(0)])
+                                    T.writes(T_subtract_1[v_ax0, v_ax1, v_ax2, v_ax3])
+                                    T_subtract_1[v_ax0, v_ax1, v_ax2, v_ax3] = x[v_ax0, v_ax1, v_ax2, v_ax3] - T_reshape[T.int64(0), v_ax1, T.int64(0), T.int64(0)]
+                for ax0 in range(T.int64(2)):
+                    for ax1 in range(T.int64(3)):
+                        for ax2 in range(T.int64(28)):
+                            for ax3 in range(T.int64(28)):
+                                with T.sblock("T_subtract_2"):
+                                    v_ax0 = T.axis.spatial(T.int64(2), ax0)
+                                    v_ax1 = T.axis.spatial(T.int64(3), ax1)
+                                    v_ax2 = T.axis.spatial(T.int64(28), ax2)
+                                    v_ax3 = T.axis.spatial(T.int64(28), ax3)
+                                    T.reads(x[v_ax0, v_ax1, v_ax2, v_ax3], T_reshape[T.int64(0), v_ax1, T.int64(0), T.int64(0)])
+                                    T.writes(T_subtract_2[v_ax0, v_ax1, v_ax2, v_ax3])
+                                    T_subtract_2[v_ax0, v_ax1, v_ax2, v_ax3] = x[v_ax0, v_ax1, v_ax2, v_ax3] - T_reshape[T.int64(0), v_ax1, T.int64(0), T.int64(0)]
+                for ax0 in range(T.int64(2)):
+                    for ax1 in range(T.int64(3)):
+                        for ax2 in range(T.int64(28)):
+                            for ax3 in range(T.int64(28)):
+                                with T.sblock("T_multiply"):
+                                    v_ax0 = T.axis.spatial(T.int64(2), ax0)
+                                    v_ax1 = T.axis.spatial(T.int64(3), ax1)
+                                    v_ax2 = T.axis.spatial(T.int64(28), ax2)
+                                    v_ax3 = T.axis.spatial(T.int64(28), ax3)
+                                    T.reads(T_subtract_1[v_ax0, v_ax1, v_ax2, v_ax3], T_subtract_2[v_ax0, v_ax1, v_ax2, v_ax3])
+                                    T.writes(T_multiply[v_ax0, v_ax1, v_ax2, v_ax3])
+                                    T_multiply[v_ax0, v_ax1, v_ax2, v_ax3] = T_subtract_1[v_ax0, v_ax1, v_ax2, v_ax3] * T_subtract_2[v_ax0, v_ax1, v_ax2, v_ax3]
+                for ax0 in range(T.int64(3)):
+                    for k0 in range(T.int64(2)):
+                        for k2 in range(T.int64(28)):
+                            for k3 in range(T.int64(28)):
+                                with T.sblock("T_multiply_red"):
+                                    v_ax0 = T.axis.spatial(T.int64(3), ax0)
+                                    v_k0 = T.axis.reduce(T.int64(2), k0)
+                                    v_k2 = T.axis.reduce(T.int64(28), k2)
+                                    v_k3 = T.axis.reduce(T.int64(28), k3)
+                                    T.reads(T_multiply[v_k0, v_ax0, v_k2, v_k3])
+                                    T.writes(T_multiply_red[v_ax0])
+                                    with T.init():
+                                        T_multiply_red[v_ax0] = T.float32(0.0)
+                                    T_multiply_red[v_ax0] = T_multiply_red[v_ax0] + T_multiply[v_k0, v_ax0, v_k2, v_k3]
+                for ax0 in range(T.int64(3)):
+                    with T.sblock("T_divide_1"):
+                        v_ax0 = T.axis.spatial(T.int64(3), ax0)
+                        T.reads(T_multiply_red[v_ax0])
+                        T.writes(T_divide_1[v_ax0])
+                        T_divide_1[v_ax0] = T_multiply_red[v_ax0] / T.float32(1568.0)
+                for ax0 in range(T.int64(1)):
+                    for ax1 in range(T.int64(3)):
+                        for ax2 in range(T.int64(1)):
+                            for ax3 in range(T.int64(1)):
+                                with T.sblock("T_reshape_1"):
+                                    v_ax0 = T.axis.spatial(T.int64(1), ax0)
+                                    v_ax1 = T.axis.spatial(T.int64(3), ax1)
+                                    v_ax2 = T.axis.spatial(T.int64(1), ax2)
+                                    v_ax3 = T.axis.spatial(T.int64(1), ax3)
+                                    T.reads(T_divide_1[(v_ax1 + v_ax2 + v_ax3) % T.int64(3)])
+                                    T.writes(T_reshape_1[v_ax0, v_ax1, v_ax2, v_ax3])
+                                    T_reshape_1[v_ax0, v_ax1, v_ax2, v_ax3] = T_divide_1[(v_ax1 + v_ax2 + v_ax3) % T.int64(3)]
+                for ax0 in range(T.int64(1)):
+                    for ax1 in range(T.int64(3)):
+                        for ax2 in range(T.int64(1)):
+                            for ax3 in range(T.int64(1)):
+                                with T.sblock("T_add"):
+                                    v_ax0 = T.axis.spatial(T.int64(1), ax0)
+                                    v_ax1 = T.axis.spatial(T.int64(3), ax1)
+                                    v_ax2 = T.axis.spatial(T.int64(1), ax2)
+                                    v_ax3 = T.axis.spatial(T.int64(1), ax3)
+                                    T.reads(T_reshape_1[v_ax0, v_ax1, v_ax2, v_ax3])
+                                    T.writes(T_add_3[v_ax0, v_ax1, v_ax2, v_ax3])
+                                    T_add_3[v_ax0, v_ax1, v_ax2, v_ax3] = T_reshape_1[v_ax0, v_ax1, v_ax2, v_ax3] + T.float32(1.0000000000000001e-05)
+                for i0 in range(T.int64(1)):
+                    for i1 in range(T.int64(3)):
+                        for i2 in range(T.int64(1)):
+                            for i3 in range(T.int64(1)):
+                                with T.sblock("compute"):
+                                    v_i0 = T.axis.spatial(T.int64(1), i0)
+                                    v_i1 = T.axis.spatial(T.int64(3), i1)
+                                    v_i2 = T.axis.spatial(T.int64(1), i2)
+                                    v_i3 = T.axis.spatial(T.int64(1), i3)
+                                    T.reads(T_add_3[v_i0, v_i1, v_i2, v_i3])
+                                    T.writes(compute[v_i0, v_i1, v_i2, v_i3])
+                                    compute[v_i0, v_i1, v_i2, v_i3] = T.sqrt(T_add_3[v_i0, v_i1, v_i2, v_i3])
+                for ax0 in range(T.int64(2)):
+                    for ax1 in range(T.int64(3)):
+                        for ax2 in range(T.int64(28)):
+                            for ax3 in range(T.int64(28)):
+                                with T.sblock("T_divide_2"):
+                                    v_ax0 = T.axis.spatial(T.int64(2), ax0)
+                                    v_ax1 = T.axis.spatial(T.int64(3), ax1)
+                                    v_ax2 = T.axis.spatial(T.int64(28), ax2)
+                                    v_ax3 = T.axis.spatial(T.int64(28), ax3)
+                                    T.reads(T_subtract[v_ax0, v_ax1, v_ax2, v_ax3], compute[T.int64(0), v_ax1, T.int64(0), T.int64(0)])
+                                    T.writes(T_divide_2[v_ax0, v_ax1, v_ax2, v_ax3])
+                                    T_divide_2[v_ax0, v_ax1, v_ax2, v_ax3] = T_subtract[v_ax0, v_ax1, v_ax2, v_ax3] / compute[T.int64(0), v_ax1, T.int64(0), T.int64(0)]
+                for ax0 in range(T.int64(1)):
+                    for ax1 in range(T.int64(3)):
+                        for ax2 in range(T.int64(1)):
+                            for ax3 in range(T.int64(1)):
+                                with T.sblock("T_reshape_2"):
+                                    v_ax0 = T.axis.spatial(T.int64(1), ax0)
+                                    v_ax1 = T.axis.spatial(T.int64(3), ax1)
+                                    v_ax2 = T.axis.spatial(T.int64(1), ax2)
+                                    v_ax3 = T.axis.spatial(T.int64(1), ax3)
+                                    T.reads(gamma[(v_ax1 + v_ax2 + v_ax3) % T.int64(3)])
+                                    T.writes(T_reshape_2[v_ax0, v_ax1, v_ax2, v_ax3])
+                                    T_reshape_2[v_ax0, v_ax1, v_ax2, v_ax3] = gamma[(v_ax1 + v_ax2 + v_ax3) % T.int64(3)]
+                for ax0 in range(T.int64(2)):
+                    for ax1 in range(T.int64(3)):
+                        for ax2 in range(T.int64(28)):
+                            for ax3 in range(T.int64(28)):
+                                with T.sblock("T_multiply_1"):
+                                    v_ax0 = T.axis.spatial(T.int64(2), ax0)
+                                    v_ax1 = T.axis.spatial(T.int64(3), ax1)
+                                    v_ax2 = T.axis.spatial(T.int64(28), ax2)
+                                    v_ax3 = T.axis.spatial(T.int64(28), ax3)
+                                    T.reads(T_divide_2[v_ax0, v_ax1, v_ax2, v_ax3], T_reshape_2[T.int64(0), v_ax1, T.int64(0), T.int64(0)])
+                                    T.writes(T_multiply_1[v_ax0, v_ax1, v_ax2, v_ax3])
+                                    T_multiply_1[v_ax0, v_ax1, v_ax2, v_ax3] = T_divide_2[v_ax0, v_ax1, v_ax2, v_ax3] * T_reshape_2[T.int64(0), v_ax1, T.int64(0), T.int64(0)]
+                for ax0 in range(T.int64(1)):
+                    for ax1 in range(T.int64(3)):
+                        for ax2 in range(T.int64(1)):
+                            for ax3 in range(T.int64(1)):
+                                with T.sblock("T_reshape_3"):
+                                    v_ax0 = T.axis.spatial(T.int64(1), ax0)
+                                    v_ax1 = T.axis.spatial(T.int64(3), ax1)
+                                    v_ax2 = T.axis.spatial(T.int64(1), ax2)
+                                    v_ax3 = T.axis.spatial(T.int64(1), ax3)
+                                    T.reads(beta[(v_ax1 + v_ax2 + v_ax3) % T.int64(3)])
+                                    T.writes(T_reshape_3[v_ax0, v_ax1, v_ax2, v_ax3])
+                                    T_reshape_3[v_ax0, v_ax1, v_ax2, v_ax3] = beta[(v_ax1 + v_ax2 + v_ax3) % T.int64(3)]
+                for ax0 in range(T.int64(2)):
+                    for ax1 in range(T.int64(3)):
+                        for ax2 in range(T.int64(28)):
+                            for ax3 in range(T.int64(28)):
+                                with T.sblock("T_add_1"):
+                                    v_ax0 = T.axis.spatial(T.int64(2), ax0)
+                                    v_ax1 = T.axis.spatial(T.int64(3), ax1)
+                                    v_ax2 = T.axis.spatial(T.int64(28), ax2)
+                                    v_ax3 = T.axis.spatial(T.int64(28), ax3)
+                                    T.reads(T_multiply_1[v_ax0, v_ax1, v_ax2, v_ax3], T_reshape_3[T.int64(0), v_ax1, T.int64(0), T.int64(0)])
+                                    T.writes(T_add[v_ax0, v_ax1, v_ax2, v_ax3])
+                                    T_add[v_ax0, v_ax1, v_ax2, v_ax3] = T_multiply_1[v_ax0, v_ax1, v_ax2, v_ax3] + T_reshape_3[T.int64(0), v_ax1, T.int64(0), T.int64(0)]
+                for ax0 in range(T.int64(3)):
+                    with T.sblock("T_multiply_2"):
+                        v_ax0 = T.axis.spatial(T.int64(3), ax0)
+                        T.reads(moving_mean[v_ax0])
+                        T.writes(T_multiply_2[v_ax0])
+                        T_multiply_2[v_ax0] = T.float32(0.90000000000000002) * moving_mean[v_ax0]
+                for ax0 in range(T.int64(3)):
+                    with T.sblock("T_multiply_3"):
+                        v_ax0 = T.axis.spatial(T.int64(3), ax0)
+                        T.reads(T_divide[v_ax0])
+                        T.writes(T_multiply_3[v_ax0])
+                        T_multiply_3[v_ax0] = T.float32(0.10000000000000001) * T_divide[v_ax0]
+                for ax0 in range(T.int64(3)):
+                    with T.sblock("T_add_2"):
+                        v_ax0 = T.axis.spatial(T.int64(3), ax0)
+                        T.reads(T_multiply_2[v_ax0], T_multiply_3[v_ax0])
+                        T.writes(T_add_1[v_ax0])
+                        T_add_1[v_ax0] = T_multiply_2[v_ax0] + T_multiply_3[v_ax0]
+                for ax0 in range(T.int64(3)):
+                    with T.sblock("T_multiply_4"):
+                        v_ax0 = T.axis.spatial(T.int64(3), ax0)
+                        T.reads(moving_var[v_ax0])
+                        T.writes(T_multiply_4[v_ax0])
+                        T_multiply_4[v_ax0] = T.float32(0.90000000000000002) * moving_var[v_ax0]
+                for ax0 in range(T.int64(3)):
+                    with T.sblock("T_multiply_5"):
+                        v_ax0 = T.axis.spatial(T.int64(3), ax0)
+                        T.reads(T_divide_1[v_ax0])
+                        T.writes(T_multiply_5[v_ax0])
+                        T_multiply_5[v_ax0] = T.float32(0.10000000000000001) * T_divide_1[v_ax0]
+                for ax0 in range(T.int64(3)):
+                    with T.sblock("T_add_3"):
+                        v_ax0 = T.axis.spatial(T.int64(3), ax0)
+                        T.reads(T_multiply_4[v_ax0], T_multiply_5[v_ax0])
+                        T.writes(T_add_2[v_ax0])
+                        T_add_2[v_ax0] = T_multiply_4[v_ax0] + T_multiply_5[v_ax0]
+
+        @R.function
+        def main(x: R.Tensor((2, 3, 28, 28), dtype="float32"), gamma: R.Tensor((3,), dtype="float32"), beta: R.Tensor((3,), dtype="float32"), moving_mean: R.Tensor((3,), dtype="float32"), moving_var: R.Tensor((3,), dtype="float32")) -> R.Tuple(R.Tensor((2, 3, 28, 28), dtype="float32"), R.Tensor((3,), dtype="float32"), R.Tensor((3,), dtype="float32")):
+            cls = Expected
+            gv = R.call_tir(cls.batch_norm, (x, gamma, beta, moving_mean, moving_var), out_sinfo=[R.Tensor((2, 3, 28, 28), dtype="float32"), R.Tensor((3,), dtype="float32"), R.Tensor((3,), dtype="float32")])
+            return gv
+
+    @I.ir_module
+    class ExpectedCPP:
         @T.prim_func(private=True)
         def batch_norm(x: T.Buffer((T.int64(2), T.int64(3), T.int64(28), T.int64(28)), "float32"), gamma: T.Buffer((T.int64(3),), "float32"), beta: T.Buffer((T.int64(3),), "float32"), moving_mean: T.Buffer((T.int64(3),), "float32"), moving_var: T.Buffer((T.int64(3),), "float32"), T_add: T.Buffer((T.int64(2), T.int64(3), T.int64(28), T.int64(28)), "float32"), T_add_1: T.Buffer((T.int64(3),), "float32"), T_add_2: T.Buffer((T.int64(3),), "float32")):
             T.func_attr({"tir.noalias": True})
@@ -2027,13 +2420,15 @@ def test_batch_norm():
 
         @R.function
         def main(x: R.Tensor((2, 3, 28, 28), dtype="float32"), gamma: R.Tensor((3,), dtype="float32"), beta: R.Tensor((3,), dtype="float32"), moving_mean: R.Tensor((3,), dtype="float32"), moving_var: R.Tensor((3,), dtype="float32")) -> R.Tuple(R.Tensor((2, 3, 28, 28), dtype="float32"), R.Tensor((3,), dtype="float32"), R.Tensor((3,), dtype="float32")):
-            cls = Expected
+            cls = ExpectedCPP
             gv = R.call_tir(cls.batch_norm, (x, gamma, beta, moving_mean, moving_var), out_sinfo=[R.Tensor((2, 3, 28, 28), dtype="float32"), R.Tensor((3,), dtype="float32"), R.Tensor((3,), dtype="float32")])
             return gv
     # fmt: on
 
     mod = LegalizeOps()(BatchNorm)
-    tvm.ir.assert_structural_equal(mod, Expected)
+    tvm.ir.assert_structural_equal(
+        mod, ExpectedCPP if os.environ.get("CPP_COMPILER_CI", "OFF") == "ON" else Expected
+    )
 
 
 def test_batch_norm_symbolic():
@@ -2049,8 +2444,288 @@ def test_batch_norm_symbolic():
             gv: R.Tuple(R.Tensor((n, h, w, c), "float32"), R.Tensor((c,), "float32"), R.Tensor((c,), "float32")) = R.nn.batch_norm(x, gamma, beta, moving_mean, moving_var, axis=1)
             return gv
 
-    @I.ir_module
+    @tvm.script.ir_module
     class Expected:
+        @T.prim_func(private=True)
+        def batch_norm(var_x: T.handle, var_gamma: T.handle, var_beta: T.handle, var_moving_mean: T.handle, var_moving_var: T.handle, var_T_add: T.handle, var_T_add_1: T.handle, var_T_add_2: T.handle):
+            T.func_attr({"tir.noalias": True})
+            n, h, w, c = T.int64(), T.int64(), T.int64(), T.int64()
+            x = T.match_buffer(var_x, (n, h, w, c))
+            gamma = T.match_buffer(var_gamma, (c,))
+            beta = T.match_buffer(var_beta, (c,))
+            moving_mean = T.match_buffer(var_moving_mean, (c,))
+            moving_var = T.match_buffer(var_moving_var, (c,))
+            T_add = T.match_buffer(var_T_add, (n, h, w, c))
+            T_add_1 = T.match_buffer(var_T_add_1, (T.max(c, h),))
+            T_add_2 = T.match_buffer(var_T_add_2, (T.max(c, h),))
+            with T.sblock("root"):
+                T.reads()
+                T.writes()
+                x_red = T.alloc_buffer((h,))
+                T_divide = T.alloc_buffer((h,))
+                T_reshape = T.alloc_buffer((T.int64(1), h, T.int64(1), T.int64(1)))
+                T_subtract = T.alloc_buffer((n, h, w, c))
+                T_subtract_1 = T.alloc_buffer((n, h, w, c))
+                T_subtract_2 = T.alloc_buffer((n, h, w, c))
+                T_multiply = T.alloc_buffer((n, h, w, c))
+                T_multiply_red = T.alloc_buffer((h,))
+                T_divide_1 = T.alloc_buffer((h,))
+                T_reshape_1 = T.alloc_buffer((T.int64(1), h, T.int64(1), T.int64(1)))
+                T_add_3 = T.alloc_buffer((T.int64(1), h, T.int64(1), T.int64(1)))
+                compute = T.alloc_buffer((T.int64(1), h, T.int64(1), T.int64(1)))
+                T_divide_2 = T.alloc_buffer((n, h, w, c))
+                T_reshape_2 = T.alloc_buffer((T.int64(1), h, T.int64(1), T.int64(1)))
+                T_multiply_1 = T.alloc_buffer((n, h, w, c))
+                T_reshape_3 = T.alloc_buffer((T.int64(1), h, T.int64(1), T.int64(1)))
+                T_multiply_2 = T.alloc_buffer((c,))
+                T_multiply_3 = T.alloc_buffer((h,))
+                T_multiply_4 = T.alloc_buffer((c,))
+                T_multiply_5 = T.alloc_buffer((h,))
+                for ax0 in range(h):
+                    for k0 in range(n):
+                        for k2 in range(w):
+                            for k3 in range(c):
+                                with T.sblock("x_red"):
+                                    v_ax0 = T.axis.spatial(h, ax0)
+                                    v_k0 = T.axis.reduce(n, k0)
+                                    v_k2 = T.axis.reduce(w, k2)
+                                    v_k3 = T.axis.reduce(c, k3)
+                                    T.reads(x[v_k0, v_ax0, v_k2, v_k3])
+                                    T.writes(x_red[v_ax0])
+                                    with T.init():
+                                        x_red[v_ax0] = T.float32(0.0)
+                                    x_red[v_ax0] = x_red[v_ax0] + x[v_k0, v_ax0, v_k2, v_k3]
+                for ax0 in range(h):
+                    with T.sblock("T_divide"):
+                        v_ax0 = T.axis.spatial(h, ax0)
+                        T.reads(x_red[v_ax0])
+                        T.writes(T_divide[v_ax0])
+                        T_divide[v_ax0] = x_red[v_ax0] / T.Cast("float32", n * w * c)
+                for ax0 in range(T.int64(1)):
+                    for ax1 in range(h):
+                        for ax2 in range(T.int64(1)):
+                            for ax3 in range(T.int64(1)):
+                                with T.sblock("T_reshape"):
+                                    v_ax0 = T.axis.spatial(T.int64(1), ax0)
+                                    v_ax1 = T.axis.spatial(h, ax1)
+                                    v_ax2 = T.axis.spatial(T.int64(1), ax2)
+                                    v_ax3 = T.axis.spatial(T.int64(1), ax3)
+                                    T.reads(T_divide[(v_ax0 * h + v_ax1 + v_ax2 + v_ax3) % h])
+                                    T.writes(T_reshape[v_ax0, v_ax1, v_ax2, v_ax3])
+                                    T_reshape[v_ax0, v_ax1, v_ax2, v_ax3] = T_divide[(v_ax0 * h + v_ax1 + v_ax2 + v_ax3) % h]
+                for ax0 in range(n):
+                    for ax1 in range(h):
+                        for ax2 in range(w):
+                            for ax3 in range(c):
+                                with T.sblock("T_subtract"):
+                                    v_ax0 = T.axis.spatial(n, ax0)
+                                    v_ax1 = T.axis.spatial(h, ax1)
+                                    v_ax2 = T.axis.spatial(w, ax2)
+                                    v_ax3 = T.axis.spatial(c, ax3)
+                                    T.reads(x[v_ax0, v_ax1, v_ax2, v_ax3], T_reshape[T.int64(0), v_ax1, T.int64(0), T.int64(0)])
+                                    T.writes(T_subtract[v_ax0, v_ax1, v_ax2, v_ax3])
+                                    T_subtract[v_ax0, v_ax1, v_ax2, v_ax3] = x[v_ax0, v_ax1, v_ax2, v_ax3] - T_reshape[T.int64(0), v_ax1, T.int64(0), T.int64(0)]
+                for ax0 in range(n):
+                    for ax1 in range(h):
+                        for ax2 in range(w):
+                            for ax3 in range(c):
+                                with T.sblock("T_subtract_1"):
+                                    v_ax0 = T.axis.spatial(n, ax0)
+                                    v_ax1 = T.axis.spatial(h, ax1)
+                                    v_ax2 = T.axis.spatial(w, ax2)
+                                    v_ax3 = T.axis.spatial(c, ax3)
+                                    T.reads(x[v_ax0, v_ax1, v_ax2, v_ax3], T_reshape[T.int64(0), v_ax1, T.int64(0), T.int64(0)])
+                                    T.writes(T_subtract_1[v_ax0, v_ax1, v_ax2, v_ax3])
+                                    T_subtract_1[v_ax0, v_ax1, v_ax2, v_ax3] = x[v_ax0, v_ax1, v_ax2, v_ax3] - T_reshape[T.int64(0), v_ax1, T.int64(0), T.int64(0)]
+                for ax0 in range(n):
+                    for ax1 in range(h):
+                        for ax2 in range(w):
+                            for ax3 in range(c):
+                                with T.sblock("T_subtract_2"):
+                                    v_ax0 = T.axis.spatial(n, ax0)
+                                    v_ax1 = T.axis.spatial(h, ax1)
+                                    v_ax2 = T.axis.spatial(w, ax2)
+                                    v_ax3 = T.axis.spatial(c, ax3)
+                                    T.reads(x[v_ax0, v_ax1, v_ax2, v_ax3], T_reshape[T.int64(0), v_ax1, T.int64(0), T.int64(0)])
+                                    T.writes(T_subtract_2[v_ax0, v_ax1, v_ax2, v_ax3])
+                                    T_subtract_2[v_ax0, v_ax1, v_ax2, v_ax3] = x[v_ax0, v_ax1, v_ax2, v_ax3] - T_reshape[T.int64(0), v_ax1, T.int64(0), T.int64(0)]
+                for ax0 in range(n):
+                    for ax1 in range(h):
+                        for ax2 in range(w):
+                            for ax3 in range(c):
+                                with T.sblock("T_multiply"):
+                                    v_ax0 = T.axis.spatial(n, ax0)
+                                    v_ax1 = T.axis.spatial(h, ax1)
+                                    v_ax2 = T.axis.spatial(w, ax2)
+                                    v_ax3 = T.axis.spatial(c, ax3)
+                                    T.reads(T_subtract_1[v_ax0, v_ax1, v_ax2, v_ax3], T_subtract_2[v_ax0, v_ax1, v_ax2, v_ax3])
+                                    T.writes(T_multiply[v_ax0, v_ax1, v_ax2, v_ax3])
+                                    T_multiply[v_ax0, v_ax1, v_ax2, v_ax3] = T_subtract_1[v_ax0, v_ax1, v_ax2, v_ax3] * T_subtract_2[v_ax0, v_ax1, v_ax2, v_ax3]
+                for ax0 in range(h):
+                    for k0 in range(n):
+                        for k2 in range(w):
+                            for k3 in range(c):
+                                with T.sblock("T_multiply_red"):
+                                    v_ax0 = T.axis.spatial(h, ax0)
+                                    v_k0 = T.axis.reduce(n, k0)
+                                    v_k2 = T.axis.reduce(w, k2)
+                                    v_k3 = T.axis.reduce(c, k3)
+                                    T.reads(T_multiply[v_k0, v_ax0, v_k2, v_k3])
+                                    T.writes(T_multiply_red[v_ax0])
+                                    with T.init():
+                                        T_multiply_red[v_ax0] = T.float32(0.0)
+                                    T_multiply_red[v_ax0] = T_multiply_red[v_ax0] + T_multiply[v_k0, v_ax0, v_k2, v_k3]
+                for ax0 in range(h):
+                    with T.sblock("T_divide_1"):
+                        v_ax0 = T.axis.spatial(h, ax0)
+                        T.reads(T_multiply_red[v_ax0])
+                        T.writes(T_divide_1[v_ax0])
+                        T_divide_1[v_ax0] = T_multiply_red[v_ax0] / T.Cast("float32", n * w * c)
+                for ax0 in range(T.int64(1)):
+                    for ax1 in range(h):
+                        for ax2 in range(T.int64(1)):
+                            for ax3 in range(T.int64(1)):
+                                with T.sblock("T_reshape_1"):
+                                    v_ax0 = T.axis.spatial(T.int64(1), ax0)
+                                    v_ax1 = T.axis.spatial(h, ax1)
+                                    v_ax2 = T.axis.spatial(T.int64(1), ax2)
+                                    v_ax3 = T.axis.spatial(T.int64(1), ax3)
+                                    T.reads(T_divide_1[(v_ax0 * h + v_ax1 + v_ax2 + v_ax3) % h])
+                                    T.writes(T_reshape_1[v_ax0, v_ax1, v_ax2, v_ax3])
+                                    T_reshape_1[v_ax0, v_ax1, v_ax2, v_ax3] = T_divide_1[(v_ax0 * h + v_ax1 + v_ax2 + v_ax3) % h]
+                for ax0 in range(T.int64(1)):
+                    for ax1 in range(h):
+                        for ax2 in range(T.int64(1)):
+                            for ax3 in range(T.int64(1)):
+                                with T.sblock("T_add"):
+                                    v_ax0 = T.axis.spatial(T.int64(1), ax0)
+                                    v_ax1 = T.axis.spatial(h, ax1)
+                                    v_ax2 = T.axis.spatial(T.int64(1), ax2)
+                                    v_ax3 = T.axis.spatial(T.int64(1), ax3)
+                                    T.reads(T_reshape_1[v_ax0, v_ax1, v_ax2, v_ax3])
+                                    T.writes(T_add_3[v_ax0, v_ax1, v_ax2, v_ax3])
+                                    T_add_3[v_ax0, v_ax1, v_ax2, v_ax3] = T_reshape_1[v_ax0, v_ax1, v_ax2, v_ax3] + T.float32(1.0000000000000001e-05)
+                for i0 in range(T.int64(1)):
+                    for i1 in range(h):
+                        for i2 in range(T.int64(1)):
+                            for i3 in range(T.int64(1)):
+                                with T.sblock("compute"):
+                                    v_i0 = T.axis.spatial(T.int64(1), i0)
+                                    v_i1 = T.axis.spatial(h, i1)
+                                    v_i2 = T.axis.spatial(T.int64(1), i2)
+                                    v_i3 = T.axis.spatial(T.int64(1), i3)
+                                    T.reads(T_add_3[v_i0, v_i1, v_i2, v_i3])
+                                    T.writes(compute[v_i0, v_i1, v_i2, v_i3])
+                                    compute[v_i0, v_i1, v_i2, v_i3] = T.sqrt(T_add_3[v_i0, v_i1, v_i2, v_i3])
+                for ax0 in range(n):
+                    for ax1 in range(h):
+                        for ax2 in range(w):
+                            for ax3 in range(c):
+                                with T.sblock("T_divide_2"):
+                                    v_ax0 = T.axis.spatial(n, ax0)
+                                    v_ax1 = T.axis.spatial(h, ax1)
+                                    v_ax2 = T.axis.spatial(w, ax2)
+                                    v_ax3 = T.axis.spatial(c, ax3)
+                                    T.reads(T_subtract[v_ax0, v_ax1, v_ax2, v_ax3], compute[T.int64(0), v_ax1, T.int64(0), T.int64(0)])
+                                    T.writes(T_divide_2[v_ax0, v_ax1, v_ax2, v_ax3])
+                                    T_divide_2[v_ax0, v_ax1, v_ax2, v_ax3] = T_subtract[v_ax0, v_ax1, v_ax2, v_ax3] / compute[T.int64(0), v_ax1, T.int64(0), T.int64(0)]
+                for ax0 in range(T.int64(1)):
+                    for ax1 in range(h):
+                        for ax2 in range(T.int64(1)):
+                            for ax3 in range(T.int64(1)):
+                                with T.sblock("T_reshape_2"):
+                                    v_ax0 = T.axis.spatial(T.int64(1), ax0)
+                                    v_ax1 = T.axis.spatial(h, ax1)
+                                    v_ax2 = T.axis.spatial(T.int64(1), ax2)
+                                    v_ax3 = T.axis.spatial(T.int64(1), ax3)
+                                    T.reads(gamma[(v_ax0 * h + v_ax1 + v_ax2 + v_ax3) % c])
+                                    T.writes(T_reshape_2[v_ax0, v_ax1, v_ax2, v_ax3])
+                                    T_reshape_2[v_ax0, v_ax1, v_ax2, v_ax3] = gamma[(v_ax0 * h + v_ax1 + v_ax2 + v_ax3) % c]
+                for ax0 in range(n):
+                    for ax1 in range(h):
+                        for ax2 in range(w):
+                            for ax3 in range(c):
+                                with T.sblock("T_multiply_1"):
+                                    v_ax0 = T.axis.spatial(n, ax0)
+                                    v_ax1 = T.axis.spatial(h, ax1)
+                                    v_ax2 = T.axis.spatial(w, ax2)
+                                    v_ax3 = T.axis.spatial(c, ax3)
+                                    T.reads(T_divide_2[v_ax0, v_ax1, v_ax2, v_ax3], T_reshape_2[T.int64(0), v_ax1, T.int64(0), T.int64(0)])
+                                    T.writes(T_multiply_1[v_ax0, v_ax1, v_ax2, v_ax3])
+                                    T_multiply_1[v_ax0, v_ax1, v_ax2, v_ax3] = T_divide_2[v_ax0, v_ax1, v_ax2, v_ax3] * T_reshape_2[T.int64(0), v_ax1, T.int64(0), T.int64(0)]
+                for ax0 in range(T.int64(1)):
+                    for ax1 in range(h):
+                        for ax2 in range(T.int64(1)):
+                            for ax3 in range(T.int64(1)):
+                                with T.sblock("T_reshape_3"):
+                                    v_ax0 = T.axis.spatial(T.int64(1), ax0)
+                                    v_ax1 = T.axis.spatial(h, ax1)
+                                    v_ax2 = T.axis.spatial(T.int64(1), ax2)
+                                    v_ax3 = T.axis.spatial(T.int64(1), ax3)
+                                    T.reads(beta[(v_ax0 * h + v_ax1 + v_ax2 + v_ax3) % c])
+                                    T.writes(T_reshape_3[v_ax0, v_ax1, v_ax2, v_ax3])
+                                    T_reshape_3[v_ax0, v_ax1, v_ax2, v_ax3] = beta[(v_ax0 * h + v_ax1 + v_ax2 + v_ax3) % c]
+                for ax0 in range(n):
+                    for ax1 in range(h):
+                        for ax2 in range(w):
+                            for ax3 in range(c):
+                                with T.sblock("T_add_1"):
+                                    v_ax0 = T.axis.spatial(n, ax0)
+                                    v_ax1 = T.axis.spatial(h, ax1)
+                                    v_ax2 = T.axis.spatial(w, ax2)
+                                    v_ax3 = T.axis.spatial(c, ax3)
+                                    T.reads(T_multiply_1[v_ax0, v_ax1, v_ax2, v_ax3], T_reshape_3[T.int64(0), v_ax1, T.int64(0), T.int64(0)])
+                                    T.writes(T_add[v_ax0, v_ax1, v_ax2, v_ax3])
+                                    T_add[v_ax0, v_ax1, v_ax2, v_ax3] = T_multiply_1[v_ax0, v_ax1, v_ax2, v_ax3] + T_reshape_3[T.int64(0), v_ax1, T.int64(0), T.int64(0)]
+                for ax0 in range(c):
+                    with T.sblock("T_multiply_2"):
+                        v_ax0 = T.axis.spatial(c, ax0)
+                        T.reads(moving_mean[v_ax0])
+                        T.writes(T_multiply_2[v_ax0])
+                        T_multiply_2[v_ax0] = T.float32(0.90000000000000002) * moving_mean[v_ax0]
+                for ax0 in range(h):
+                    with T.sblock("T_multiply_3"):
+                        v_ax0 = T.axis.spatial(h, ax0)
+                        T.reads(T_divide[v_ax0])
+                        T.writes(T_multiply_3[v_ax0])
+                        T_multiply_3[v_ax0] = T.float32(0.10000000000000001) * T_divide[v_ax0]
+                for ax0 in range(T.max(c, h)):
+                    with T.sblock("T_add_2"):
+                        v_ax0 = T.axis.spatial(T.max(c, h), ax0)
+                        T.reads(T_multiply_2[v_ax0], T_multiply_3[v_ax0])
+                        T.writes(T_add_1[v_ax0])
+                        T_add_1[v_ax0] = T_multiply_2[v_ax0] + T_multiply_3[v_ax0]
+                for ax0 in range(c):
+                    with T.sblock("T_multiply_4"):
+                        v_ax0 = T.axis.spatial(c, ax0)
+                        T.reads(moving_var[v_ax0])
+                        T.writes(T_multiply_4[v_ax0])
+                        T_multiply_4[v_ax0] = T.float32(0.90000000000000002) * moving_var[v_ax0]
+                for ax0 in range(h):
+                    with T.sblock("T_multiply_5"):
+                        v_ax0 = T.axis.spatial(h, ax0)
+                        T.reads(T_divide_1[v_ax0])
+                        T.writes(T_multiply_5[v_ax0])
+                        T_multiply_5[v_ax0] = T.float32(0.10000000000000001) * T_divide_1[v_ax0]
+                for ax0 in range(T.max(c, h)):
+                    with T.sblock("T_add_3"):
+                        v_ax0 = T.axis.spatial(T.max(c, h), ax0)
+                        T.reads(T_multiply_4[v_ax0], T_multiply_5[v_ax0])
+                        T.writes(T_add_2[v_ax0])
+                        T_add_2[v_ax0] = T_multiply_4[v_ax0] + T_multiply_5[v_ax0]
+
+        @R.function
+        def main(x: R.Tensor(("n", "h", "w", "c"), dtype="float32"), gamma: R.Tensor(("c",), dtype="float32"), beta: R.Tensor(("c",), dtype="float32"), moving_mean: R.Tensor(("c",), dtype="float32"), moving_var: R.Tensor(("c",), dtype="float32")) -> R.Tuple(R.Tensor(("n", "h", "w", "c"), dtype="float32"), R.Tensor(("T.max(c, h)",), dtype="float32"), R.Tensor(("T.max(c, h)",), dtype="float32")):
+            n = T.int64()
+            h = T.int64()
+            w = T.int64()
+            c = T.int64()
+            cls = Expected
+            gv = R.call_tir(cls.batch_norm, (x, gamma, beta, moving_mean, moving_var), out_sinfo=[R.Tensor((n, h, w, c), dtype="float32"), R.Tensor((T.max(c, h),), dtype="float32"), R.Tensor((T.max(c, h),), dtype="float32")])
+            return gv
+
+    @I.ir_module
+    class ExpectedCPP:
         @T.prim_func(private=True)
         def batch_norm(var_x: T.handle, var_gamma: T.handle, var_beta: T.handle, var_moving_mean: T.handle, var_moving_var: T.handle, var_T_add: T.handle, var_T_add_1: T.handle, var_T_add_2: T.handle):
             T.func_attr({"tir.noalias": True})
@@ -2219,12 +2894,12 @@ def test_batch_norm_symbolic():
             h = T.int64()
             w = T.int64()
             c = T.int64()
-            cls = Expected
+            cls = ExpectedCPP
             gv = R.call_tir(cls.batch_norm, (x, gamma, beta, moving_mean, moving_var), out_sinfo=[R.Tensor((n, h, w, c), dtype="float32"), R.Tensor((T.max(c, h),), dtype="float32"), R.Tensor((T.max(c, h),), dtype="float32")])
             return gv
 
     mod = LegalizeOps()(BatchNorm)
-    tvm.ir.assert_structural_equal(mod, Expected)
+    tvm.ir.assert_structural_equal(mod, ExpectedCPP if os.environ.get("CPP_COMPILER_CI", "OFF") == "ON" else Expected)
 
 
 def test_layer_norm():

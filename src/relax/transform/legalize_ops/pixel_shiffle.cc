@@ -33,6 +33,16 @@
 namespace tvm {
 namespace relax {
 
+/*!
+ * \brief TE handler for pixel shuffle (sub-pixel convolution).
+ *
+ * Rearranges elements from the channel dimension into the spatial (H, W)
+ * dimensions. The input channel count must be divisible by
+ * `upscale_factor^2`.
+ *
+ * \param args Packed argument list: [data, upscale_factor (int)].
+ * \return A single-element array containing the shuffled output tensor.
+ */
 ffi::Array<te::Tensor> PixelShuffleTE(const ffi::Array<ffi::Any> args) {
   auto data = args[0].cast<te::Tensor>();
   auto upscale_factor_i = args[1].cast<int>();
@@ -88,7 +98,13 @@ ffi::Array<te::Tensor> PixelShuffleTE(const ffi::Array<ffi::Any> args) {
       "PixelShuffle")};
 }
 
-// PixelShuffle
+/*!
+ * \brief Legalize relax.nn.pixel_shuffle to call_tir via PixelShuffleTE.
+ *
+ * \param bb The block builder.
+ * \param call The relax.nn.pixel_shuffle call to legalize.
+ * \return The legalized call_tir expression.
+ */
 Expr LegalizeNNPixelShuffle(const BlockBuilder& bb, const Call& call) {
   const auto* attrs = call->attrs.as<PixelShuffleAttrs>();
   auto m_te = MakeCallTE(bb, call);

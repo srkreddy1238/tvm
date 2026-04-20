@@ -116,7 +116,14 @@ TVM_LEGALIZE_CREATE_OP_BY_VALUE(zeros_like, true, 0.0, zeros);
 TVM_LEGALIZE_TRILU_OP(tril, false);
 TVM_LEGALIZE_TRILU_OP(triu, true);
 
-// eye / eye_like
+/*!
+ * \brief TE handler for the eye / eye_like operator.
+ *
+ * Produces an n×m matrix with ones on the k-th diagonal and zeros elsewhere.
+ *
+ * \param args Packed argument list: [n, m, k, dtype].
+ * \return A single-element array containing the eye output tensor.
+ */
 static ffi::Array<te::Tensor> EyeTEHandler(const ffi::Array<ffi::Any>& args) {
   PrimExpr n = args[0].cast<PrimExpr>();
   PrimExpr m = args[1].cast<PrimExpr>();
@@ -131,6 +138,13 @@ static ffi::Array<te::Tensor> EyeTEHandler(const ffi::Array<ffi::Any>& args) {
       "eye")};
 }
 
+/*!
+ * \brief Legalize relax.eye to call_tir via EyeTEHandler.
+ *
+ * \param bb The block builder.
+ * \param call The relax.eye call to legalize.
+ * \return The legalized call_tir expression.
+ */
 Expr LegalizeEye(const BlockBuilder& bb, const Call& call) {
   const auto* attrs = call->attrs.as<InitAttrs>();
   auto m_te = MakeCallTE(bb, call);
@@ -148,6 +162,15 @@ Expr LegalizeEye(const BlockBuilder& bb, const Call& call) {
 }
 TVM_REGISTER_OP("relax.eye").set_attr<FLegalize>("FLegalize", LegalizeEye, TVM_LEGALIZE_CPP_LEVEL);
 
+/*!
+ * \brief Legalize relax.eye_like to call_tir via EyeTEHandler.
+ *
+ * Derives n, m from the shape of the input tensor.
+ *
+ * \param bb The block builder.
+ * \param call The relax.eye_like call to legalize.
+ * \return The legalized call_tir expression.
+ */
 Expr LegalizeEyeLike(const BlockBuilder& bb, const Call& call) {
   auto m_te = MakeCallTE(bb, call);
   auto sinfo = GetStructInfo(call->args[0]).as<TensorStructInfoNode>();
@@ -165,21 +188,37 @@ Expr LegalizeEyeLike(const BlockBuilder& bb, const Call& call) {
 TVM_REGISTER_OP("relax.eye_like")
     .set_attr<FLegalize>("FLegalize", LegalizeEyeLike, TVM_LEGALIZE_CPP_LEVEL);
 
-// arange
-// Return true iff the PrimExpr is a compile-time integer or float immediate.
+/*!
+ * \brief Check whether a PrimExpr is a compile-time integer or float immediate.
+ *
+ * \param e The expression to test.
+ * \return True if `e` is an IntImm or FloatImm.
+ */
 static bool IsConstScalar(const PrimExpr& e) {
   return e->IsInstance<IntImmNode>() || e->IsInstance<FloatImmNode>();
 }
 
-// Extract the numeric value of an IntImm or FloatImm as double.
+/*!
+ * \brief Extract the numeric value of an IntImm or FloatImm as a double.
+ *
+ * \param e The scalar immediate to convert.
+ * \return The value as a double.
+ */
 static double ScalarToDouble(const PrimExpr& e) {
   if (const auto* i = e.as<IntImmNode>()) return static_cast<double>(i->value);
   if (const auto* f = e.as<FloatImmNode>()) return f->value;
   LOG(FATAL) << "ScalarToDouble: not a scalar immediate";
 }
 
-// Portable float32 -> float16 bit-pattern conversion (IEEE 754 round-to-nearest).
-// Avoids any dependency on compiler-specific __fp16 or hardware intrinsics.
+/*!
+ * \brief Portable float32 to float16 bit-pattern conversion.
+ *
+ * Implements IEEE 754 round-to-nearest half-precision conversion using only
+ * integer arithmetic. Denormals are flushed to zero.
+ *
+ * \param v The float32 value to convert.
+ * \return The float16 bit-pattern as a uint16_t.
+ */
 static uint16_t FloatToFloat16Bits(float v) {
   uint32_t bits;
   std::memcpy(&bits, &v, sizeof(bits));
@@ -197,9 +236,18 @@ static uint16_t FloatToFloat16Bits(float v) {
                                static_cast<uint16_t>(mantissa >> 13));
 }
 
-// Build a relax::Constant holding the result of arange(start, end, step) with
-// the given dtype.  Returns a null Expr if the dtype is not supported for
-// eager evaluation (caller should fall back to the dynamic path).
+/*!
+ * \brief Eagerly evaluate arange(start, end, step) and return a relax::Constant.
+ *
+ * Returns a null Expr if the dtype is not supported for eager evaluation,
+ * signalling the caller to fall back to the dynamic path.
+ *
+ * \param start The start value of the range.
+ * \param end The end value of the range (exclusive).
+ * \param step The step size.
+ * \param dtype The output element data type.
+ * \return A relax::Constant holding the arange result, or a null Expr.
+ */
 static Expr MakeArangeConstant(double start, double end, double step, DataType dtype) {
   const int64_t n = static_cast<int64_t>(std::max(0.0, std::ceil((end - start) / step)));
 
@@ -244,6 +292,17 @@ static Expr MakeArangeConstant(double start, double end, double step, DataType d
   return Constant(data);
 }
 
+/*!
+ * \brief Legalize relax.arange to call_tir via topi.arange.
+ *
+ * When all three arguments are compile-time constants the result is computed
+ * eagerly and returned as a relax::Constant. Otherwise the dynamic TOPI path
+ * is used.
+ *
+ * \param bb The block builder.
+ * \param call The relax.arange call to legalize.
+ * \return A relax::Constant for static inputs, or a call_tir expression.
+ */
 Expr LegalizeArange(const BlockBuilder& bb, const Call& call) {
   TVM_FFI_ICHECK_EQ(call->args.size(), 3);
   const auto* attrs = call->attrs.as<InitAttrs>();
@@ -273,7 +332,13 @@ Expr LegalizeArange(const BlockBuilder& bb, const Call& call) {
 TVM_REGISTER_OP("relax.arange")
     .set_attr<FLegalize>("FLegalize", LegalizeArange, TVM_LEGALIZE_CPP_LEVEL);
 
-// hamming_window
+/*!
+ * \brief Legalize relax.hamming_window to call_tir via topi.hamming_window.
+ *
+ * \param bb The block builder.
+ * \param call The relax.hamming_window call to legalize.
+ * \return The legalized call_tir expression.
+ */
 Expr LegalizeHammingWindow(const BlockBuilder& bb, const Call& call) {
   const auto* attrs = call->attrs.as<InitAttrs>();
   auto m_te = MakeCallTE(bb, call);

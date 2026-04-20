@@ -27,6 +27,17 @@
 namespace tvm {
 namespace relax {
 
+/*!
+ * \brief Legalize relax.astype to call_tir via topi.cast.
+ *
+ * \note Priority is set to 9 (below the default Python level of 10) so that
+ *       the Python legalization, which handles scalar casting via NumPy
+ *       helpers, takes precedence.
+ *
+ * \param bb The block builder.
+ * \param call The relax.astype call to legalize.
+ * \return The legalized call_tir expression.
+ */
 Expr LegalizeAsType(const BlockBuilder& bb, const Call& call) {
   auto m_te = MakeCallTE(bb, call);
   tvm::ffi::Array<tvm::ffi::Any> args;

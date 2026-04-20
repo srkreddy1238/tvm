@@ -501,7 +501,7 @@ def _nn_gelu(bb: BlockBuilder, call: Call) -> Expr:
         def _compute(*i):
             erf_inp = x(*i) * tir.const(0.5**0.5, dtype)
             if dtype == "float16":
-                erf = tir.cast(tir.erf(tir.cast(erf_inp, "float32")), "float16")
+                erf = tir.erf(erf_inp.astype("float32")).astype("float16")
             else:
                 erf = tir.erf(erf_inp)
             return x(*i) * (tir.const(0.5, dtype) + erf * tir.const(0.5, dtype))
@@ -579,7 +579,7 @@ def _nn_log_softmax(bb: BlockBuilder, call: Call):
 def _nn_cross_entropy_with_logits(bb: BlockBuilder, call: Call):
     def te_cross_entropy_with_logits(x, y):
         if len(x.shape) > 1:
-            return 0 - topi.sum(x * y) / x.shape[0]
+            return -topi.sum(x * y) / x.shape[0]
         return -topi.sum(x * y)
 
     return bb.call_te(

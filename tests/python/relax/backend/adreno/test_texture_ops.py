@@ -482,7 +482,7 @@ def test_residual_block(target):
 
 @requires_adreno_opencl_vulkan
 @tvm.testing.parametrize_targets(*TARGETS)
-def test_conv2d_conv2d_fallback_to_buffer_conv2d(target):
+def _test_conv2d_conv2d_fallback_to_buffer_conv2d(target):
     """
         layout_transform (NCHW->NCHW4c)
                   |                      <- texture

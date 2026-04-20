@@ -88,6 +88,11 @@ if [ -f "${ADRENO_LLVM}/bin/llvm-config-native" ] ; then # Only if CI is enabled
   fi
 fi
 
+# cleanup pycache
+find . -type f -path "*.pyc" | xargs rm -f
+# setup tvm-ffi into python folder
+python3 -m pip install --target=python -v ./3rdparty/tvm-ffi/
+
 env PYTHONPATH=python python3 -m tvm.exec.rpc_tracker --host "${TVM_TRACKER_HOST}" --port "${TVM_TRACKER_PORT}" &
 TRACKER_PID=$!
 sleep 5   # Wait for tracker to bind
@@ -108,11 +113,6 @@ clean_ports() {
     done;
 }
 trap "{ kill ${TRACKER_PID} || true; kill ${DEVICE_PID} || true; clean_ports; cleanup;}" 0
-
-# cleanup pycache
-find . -type f -path "*.pyc" | xargs rm -f
-# setup tvm-ffi into python folder
-python3 -m pip install --target=python -v ./3rdparty/tvm-ffi/
 
 # Relax test
 run_pytest -s tests/python/relax/backend/adreno

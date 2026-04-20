@@ -15,6 +15,8 @@
 # specific language governing permissions and limitations
 # under the License.
 # ruff: noqa: E501, E731, F841
+import os
+
 import pytest
 
 import tvm
@@ -1377,6 +1379,90 @@ def test_scatter_elements():
     @I.ir_module
     class Expected:
         @T.prim_func(private=True)
+        def scatter_elements(
+            var_rxplaceholder: T.handle,
+            var_rxplaceholder_1: T.handle,
+            var_rxplaceholder_2: T.handle,
+            out_buf: T.Buffer((T.int64(4), T.int64(4)), "float32"),
+        ):
+            T.func_attr({"tir.noalias": True})
+            rxplaceholder = T.match_buffer(
+                var_rxplaceholder, (T.int64(4), T.int64(4)), offset_factor=1
+            )
+            rxplaceholder_1 = T.match_buffer(
+                var_rxplaceholder_1, (T.int64(2), T.int64(2)), "int64", offset_factor=1
+            )
+            rxplaceholder_2 = T.match_buffer(
+                var_rxplaceholder_2, (T.int64(2), T.int64(2)), offset_factor=1
+            )
+            with T.sblock("scatter_elements_generic"):
+                T.attr(0, "pragma_scope", "seq")
+                for i in T.parallel(T.int64(16)):
+                    out_buf[i // T.int64(4), i % T.int64(4)] = rxplaceholder[
+                        i // T.int64(4), i % T.int64(4)
+                    ]
+                for fused in T.parallel(T.int64(2)):
+                    for k in range(T.int64(2)):
+                        out_buf[
+                            (
+                                fused * T.int64(4)
+                                + (
+                                    rxplaceholder_1[
+                                        (fused * T.int64(2) + k) // T.int64(2),
+                                        (fused * T.int64(2) + k) % T.int64(2),
+                                    ]
+                                    + T.Cast(
+                                        "int64",
+                                        rxplaceholder_1[
+                                            (fused * T.int64(2) + k) // T.int64(2),
+                                            (fused * T.int64(2) + k) % T.int64(2),
+                                        ]
+                                        < T.int64(0),
+                                    )
+                                    * T.int64(4)
+                                )
+                            )
+                            // T.int64(4),
+                            (
+                                fused * T.int64(4)
+                                + (
+                                    rxplaceholder_1[
+                                        (fused * T.int64(2) + k) // T.int64(2),
+                                        (fused * T.int64(2) + k) % T.int64(2),
+                                    ]
+                                    + T.Cast(
+                                        "int64",
+                                        rxplaceholder_1[
+                                            (fused * T.int64(2) + k) // T.int64(2),
+                                            (fused * T.int64(2) + k) % T.int64(2),
+                                        ]
+                                        < T.int64(0),
+                                    )
+                                    * T.int64(4)
+                                )
+                            )
+                            % T.int64(4),
+                        ] = rxplaceholder_2[
+                            (fused * T.int64(2) + k) // T.int64(2),
+                            (fused * T.int64(2) + k) % T.int64(2),
+                        ]
+
+        @R.function
+        def main(
+            x: R.Tensor((4, 4), dtype="float32"),
+            indices: R.Tensor((2, 2), dtype="int64"),
+            updates: R.Tensor((2, 2), dtype="float32"),
+        ) -> R.Tensor((4, 4), dtype="float32"):
+            gv = R.call_tir(
+                Expected.scatter_elements,
+                (x, indices, updates),
+                out_sinfo=R.Tensor((4, 4), dtype="float32"),
+            )
+            return gv
+
+    @I.ir_module
+    class ExpectedCPP:
+        @T.prim_func(private=True)
         def scatter_elements(data: T.Buffer((T.int64(4), T.int64(4)), "float32"), indices: T.Buffer((T.int64(2), T.int64(2)), "int64"), updates: T.Buffer((T.int64(2), T.int64(2)), "float32"), out_buf: T.Buffer((T.int64(4), T.int64(4)), "float32")):
             T.func_attr({"tir.noalias": True})
             with T.sblock("scatter_elements_generic"):
@@ -1390,13 +1476,15 @@ def test_scatter_elements():
 
         @R.function
         def main(x: R.Tensor((4, 4), dtype="float32"), indices: R.Tensor((2, 2), dtype="int64"), updates: R.Tensor((2, 2), dtype="float32")) -> R.Tensor((4, 4), dtype="float32"):
-            cls = Expected
+            cls = ExpectedCPP
             gv = R.call_tir(cls.scatter_elements, (x, indices, updates), out_sinfo=R.Tensor((4, 4), dtype="float32"))
             return gv
 
     # fmt: on
     mod = LegalizeOps()(ScatterElements)
-    tvm.ir.assert_structural_equal(mod, Expected)
+    tvm.ir.assert_structural_equal(
+        mod, ExpectedCPP if os.environ.get("CPP_COMPILER_CI", "OFF") == "ON" else Expected
+    )
 
 
 def test_scatter_elements_symbolic():
@@ -1410,6 +1498,84 @@ def test_scatter_elements_symbolic():
 
     @I.ir_module
     class Expected:
+        @T.prim_func(private=True)
+        def scatter_elements(
+            var_rxplaceholder: T.handle,
+            var_rxplaceholder_1: T.handle,
+            var_rxplaceholder_2: T.handle,
+            var_scatter_elements_generic: T.handle,
+        ):
+            T.func_attr({"tir.noalias": True})
+            a, b = T.int64(), T.int64()
+            rxplaceholder = T.match_buffer(var_rxplaceholder, (a, b), offset_factor=1)
+            m, n = T.int64(), T.int64()
+            rxplaceholder_1 = T.match_buffer(
+                var_rxplaceholder_1, (m, n), "int64", offset_factor=1
+            )
+            rxplaceholder_2 = T.match_buffer(var_rxplaceholder_2, (m, n), offset_factor=1)
+            out_buf = T.match_buffer(var_scatter_elements_generic, (a, b))
+            with T.sblock("scatter_elements_generic"):
+                T.attr(0, "pragma_scope", "seq")
+                for i in T.parallel(a * b):
+                    out_buf[i // b, i % b] = rxplaceholder[i // b, i % b]
+                for fused in T.parallel(m):
+                    for k in range(n):
+                        out_buf[
+                            (
+                                fused * b
+                                + (
+                                    rxplaceholder_1[
+                                        (fused * n + k) // n, (fused * n + k) % n
+                                    ]
+                                    + T.Cast(
+                                        "int64",
+                                        rxplaceholder_1[
+                                            (fused * n + k) // n, (fused * n + k) % n
+                                        ]
+                                        < T.int64(0),
+                                    )
+                                    * b
+                                )
+                            )
+                            // b,
+                            (
+                                fused * b
+                                + (
+                                    rxplaceholder_1[
+                                        (fused * n + k) // n, (fused * n + k) % n
+                                    ]
+                                    + T.Cast(
+                                        "int64",
+                                        rxplaceholder_1[
+                                            (fused * n + k) // n, (fused * n + k) % n
+                                        ]
+                                        < T.int64(0),
+                                    )
+                                    * b
+                                )
+                            )
+                            % b,
+                        ] = rxplaceholder_2[(fused * n + k) // n, (fused * n + k) % n]
+
+        @R.function
+        def main(
+            x: R.Tensor(("a", "b"), dtype="float32"),
+            indices: R.Tensor(("m", "n"), dtype="int64"),
+            updates: R.Tensor(("m", "n"), dtype="float32"),
+        ) -> R.Tensor(("a", "b"), dtype="float32"):
+            a = T.int64()
+            b = T.int64()
+            m = T.int64()
+            n = T.int64()
+            gv = R.call_tir(
+                Expected.scatter_elements,
+                (x, indices, updates),
+                out_sinfo=R.Tensor((a, b), dtype="float32"),
+            )
+            return gv
+
+    @I.ir_module
+    class ExpectedCPP:
         @T.prim_func(private=True)
         def scatter_elements(var_x: T.handle, var_indices: T.handle, var_updates: T.handle, var_scatter_elements_generic: T.handle):
             T.func_attr({"tir.noalias": True})
@@ -1434,13 +1600,15 @@ def test_scatter_elements_symbolic():
             b = T.int64()
             m = T.int64()
             n = T.int64()
-            cls = Expected
+            cls = ExpectedCPP
             gv = R.call_tir(cls.scatter_elements, (x, indices, updates), out_sinfo=R.Tensor((a, b), dtype="float32"))
             return gv
     # fmt: on
 
     mod = LegalizeOps()(ScatterElements)
-    tvm.ir.assert_structural_equal(mod, Expected)
+    tvm.ir.assert_structural_equal(
+        mod, ExpectedCPP if os.environ.get("CPP_COMPILER_CI", "OFF") == "ON" else Expected
+    )
 
 
 def test_layout_transform():
@@ -1686,6 +1854,48 @@ def test_scatter_nd():
 
     @I.ir_module
     class Expected:
+        @R.function
+        def main(
+            data: R.Tensor((8,), "float32"),
+            indices: R.Tensor((4, 1), "int64"),
+            updates: R.Tensor((4,), "float32"),
+        ) -> R.Tensor((8,), "float32"):
+            gv = R.call_tir(
+                Expected.scatter_nd, (data, indices, updates), R.Tensor((8,), dtype="float32")
+            )
+            return gv
+
+        @T.prim_func(private=True)
+        def scatter_nd(var_data: T.handle, var_indices: T.handle, var_updates: T.handle, var_scatter_nd_generic: T.handle):
+            T.func_attr({"tir.noalias": True})
+            data = T.match_buffer(var_data, (T.int64(8),), offset_factor=1)
+            indices = T.match_buffer(var_indices, (T.int64(4), T.int64(1)), "int64")
+            updates = T.match_buffer(var_updates, (T.int64(4),), offset_factor=1)
+            out_buf = T.match_buffer(var_scatter_nd_generic, (T.int64(8),))
+            with T.sblock("root"):
+                T.reads()
+                T.writes()
+                T_transpose = T.alloc_buffer((T.int64(1), T.int64(4)), "int64")
+                for ax0 in range(T.int64(1)):
+                    for ax1 in range(T.int64(4)):
+                        with T.sblock("T_transpose"):
+                            v_ax0 = T.axis.spatial(T.int64(1), ax0)
+                            v_ax1 = T.axis.spatial(T.int64(4), ax1)
+                            T.reads(indices[v_ax1, v_ax0])
+                            T.writes(T_transpose[v_ax0, v_ax1])
+                            T_transpose[v_ax0, v_ax1] = indices[v_ax1, v_ax0]
+                with T.sblock("scatter_nd_generic"):
+                    T.reads()
+                    T.writes()
+                    T.attr(0, "pragma_scope", "seq")
+                    for i in range(T.int64(8)):
+                        out_buf[i] = data[i]
+                    for j in range(T.int64(4)):
+                        for k in T.parallel(T.int64(1)):
+                            out_buf[k + T_transpose[j // T.int64(4), j % T.int64(4)]] = updates[j + k]
+
+    @I.ir_module
+    class ExpectedCPP:
         @T.prim_func(private=True)
         def scatter_nd(data: T.Buffer((T.int64(8),), "float32"), indices: T.Buffer((T.int64(4), T.int64(1)), "int64"), updates: T.Buffer((T.int64(4),), "float32"), out_buf: T.Buffer((T.int64(8),), "float32")):
             T.func_attr({"tir.noalias": True})
@@ -1708,12 +1918,14 @@ def test_scatter_nd():
 
         @R.function
         def main(data: R.Tensor((8,), dtype="float32"), indices: R.Tensor((4, 1), dtype="int64"), updates: R.Tensor((4,), dtype="float32")) -> R.Tensor((8,), dtype="float32"):
-            cls = Expected
+            cls = ExpectedCPP
             gv = R.call_tir(cls.scatter_nd, (data, indices, updates), out_sinfo=R.Tensor((8,), dtype="float32"))
             return gv
 
     # fmt: on
-    tvm.ir.assert_structural_equal(After, Expected)
+    tvm.ir.assert_structural_equal(
+        After, ExpectedCPP if os.environ.get("CPP_COMPILER_CI", "OFF") == "ON" else Expected
+    )
 
 
 def _out_sinfo(mod):

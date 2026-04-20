@@ -53,7 +53,13 @@ namespace relax {
 TVM_LEGALIZE_ARGMIN_ARGMAX_OP(argmin, topi.argmin);
 TVM_LEGALIZE_ARGMIN_ARGMAX_OP(argmax, topi.argmax);
 
-// where
+/*!
+ * \brief Legalize relax.where to call_tir via topi.where.
+ *
+ * \param bb The block builder.
+ * \param call The relax.where call to legalize.
+ * \return The legalized call_tir expression.
+ */
 Expr LegalizeWhere(const BlockBuilder& bb, const Call& call) {
   auto m_te = MakeCallTE(bb, call);
   tvm::ffi::Array<tvm::ffi::Any> args;
@@ -65,7 +71,13 @@ Expr LegalizeWhere(const BlockBuilder& bb, const Call& call) {
 TVM_REGISTER_OP("relax.where")
     .set_attr<FLegalize>("FLegalize", LegalizeWhere, TVM_LEGALIZE_CPP_LEVEL);
 
-// bucketize
+/*!
+ * \brief Legalize relax.bucketize to call_tir via topi.searchsorted.
+ *
+ * \param bb The block builder.
+ * \param call The relax.bucketize call to legalize.
+ * \return The legalized call_tir expression.
+ */
 Expr LegalizeBucketize(const BlockBuilder& bb, const Call& call) {
   const auto* attrs = call->attrs.as<BucketizeAttrs>();
   auto m_te = MakeCallTE(bb, call);

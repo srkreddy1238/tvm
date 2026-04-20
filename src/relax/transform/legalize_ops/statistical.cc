@@ -36,6 +36,15 @@ namespace relax {
 // Variance
 // Mean
 
+/*!
+ * \brief Compute the product of the selected dimensions of a tensor.
+ *
+ * Used as the denominator when computing mean, variance, and std.
+ *
+ * \param x The input tensor.
+ * \param axis The axes to reduce over; if nullopt, all axes are used.
+ * \return A PrimExpr equal to the product of the selected dimension sizes.
+ */
 inline PrimExpr _compute_shape_prod(const te::Tensor& x, ffi::Optional<ffi::Array<Integer>>& axis) {
   auto shape_prod = tvm::tir::make_const(x->shape[0]->dtype, 1);
   std::vector<int64_t> axis_arr;
@@ -55,6 +64,14 @@ inline PrimExpr _compute_shape_prod(const te::Tensor& x, ffi::Optional<ffi::Arra
   return shape_prod;
 }
 
+/*!
+ * \brief TE handler for the arithmetic mean reduction.
+ *
+ * Computes `sum(x, axis) / prod(shape[axis])`.
+ *
+ * \param args Packed argument list: [x, axis, keepdims].
+ * \return A single-element array containing the mean tensor.
+ */
 ffi::Array<te::Tensor> _te_mean(const ffi::Array<ffi::Any> args) {
   te::Tensor x = args[0].cast<te::Tensor>();
   auto axis = tvm::topi::ArrayOrInt(args[1]);
@@ -65,6 +82,14 @@ ffi::Array<te::Tensor> _te_mean(const ffi::Array<ffi::Any> args) {
   return {tvm::topi::divide(res_sum, shape_prod)};
 }
 
+/*!
+ * \brief TE handler for the variance reduction.
+ *
+ * Computes `mean((x - mean(x, axis, keepdims=True))^2, axis, keepdims)`.
+ *
+ * \param args Packed argument list: [x, axis, keepdims].
+ * \return A single-element array containing the variance tensor.
+ */
 ffi::Array<te::Tensor> _te_variance(const ffi::Array<ffi::Any> args) {
   /*
    * This version has better memory locality and performance
@@ -78,6 +103,14 @@ ffi::Array<te::Tensor> _te_variance(const ffi::Array<ffi::Any> args) {
   return _te_mean({tvm::topi::multiply(dev, dev), args[1], args[2]});
 }
 
+/*!
+ * \brief TE handler for the standard deviation reduction.
+ *
+ * Computes `sqrt(variance(x, axis, keepdims))`.
+ *
+ * \param args Packed argument list: [x, axis, keepdims].
+ * \return A single-element array containing the standard deviation tensor.
+ */
 ffi::Array<te::Tensor> _te_std(const ffi::Array<ffi::Any> args) {
   return {tvm::topi::sqrt(_te_variance(args)[0])};
 }

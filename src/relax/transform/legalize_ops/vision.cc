@@ -44,21 +44,52 @@ static PrimExpr I32(int64_t v) { return tvm::tir::make_const(DataType::Int(32), 
 static PrimExpr I64(int64_t v) { return tvm::tir::make_const(DataType::Int(64), v); }
 static PrimExpr F32(double v) { return tvm::tir::make_const(DataType::Float(32), v); }
 
-// Build a 1-D Buffer declaration (helper used when constructing ExternOp).
+/*!
+ * \brief Build a 1-D Buffer declaration for use in ExternOp.
+ *
+ * \param size Number of elements.
+ * \param dtype Element data type.
+ * \param name Buffer name hint.
+ * \return The declared 1-D buffer.
+ */
 static tir::Buffer DeclBuf1D(PrimExpr size, DataType dtype, const std::string& name) {
   return tir::decl_buffer({size}, dtype, name);
 }
-// Build a 2-D Buffer declaration.
+/*!
+ * \brief Build a 2-D Buffer declaration for use in ExternOp.
+ *
+ * \param rows Number of rows.
+ * \param cols Number of columns.
+ * \param dtype Element data type.
+ * \param name Buffer name hint.
+ * \return The declared 2-D buffer.
+ */
 static tir::Buffer DeclBuf2D(PrimExpr rows, PrimExpr cols, DataType dtype,
                              const std::string& name) {
   return tir::decl_buffer({rows, cols}, dtype, name);
 }
 
+/*!
+ * \brief Reshape a [B, C, N] scores tensor to [B*C, N].
+ *
+ * \param scores The input scores tensor.
+ * \param batch_class The product B*C.
+ * \param num_boxes The number of boxes N.
+ * \return The reshaped 2-D tensor.
+ */
 static te::Tensor ReshapeScores(const te::Tensor& scores, PrimExpr batch_class,
                                 PrimExpr num_boxes) {
   return topi::reshape(scores, {batch_class, num_boxes});
 }
 
+/*!
+ * \brief Argsort each row of a 2-D tensor in descending order.
+ *
+ * Calls the `tvm.contrib.sort.argsort` packed function via an ExternOp.
+ *
+ * \param data The 2-D input tensor to sort.
+ * \return A 2-D int32 tensor of sorted indices (same shape as `data`).
+ */
 static te::Tensor Argsort2D(const te::Tensor& data) {
   PrimExpr rows = data->shape[0];
   PrimExpr cols = data->shape[1];
@@ -93,10 +124,28 @@ static te::Tensor Argsort2D(const te::Tensor& data) {
       .output(0);
 }
 
+/*!
+ * \brief Gather rows of `scores` according to `sorted_indices`.
+ *
+ * \param scores The 2-D scores tensor.
+ * \param sorted_indices The 2-D index tensor produced by Argsort2D.
+ * \return The 2-D tensor of scores reordered by `sorted_indices`.
+ */
 static te::Tensor GatherScores(const te::Tensor& scores, const te::Tensor& sorted_indices) {
   return topi::gather(scores, 1, sorted_indices);
 }
 
+/*!
+ * \brief For each row, binary-search for the first score <= score_threshold.
+ *
+ * Assumes each row of `sorted_scores` is sorted in descending order.
+ * Returns a 1-D int32 tensor of length `batch_class` containing the
+ * number of valid (above-threshold) boxes per row.
+ *
+ * \param sorted_scores The 2-D sorted scores tensor.
+ * \param score_threshold_f32 The float32 score threshold.
+ * \return A 1-D int32 tensor of valid-box counts.
+ */
 static te::Tensor SearchSorted(const te::Tensor& sorted_scores, PrimExpr score_threshold_f32) {
   PrimExpr batch_class = sorted_scores->shape[0];
   PrimExpr num_boxes = sorted_scores->shape[1];
@@ -151,6 +200,21 @@ static te::Tensor SearchSorted(const te::Tensor& sorted_scores, PrimExpr score_t
       .output(0);
 }
 
+/*!
+ * \brief Run all-class NMS and return selected box indices and per-class detection counts.
+ *
+ * \param boxes Input boxes tensor [B, N, 4] in float32.
+ * \param sorted_scores Scores sorted in descending order [B*C, N].
+ * \param sorted_indices Argsort indices corresponding to sorted_scores [B*C, N].
+ * \param valid_count Number of above-threshold boxes per row [B*C].
+ * \param iou_threshold_f32 IoU threshold for suppression.
+ * \param max_output_size_i32 Maximum number of detections per class.
+ * \param score_threshold_f32 Score threshold (used to skip already-suppressed boxes).
+ * \param batch_class Product B*C.
+ * \param num_class Number of classes C.
+ * \param num_boxes Number of boxes N.
+ * \return A pair (selected_indices [B*C, N], num_detections [B*C]).
+ */
 static std::pair<te::Tensor, te::Tensor> AllClassNMS(
     const te::Tensor& boxes, const te::Tensor& sorted_scores, const te::Tensor& sorted_indices,
     const te::Tensor& valid_count, PrimExpr iou_threshold_f32, PrimExpr max_output_size_i32,
@@ -266,6 +330,15 @@ static std::pair<te::Tensor, te::Tensor> AllClassNMS(
   return {out_indices, out_num_det};
 }
 
+/*!
+ * \brief Compute the exclusive prefix-sum of a 1-D int32 tensor.
+ *
+ * The output dtype is int64. Element `i` of the output equals the sum of
+ * the first `i` elements of the input.
+ *
+ * \param num_detections A 1-D int32 tensor of per-class detection counts.
+ * \return A 1-D int64 tensor of row offsets.
+ */
 static te::Tensor ExclusiveCumsum(const te::Tensor& num_detections) {
   PrimExpr n = num_detections->shape[0];
   tir::Buffer in_buf = DeclBuf1D(n, DataType::Int(32), "cumsum_in");
@@ -288,6 +361,15 @@ static te::Tensor ExclusiveCumsum(const te::Tensor& num_detections) {
       .output(0);
 }
 
+/*!
+ * \brief Sum a 1-D int32 tensor with each element clamped to max_boxes.
+ *
+ * Returns a scalar int64 tensor containing the total number of output rows.
+ *
+ * \param num_detections A 1-D int32 tensor of per-class detection counts.
+ * \param max_boxes_i32 The per-class maximum box count.
+ * \return A scalar int64 tensor.
+ */
 static te::Tensor SumClamped(const te::Tensor& num_detections, PrimExpr max_boxes_i32) {
   PrimExpr n = num_detections->shape[0];
   tir::Buffer in_buf = DeclBuf1D(n, DataType::Int(32), "sum_in");
@@ -316,6 +398,20 @@ static te::Tensor SumClamped(const te::Tensor& num_detections, PrimExpr max_boxe
   return scalar_out;
 }
 
+/*!
+ * \brief Collect (batch_id, class_id, box_id) triples for all selected boxes.
+ *
+ * Writes at most `min(num_detections[i], max_boxes)` triples per row `i`
+ * into a flat output tensor of shape [out_rows, 3].
+ *
+ * \param selected_indices Selected box indices [B*C, N] from AllClassNMS.
+ * \param num_detections Number of valid detections per row [B*C].
+ * \param row_offsets Exclusive prefix-sum of num_detections [B*C].
+ * \param num_class Number of classes C.
+ * \param max_boxes_i32 Per-class maximum box count.
+ * \param out_rows Total number of output rows (B*C*max_boxes).
+ * \return A 2-D int64 tensor of shape [out_rows, 3].
+ */
 static te::Tensor CollectIndices(const te::Tensor& selected_indices,
                                  const te::Tensor& num_detections, const te::Tensor& row_offsets,
                                  PrimExpr num_class, PrimExpr max_boxes_i32, PrimExpr out_rows) {
@@ -361,6 +457,17 @@ static te::Tensor CollectIndices(const te::Tensor& selected_indices,
       .output(0);
 }
 
+/*!
+ * \brief TE handler for all-class non-maximum suppression.
+ *
+ * Orchestrates the full NMS pipeline: reshape scores, argsort, gather,
+ * searchsorted, NMS, cumsum, sum, and collect-indices.
+ *
+ * \param args Packed argument list: [boxes, scores, max_output_boxes_per_class,
+ *             iou_threshold, score_threshold].
+ * \return A two-element array: [flat_indices [B*C*max_boxes, 3],
+ *         num_total_detections [1]].
+ */
 static ffi::Array<te::Tensor> AllClassNMSHandler(const ffi::Array<ffi::Any>& args) {
   te::Tensor boxes = args[0].cast<te::Tensor>();      // [B, N, 4]  float32
   te::Tensor scores = args[1].cast<te::Tensor>();     // [B, C, N]  float32
@@ -410,6 +517,18 @@ static ffi::Array<te::Tensor> AllClassNMSHandler(const ffi::Array<ffi::Any>& arg
   return {flat_indices, num_total_det};
 }
 
+/*!
+ * \brief Legalize relax.vision.all_class_non_max_suppression to call_tir.
+ *
+ * Only the ONNX output format is handled by this C++ path; other formats
+ * fall back to the Python legalization. The function emits the full NMS
+ * pipeline and trims the output via relax.dynamic_strided_slice.
+ *
+ * \param bb The block builder.
+ * \param call The relax.vision.all_class_non_max_suppression call to legalize.
+ * \return The legalized expression (a Tuple of trimmed indices and detection
+ *         count), or the original call if the output format is not "onnx".
+ */
 Expr LegalizeAllClassNonMaxSuppression(const BlockBuilder& bb, const Call& call) {
   const auto* attrs = call->attrs.as<AllClassNonMaximumSuppressionAttrs>();
   TVM_FFI_ICHECK_NOTNULL(attrs);

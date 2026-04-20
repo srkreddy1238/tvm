@@ -16,120 +16,139 @@
 # under the License.
 """The Relax Adreno GPU backend compilation pipeline and other passes."""
 
+import os
+
 import tvm
 from tvm import relax
 from tvm.relax.transform.legalize_ops import adreno as legalize_adreno
+
+from . import _ffi_api
 
 
 def library_dispatch_passes(target: tvm.target.Target):  # pylint: disable=unused-argument
     """The default library dispatch passes for Adreno GPU backend."""
     if "clml" in target.keys:
-        return [
-            relax.backend.adreno.clml.OpenCLMLOffLoadForLLM(target),
-            relax.backend.adreno.clml.OpenCLMLOffLoad(),
-        ]
+        return [_ffi_api.PipelineLibrary(target)]
     else:
         return []
 
 
 def legalize_passes(target: tvm.target.Target):  # pylint: disable=unused-argument
     """The default legalization passes for Adreno GPU backend."""
-    opt_texture = "texture" in target.keys
-    opt_coopmat = target.attrs.get("supports_khr_cooperative_matrix", False)
-    skip_ops = [
-        "relax.nn.conv2d",
-        "relax.nn.max_pool2d",
-        "relax.nn.adaptive_avg_pool2d",
-    ]
-    pass_list = []
-
-    pass_list.extend(
-        [
-            tvm.tir.transform.BindTarget(tvm.target.Target.current(allow_none=False)),
-            relax.transform.DecomposeOpsForInference(),
+    if os.getenv("CPP_COMPILER_CI", "OFF") == "ON":
+        return [_ffi_api.PipelineLegalize(target)]
+    else:
+        opt_texture = "texture" in target.keys
+        opt_coopmat = target.attrs.get("supports_khr_cooperative_matrix", False)
+        skip_ops = [
+            "relax.nn.conv2d",
+            "relax.nn.max_pool2d",
+            "relax.nn.adaptive_avg_pool2d",
         ]
-    )
-    if opt_texture:
+        pass_list = []
+
         pass_list.extend(
             [
-                relax.transform.ConvertLayout(
-                    {}, legalize_adreno.conv2d_convert_layout(opt_coopmat)
-                ),
-                relax.transform.Normalize(),
-                relax.transform.FoldConstant(),
-                relax.transform.LegalizeOps(skip_ops=skip_ops),
-                relax.transform.AnnotateTIROpPattern(),
-                relax.backend.adreno.transform.AnnotateCustomMemoryScope(target),
+                tvm.tir.transform.BindTarget(tvm.target.Target.current(allow_none=False)),
+                relax.transform.DecomposeOpsForInference(),
             ]
         )
-        if opt_coopmat:
+        if opt_texture:
+            pass_list.extend(
+                [
+                    relax.transform.ConvertLayout(
+                        {}, legalize_adreno.conv2d_convert_layout(opt_coopmat)
+                    ),
+                    relax.transform.Normalize(),
+                    relax.transform.FoldConstant(),
+                    relax.transform.LegalizeOps(skip_ops=skip_ops),
+                    relax.transform.AnnotateTIROpPattern(),
+                    relax.backend.adreno.transform.AnnotateCustomMemoryScope(target),
+                ]
+            )
+            if opt_coopmat:
+                pass_list.append(
+                    relax.transform.LegalizeOps(
+                        {"relax.nn.conv2d": legalize_adreno.conv2d_matmul},
+                    )
+                )
             pass_list.append(
                 relax.transform.LegalizeOps(
-                    {"relax.nn.conv2d": legalize_adreno.conv2d_matmul},
+                    {"relax.nn.conv2d": legalize_adreno.conv2d_NCHWc_OIHWo},
                 )
             )
-        pass_list.append(
-            relax.transform.LegalizeOps(
-                {"relax.nn.conv2d": legalize_adreno.conv2d_NCHWc_OIHWo},
-            )
-        )
-    pass_list.extend(
-        [
-            relax.transform.LegalizeOps(),
-            relax.transform.AnnotateTIROpPattern(),
-            relax.transform.FoldConstant(),
-            relax.transform.FuseOps(),
-            relax.transform.FuseTIR(),
-            relax.transform.DeadCodeElimination(),
-        ]
-    )
-    if opt_texture:
         pass_list.extend(
             [
-                relax.backend.adreno.transform.FoldVDeviceScopeChange(),
+                relax.transform.LegalizeOps(),
+                relax.transform.AnnotateTIROpPattern(),
+                relax.transform.FoldConstant(),
+                relax.transform.FuseOps(),
+                relax.transform.FuseTIR(),
                 relax.transform.DeadCodeElimination(),
-                relax.transform.SpecializePrimFuncBasedOnCallSite(),
             ]
         )
-    from tvm.s_tir import dlight as dl  # pylint: disable=import-outside-toplevel
-
-    pass_list.extend([relax.transform.Normalize()])
-    pass_list.extend(
-        [
-            dl.ApplyDefaultSchedule(
-                # Adreno Schedules
-                dl.adreno.DequantMatmulTensorization(),
-                # TODO(sanjs): Enable after network level tests, and Vulkan Texture integration
-                # dl.adreno.Conv2DTensorization(),
-                dl.adreno.MatmulTensorization(),
-                dl.adreno.Conv2D(),
-                dl.adreno.LayoutTransform(),
-                dl.adreno.Pool2D(),
-                dl.adreno.Fallback(),
-                # GPU Fallback
-                dl.gpu.Matmul(),
-                dl.gpu.Reduction(),
-                dl.gpu.GeneralReduction(),
-                dl.gpu.Fallback(),
+        if opt_texture:
+            pass_list.extend(
+                [
+                    relax.backend.adreno.transform.FoldVDeviceScopeChange(),
+                    relax.transform.DeadCodeElimination(),
+                    relax.transform.SpecializePrimFuncBasedOnCallSite(),
+                ]
             )
-        ]
-    )
-    return pass_list
+        from tvm.s_tir import dlight as dl  # pylint: disable=import-outside-toplevel
+
+        pass_list.extend([relax.transform.Normalize()])
+        if opt_coopmat:
+            pass_list.extend(
+                [
+                    dl.ApplyDefaultSchedule(
+                        # Adreno Schedules
+                        dl.adreno.DequantMatmulTensorization(),
+                        # TODO(sanjs): Enable after network level tests,
+                        # and Vulkan Texture integration
+                        # dl.adreno.Conv2DTensorization(),
+                        dl.adreno.MatmulTensorization(),
+                    )
+                ]
+            )
+        pass_list.extend(
+            [
+                dl.ApplyDefaultSchedule(
+                    dl.adreno.Conv2D(),
+                    dl.adreno.LayoutTransform(),
+                    dl.adreno.Pool2D(),
+                    dl.adreno.Fallback(),
+                    # GPU Fallback
+                    dl.gpu.Matmul(),
+                    dl.gpu.Reduction(),
+                    dl.gpu.GeneralReduction(),
+                    dl.gpu.Fallback(),
+                )
+            ]
+        )
+        return pass_list
 
 
 def dataflow_lower_passes(target: tvm.target.Target):  # pylint: disable=unused-argument
     """The default dataflow lowering passes for Adreno GPU backend."""
-    return relax.backend.gpu_generic.dataflow_lower_passes(target)
+    if os.getenv("CPP_COMPILER_CI", "OFF") == "ON":
+        return [_ffi_api.PipelineDataflow(target)]
+    else:
+        return relax.backend.gpu_generic.dataflow_lower_passes(target)
 
 
 def finalize_passes(target: tvm.target.Target):  # pylint: disable=unused-argument
     """The default finalization passes for Adreno GPU backend."""
-    return relax.backend.gpu_generic.finalize_passes(target)
+    if os.getenv("CPP_COMPILER_CI", "OFF") == "ON":
+        return [_ffi_api.PipelineFinalize(target)]
+    else:
+        return relax.backend.gpu_generic.finalize_passes(target)
 
 
 def get_default_pipeline(target: tvm.target.Target):
     """Return the default compilation pipeline for Adreno GPU."""
 
+    # return _ffi_api.Pipeline(target)
     @tvm.transform.module_pass(opt_level=0)
     def _pipeline(mod: tvm.ir.IRModule, _ctx: tvm.transform.PassContext):
         with target:

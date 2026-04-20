@@ -33,6 +33,12 @@
 namespace tvm {
 namespace relax {
 
+/*!
+ * \brief Return the indices that would sort `array` in ascending order.
+ *
+ * \param array The values to sort.
+ * \return A vector of indices such that `array[result[i]]` is non-decreasing.
+ */
 template <typename T>
 std::vector<size_t> ArgSort(const std::vector<T>& array) {
   std::vector<size_t> indices(array.size());
@@ -43,6 +49,19 @@ std::vector<size_t> ArgSort(const std::vector<T>& array) {
   return indices;
 }
 
+/*!
+ * \brief Apply constant-value padding to a tensor via the PadTE handler.
+ *
+ * Thin wrapper that forwards to PadTE with a fixed constant fill value.
+ *
+ * \param data The tensor to pad.
+ * \param pad_before Per-axis leading pad extents.
+ * \param pad_after Per-axis trailing pad extents.
+ * \param pad_value The scalar fill value.
+ * \param name Optional name for the output tensor.
+ * \param attrs Optional attribute map forwarded to the TE compute.
+ * \return The padded output tensor.
+ */
 te::Tensor Pad(const te::Tensor& data, const ffi::Array<tvm::PrimExpr>& pad_before,
                const ffi::Array<tvm::PrimExpr>& pad_after, const tvm::PrimExpr& pad_value,
                const ffi::String& name = "PadInput",
@@ -313,7 +332,14 @@ ffi::Array<te::Tensor> ConvTE(const ffi::Array<ffi::Any> args) {
       name_, tag_, attrs)};
 }
 
-// Conv1D
+/*!
+ * \brief Legalize relax.nn.conv1d to call_tir via ConvTE.
+ *
+ * \param bb The block builder.
+ * \param call The relax.nn.conv1d call to legalize.
+ * \return The legalized call_tir expression, or the original call if the
+ *         layout or group configuration is not supported.
+ */
 Expr LegalizeNNConv1D(const BlockBuilder& bb, const Call& call) {
   const auto* attrs = call->attrs.as<Conv1DAttrs>();
   auto m_te = MakeCallTE(bb, call);
@@ -366,21 +392,24 @@ Expr LegalizeNNConv1D(const BlockBuilder& bb, const Call& call) {
 TVM_REGISTER_OP("relax.nn.conv1d")
     .set_attr<FLegalize>("FLegalize", LegalizeNNConv1D, TVM_LEGALIZE_CPP_LEVEL);
 
-// Conv2D
+/*!
+ * \brief Legalize relax.nn.conv2d to call_tir via ConvTE.
+ *
+ * \param bb The block builder.
+ * \param call The relax.nn.conv2d call to legalize.
+ * \return The legalized call_tir expression, or the original call if the
+ *         layout or group configuration is not supported.
+ */
 Expr LegalizeNNConv2D(const BlockBuilder& bb, const Call& call) {
   const auto* attrs = call->attrs.as<Conv2DAttrs>();
   auto m_te = MakeCallTE(bb, call);
   tvm::ffi::Array<tvm::ffi::Any> args;
 
   if (attrs->out_layout != attrs->data_layout) {
-    LOG(WARNING) << "TOPI Conv2D does not support different input-output layouts, "
-                 << "and thus cannot be legalized by TOPI";
     return call;
   }
 
   if ((attrs->out_layout.length() != 4) || (attrs->data_layout.length() != 4)) {
-    LOG(WARNING) << "Conv2D where data layout or kernel layout have channel chunk "
-                 << "cannot be legalized by TOPI at this moment.";
     return call;
   }
 
@@ -419,7 +448,14 @@ Expr LegalizeNNConv2D(const BlockBuilder& bb, const Call& call) {
 TVM_REGISTER_OP("relax.nn.conv2d")
     .set_attr<FLegalize>("FLegalize", LegalizeNNConv2D, TVM_LEGALIZE_CPP_LEVEL);
 
-// Conv3D
+/*!
+ * \brief Legalize relax.nn.conv3d to call_tir via ConvTE.
+ *
+ * \param bb The block builder.
+ * \param call The relax.nn.conv3d call to legalize.
+ * \return The legalized call_tir expression, or the original call if the
+ *         layout or group configuration is not supported.
+ */
 Expr LegalizeNNConv3D(const BlockBuilder& bb, const Call& call) {
   const auto* attrs = call->attrs.as<Conv3DAttrs>();
   auto m_te = MakeCallTE(bb, call);

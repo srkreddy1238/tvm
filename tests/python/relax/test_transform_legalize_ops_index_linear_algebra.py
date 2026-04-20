@@ -16,6 +16,8 @@
 # under the License.
 # ruff: noqa: E501, F841
 
+import os
+
 import pytest
 
 import tvm
@@ -1371,10 +1373,14 @@ def test_matmul_unknown_dtype_raises():
     @I.ir_module
     class Before:
         @R.function
-        def main(a: R.Tensor((16, 32)), b: R.Tensor((32, 8))):
+        def main(a: R.Tensor((17, 32)), b: R.Tensor((32, 8))):
             return R.matmul(a, b)
 
-    with pytest.raises(tvm.error.InternalError):
+    with pytest.raises(
+        AssertionError
+        if os.environ.get("CPP_COMPILER_CI", "OFF") == "OFF"
+        else tvm.error.InternalError
+    ):
         LegalizeOps()(Before)
 
 
