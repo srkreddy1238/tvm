@@ -52,9 +52,9 @@ ffi::String SpecTensorNode::Repr() const {
   os << "Tensor([";
   for (size_t i = 0; i < shape.size(); ++i) {
     if (i > 0) os << ", ";
-    if (auto opt = shape[i].TryAs<int64_t>()) {
+    if (auto opt = shape[i].try_cast<int64_t>()) {
       os << opt.value();
-    } else if (auto opt = shape[i].TryAs<ffi::String>()) {
+    } else if (auto opt = shape[i].try_cast<ffi::String>()) {
       os << std::string(opt.value());
     } else {
       os << "?";
@@ -77,7 +77,7 @@ ffi::String SpecTupleNode::Repr() const {
   os << (is_tuple ? "(" : "[");
   for (size_t i = 0; i < elements.size(); ++i) {
     if (i > 0) os << ", ";
-    if (auto opt = elements[i].TryAs<runtime::ObjectRef>()) {
+    if (auto opt = elements[i].try_cast<runtime::ObjectRef>()) {
       runtime::ObjectRef elem = opt.value();
       if (elem.defined()) {
         if (const auto* t = elem.as<SpecTensorNode>()) {

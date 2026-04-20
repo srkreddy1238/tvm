@@ -47,9 +47,9 @@
 #ifndef TVM_RELAX_FRONTEND_NN_EXPORTER_H_
 #define TVM_RELAX_FRONTEND_NN_EXPORTER_H_
 
-#include "spec.h"
-
 #include <tvm/ir/module.h>
+
+#include "spec.h"
 
 namespace tvm {
 namespace relax {

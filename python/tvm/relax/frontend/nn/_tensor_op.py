@@ -17,6 +17,8 @@
 # ruff: noqa: F821
 """Adding member operators to nn.Tensor."""
 
+import tvm_ffi
+
 from tvm import tir
 
 
@@ -38,7 +40,7 @@ def _convert_scalar(scalar, ref) -> "Tensor":
     return scalar
 
 
-class _TensorOp:
+class _TensorOp(tvm_ffi.Object):
     def __add__(self, other):
         other = _convert_scalar(other, self)
         return _op().add(self, other)

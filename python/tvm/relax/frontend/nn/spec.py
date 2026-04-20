@@ -1,4 +1,4 @@
-﻿# Licensed to the Apache Software Foundation (ASF) under one
+# Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
 # distributed with this work for additional information
 # regarding copyright ownership.  The ASF licenses this file
@@ -18,9 +18,9 @@
 
 All six spec types are now native C++ objects:
 
-  Int        (relax.frontend.nn.spec.Int)      – no fields
-  Tensor     (relax.frontend.nn.spec.Tensor)   – shape, dtype
-  Tuple      (relax.frontend.nn.spec.Tuple)    – name, elements, is_tuple
+  Int        (relax.frontend.nn.spec.Int)      - no fields
+  Tensor     (relax.frontend.nn.spec.Tensor)   - shape, dtype
+  Tuple      (relax.frontend.nn.spec.Tuple)    - name, elements, is_tuple
   MethodSpec (relax.frontend.nn.spec.MethodSpec)
     forward:     ffi::Function(Map<String,Any>) -> Any
     arg_names:   Array<String>
@@ -32,7 +32,7 @@ All six spec types are now native C++ objects:
     method_specs: Array<Any>
     named_params: Map<String, NNParameter>
 
-  Object – stays Python: object_type is a Python class used as a constructor.
+  Object - stays Python: object_type is a Python class used as a constructor.
 
 The forward function in MethodSpec receives Map<String, Any> where each
 value is an nn.Tensor (TensorNode).  The implementation casts ffi::Any to
@@ -48,7 +48,6 @@ import inspect
 import typing
 
 import tvm_ffi
-import tvm
 
 if typing.TYPE_CHECKING:
     from .core import Module as _nn_module_class
@@ -62,94 +61,72 @@ ModuleSpecType = typing.Union["ModuleSpec", dict[str, MethodSpecType]]
 SpecAny = typing.Union["Object", "Int", "Tensor", "Tuple"]
 
 # ---------------------------------------------------------------------------
-# FFI API – populated by init_ffi_api("relax.frontend.nn.spec") at import time.
-# Each attribute corresponds to a C++ global registered as
-# "relax.frontend.nn.spec.<Name>" (the dot-free suffix becomes the attribute).
-# Note: constructor names like "Int.__init__" contain a dot and are therefore
-# NOT exposed by init_ffi_api.  They are accessed via the type-info mechanism
-# that register_object sets up: _ffi_api_spec.Int is the constructor function
-# registered by refl::init<>() and surfaced as the __c_ffi_init__ method,
-# which __init_handle_by_constructor__ calls directly.
+# All native C++ spec classes inherit tvm_ffi.Object and use self.__ffi_init__
+# to construct the underlying C++ object.  register_object sets __c_ffi_init__
+# on the class from the "__ffi_init__" type method registered by refl::init<>()
+# in C++, and __ffi_init__ calls __init_handle_by_constructor__(__c_ffi_init__).
 # ---------------------------------------------------------------------------
-from . import _ffi_api_spec  # noqa: E402  pylint: disable=wrong-import-position
-from . import _ffi_api       # noqa: E402  pylint: disable=wrong-import-position
 
 
 # ===========================================================================
-# Int  –  native C++ object
+# Int  -  native C++ object
 # ===========================================================================
+
 
 @tvm_ffi.register_object("relax.frontend.nn.spec.Int")
-class Int:
+class Int(tvm_ffi.Object):
     """Spec for a scalar integer input (becomes a tir.Var in the IR)."""
 
     def __init__(self) -> None:
-        self.__init_handle_by_constructor__(_ffi_api_spec.Int)
+        self.__ffi_init__()
 
     def __repr__(self) -> str:
         return "int"
 
 
 # ===========================================================================
-# Tensor  –  native C++ object
+# Tensor  -  native C++ object
 # ===========================================================================
 
+
 @tvm_ffi.register_object("relax.frontend.nn.spec.Tensor")
-class Tensor:
+class Tensor(tvm_ffi.Object):
     """Spec for a tensor input: static ndim/dtype, symbolic or static shapes."""
 
     def __init__(self, shape: typing.Sequence[int | str], dtype: str) -> None:
-        self.__init_handle_by_constructor__(
-            _ffi_api_spec.Tensor,
-            list(shape), dtype,
-        )
-
-    @property
-    def shape(self) -> list[int | str]:
-        raw = self.__object_handle__.shape  # type: ignore[attr-defined]
-        return [int(x) if isinstance(x, int) else str(x) for x in raw]
-
-    @property
-    def dtype(self) -> str:
-        return str(self.__object_handle__.dtype)  # type: ignore[attr-defined]
+        self.__ffi_init__(list(shape), dtype)
 
     def __repr__(self) -> str:
-        return str(self.__object_handle__.__repr__())  # type: ignore[attr-defined]
+        # shape and dtype are C++ fields exposed directly by register_object
+        return f"Tensor({list(self.shape)}, '{self.dtype}')"
 
 
 # ===========================================================================
-# Tuple  –  native C++ object
+# Tuple  -  native C++ object
 # ===========================================================================
+
 
 @tvm_ffi.register_object("relax.frontend.nn.spec.Tuple")
-class Tuple:
+class Tuple(tvm_ffi.Object):
     """Spec for a tuple or list input containing nested specs."""
 
     def __init__(self, name: str, elements: "list[SpecAny] | tuple[SpecAny, ...]") -> None:
-        assert isinstance(elements, (list, tuple))
+        assert isinstance(elements, list | tuple)
         is_tuple = isinstance(elements, tuple)
-        self.__init_handle_by_constructor__(
-            _ffi_api_spec.Tuple,
-            name, list(elements), is_tuple,
-        )
-
-    @property
-    def name(self) -> str:
-        return str(self.__object_handle__.name)  # type: ignore[attr-defined]
+        self.__ffi_init__(name, list(elements), is_tuple)
 
     @property
     def elements(self) -> "list[SpecAny] | tuple[SpecAny, ...]":
-        raw = list(self.__object_handle__.elements)  # type: ignore[attr-defined]
-        return tuple(raw) if self.__object_handle__.is_tuple else raw  # type: ignore[attr-defined]
-
-    def __repr__(self) -> str:
-        return str(self.__object_handle__.__repr__())  # type: ignore[attr-defined]
+        # name, elements, is_tuple are C++ fields exposed directly by register_object
+        raw = list(self.elements)
+        return tuple(raw) if self.is_tuple else raw
 
 
 # ===========================================================================
-# Object  –  stays Python
+# Object  -  stays Python
 # object_type is a Python class used as a constructor in exporter.py.
 # ===========================================================================
+
 
 class Object:
     """Spec for a non-tensor opaque frontend object (e.g. KVCache)."""
@@ -164,7 +141,7 @@ class Object:
 
 
 # ===========================================================================
-# MethodSpec  –  native C++ object
+# MethodSpec  -  native C++ object
 #
 # The forward function is stored as ffi::Function(Map<String,Any>) -> Any.
 # Python wraps the original method in a closure that:
@@ -174,8 +151,9 @@ class Object:
 #   4. Returns the result as-is (Tensor or tuple of Tensors).
 # ===========================================================================
 
+
 @tvm_ffi.register_object("relax.frontend.nn.spec.MethodSpec")
-class MethodSpec:
+class MethodSpec(tvm_ffi.Object):
     """Spec for a single compiled method.
 
     The forward function receives Map<String, Any> where each value is an
@@ -196,39 +174,15 @@ class MethodSpec:
         if effect_mode not in ("plain", "packed", "none"):
             raise ValueError(f"Invalid effect_mode: {effect_mode!r}")
 
-        # Build the ffi::Function closure.
-        # It receives Map<String, Any> and calls the original Python method
-        # with positional arguments in arg_names order.
         def _forward(named_args):
             args = [named_args[name] for name in arg_names]
             return method(*args)
 
-        self.__init_handle_by_constructor__(
-            _ffi_api_spec.MethodSpec,
-            _forward,          # ffi::Function
-            arg_names,         # Array<String>
-            arg_specs,         # Array<Any>
-            param_mode,
-            effect_mode,
-        )
+        self.__ffi_init__(_forward, arg_names, arg_specs, param_mode, effect_mode)
 
     # ---- read-only properties from C++ fields ----------------------------
-
-    @property
-    def arg_names(self) -> list[str]:
-        return list(self.__object_handle__.arg_names)  # type: ignore[attr-defined]
-
-    @property
-    def arg_specs(self) -> list[ArgSpecType]:
-        return list(self.__object_handle__.arg_specs)  # type: ignore[attr-defined]
-
-    @property
-    def param_mode(self) -> str:
-        return str(self.__object_handle__.param_mode)  # type: ignore[attr-defined]
-
-    @property
-    def effect_mode(self) -> str:
-        return str(self.__object_handle__.effect_mode)  # type: ignore[attr-defined]
+    # arg_names, arg_specs, param_mode, effect_mode are exposed directly
+    # as attributes by register_object; no Python property wrappers needed.
 
     def _repr(self, name: str) -> str:
         args = ", ".join(f"{n}: {s}" for n, s in zip(self.arg_names, self.arg_specs))
@@ -260,11 +214,12 @@ class MethodSpec:
                 return Int()
             if isinstance(arg_spec, str) and arg_spec == "int":
                 return Int()
-            if isinstance(arg_spec, (Int, Tensor, Object)):
+            if isinstance(arg_spec, Int | Tensor | Object):
                 return arg_spec
-            if isinstance(arg_spec, (list, tuple, Tuple)):
-                elems = (list(arg_spec) if not isinstance(arg_spec, Tuple)
-                         else list(arg_spec.elements))
+            if isinstance(arg_spec, list | tuple | Tuple):
+                elems = (
+                    list(arg_spec) if not isinstance(arg_spec, Tuple) else list(arg_spec.elements)
+                )
                 converted = (
                     tuple(_convert(e, f"{arg_name}_{i}") for i, e in enumerate(elems))
                     if isinstance(arg_spec, tuple)
@@ -277,25 +232,28 @@ class MethodSpec:
             if arg_name in spec:  # type: ignore[operator]
                 arg_specs.append(_convert(spec[arg_name], arg_name))  # type: ignore[index]
 
-        return MethodSpec(method, arg_names, arg_specs,
-                          param_mode=param_mode, effect_mode=effect_mode)
+        return MethodSpec(
+            method, arg_names, arg_specs, param_mode=param_mode, effect_mode=effect_mode
+        )
 
     @staticmethod
     def from_torch(args: list[typing.Any], method: typing.Callable) -> "MethodSpec":
         """Build a MethodSpec from a list of example torch tensors."""
         from .torch import _method_spec_from_torch  # pylint: disable=import-outside-toplevel
+
         return _method_spec_from_torch(args, method)
 
 
 # ===========================================================================
-# ModuleSpec  –  native C++ object
+# ModuleSpec  -  native C++ object
 #
 # named_params is pre-collected from Module.named_parameters() so the C++
 # Exporter never needs to call back into Python for parameter discovery.
 # ===========================================================================
 
+
 @tvm_ffi.register_object("relax.frontend.nn.spec.ModuleSpec")
-class ModuleSpec:
+class ModuleSpec(tvm_ffi.Object):
     """Spec for a complete nn.Module compilation."""
 
     def __init__(
@@ -304,32 +262,18 @@ class ModuleSpec:
         method_names: list[str],
         method_specs: list[MethodSpec],
     ) -> None:
-        # Collect named parameters from the Python module
         from .core import Parameter, _attribute_finder  # pylint: disable=import-outside-toplevel
+
         named_params = {
             name: param
             for name, param in _attribute_finder(
                 module, prefix="", condition_yield=lambda x: isinstance(x, Parameter)
             )
         }
-        self.__init_handle_by_constructor__(
-            _ffi_api_spec.ModuleSpec,
-            method_names,
-            method_specs,
-            named_params,
-        )
+        self.__ffi_init__(method_names, method_specs, named_params)
 
-    @property
-    def method_names(self) -> list[str]:
-        return list(self.__object_handle__.method_names)  # type: ignore[attr-defined]
-
-    @property
-    def method_specs(self) -> list[MethodSpec]:
-        return list(self.__object_handle__.method_specs)  # type: ignore[attr-defined]
-
-    @property
-    def named_params(self) -> dict:
-        return dict(self.__object_handle__.named_params)  # type: ignore[attr-defined]
+    # method_names, method_specs, named_params are C++ fields exposed
+    # directly as attributes by register_object; no property wrappers needed.
 
     @staticmethod
     def from_raw(spec: ModuleSpecType, module: "_nn_module_class") -> "ModuleSpec":
@@ -341,15 +285,12 @@ class ModuleSpec:
         for method_name in method_names:
             method_spec = spec[method_name]  # type: ignore[index]
             if not isinstance(method_spec, MethodSpec):
-                method_spec = MethodSpec.from_raw(
-                    method_spec, getattr(module, method_name)
-                )
+                method_spec = MethodSpec.from_raw(method_spec, getattr(module, method_name))
             method_specs.append(method_spec)
         return ModuleSpec(module, method_names, method_specs)
 
     def __repr__(self) -> str:
         lines = "\n".join(
-            "  " + ms._repr(name)
-            for name, ms in zip(self.method_names, self.method_specs)
+            "  " + ms._repr(name) for name, ms in zip(self.method_names, self.method_specs)
         )
         return f"ModuleSpec:\n{lines}"

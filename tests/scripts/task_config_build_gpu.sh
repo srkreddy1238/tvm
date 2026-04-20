@@ -46,3 +46,4 @@ if [ ${CPP_COMPILER_CI} == "ON" ]; then
   echo set\(USE_CPP_COMPILER ON\) >> config.cmake
   echo set\(USE_CPP_COMPILER_TESTS \"/googletest\"\) >> config.cmake
 fi
+echo set\(USE_GTEST ON\) >> config.cmake

@@ -48,14 +48,14 @@
 #ifndef TVM_RELAX_FRONTEND_NN_SPEC_H_
 #define TVM_RELAX_FRONTEND_NN_SPEC_H_
 
-#include "core.h"
-
 #include <tvm/ffi/function.h>
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/ir/module.h>
 #include <tvm/runtime/object.h>
 
 #include <string>
+
+#include "core.h"
 
 namespace tvm {
 namespace relax {
@@ -99,9 +99,9 @@ class SpecTensorNode : public runtime::Object {
     namespace refl = tvm::ffi::reflection;
     refl::ObjectDef<SpecTensorNode>()
         .def(refl::init<ffi::Array<ffi::Any>, ffi::String>())
-        .def_ro("shape",    &SpecTensorNode::shape)
-        .def_ro("dtype",    &SpecTensorNode::dtype)
-        .def("__repr__",    &SpecTensorNode::Repr);
+        .def_ro("shape", &SpecTensorNode::shape)
+        .def_ro("dtype", &SpecTensorNode::dtype)
+        .def("__repr__", &SpecTensorNode::Repr);
   }
   static constexpr bool _type_mutable = false;
   TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.frontend.nn.spec.Tensor", SpecTensorNode,
@@ -132,14 +132,13 @@ class SpecTupleNode : public runtime::Object {
     namespace refl = tvm::ffi::reflection;
     refl::ObjectDef<SpecTupleNode>()
         .def(refl::init<ffi::String, ffi::Array<ffi::Any>, bool>())
-        .def_ro("name",     &SpecTupleNode::name)
+        .def_ro("name", &SpecTupleNode::name)
         .def_ro("elements", &SpecTupleNode::elements)
         .def_ro("is_tuple", &SpecTupleNode::is_tuple)
-        .def("__repr__",    &SpecTupleNode::Repr);
+        .def("__repr__", &SpecTupleNode::Repr);
   }
   static constexpr bool _type_mutable = false;
-  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.frontend.nn.spec.Tuple", SpecTupleNode,
-                                    runtime::Object);
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.frontend.nn.spec.Tuple", SpecTupleNode, runtime::Object);
 };
 class SpecTuple : public runtime::ObjectRef {
  public:
@@ -175,8 +174,7 @@ class MethodSpecNode : public runtime::Object {
   ffi::String effect_mode;
 
   MethodSpecNode(ffi::Function forward, ffi::Array<ffi::String> arg_names,
-                 ffi::Array<ffi::Any> arg_specs, ffi::String param_mode,
-                 ffi::String effect_mode)
+                 ffi::Array<ffi::Any> arg_specs, ffi::String param_mode, ffi::String effect_mode)
       : forward(std::move(forward)),
         arg_names(std::move(arg_names)),
         arg_specs(std::move(arg_specs)),
@@ -186,12 +184,12 @@ class MethodSpecNode : public runtime::Object {
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
     refl::ObjectDef<MethodSpecNode>()
-        .def(refl::init<ffi::Function, ffi::Array<ffi::String>, ffi::Array<ffi::Any>,
-                        ffi::String, ffi::String>())
-        .def_ro("forward",     &MethodSpecNode::forward)
-        .def_ro("arg_names",   &MethodSpecNode::arg_names)
-        .def_ro("arg_specs",   &MethodSpecNode::arg_specs)
-        .def_ro("param_mode",  &MethodSpecNode::param_mode)
+        .def(refl::init<ffi::Function, ffi::Array<ffi::String>, ffi::Array<ffi::Any>, ffi::String,
+                        ffi::String>())
+        .def_ro("forward", &MethodSpecNode::forward)
+        .def_ro("arg_names", &MethodSpecNode::arg_names)
+        .def_ro("arg_specs", &MethodSpecNode::arg_specs)
+        .def_ro("param_mode", &MethodSpecNode::param_mode)
         .def_ro("effect_mode", &MethodSpecNode::effect_mode);
   }
   static constexpr bool _type_mutable = false;

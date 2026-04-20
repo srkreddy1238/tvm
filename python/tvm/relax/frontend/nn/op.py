@@ -16,7 +16,7 @@
 # under the License.
 # pylint: disable=too-many-lines,invalid-name,protected-access,redefined-outer-name
 # pylint: disable=redefined-builtin
-"""nn.Tensor operators – thin Python wrappers over C++ FFI (relax.frontend.nn.op.*).
+"""nn.Tensor operators - thin Python wrappers over C++ FFI (relax.frontend.nn.op.*).
 
 Every public function here:
   1. Unwraps nn.Tensor arguments to their underlying relax.Var (_expr).
@@ -33,16 +33,19 @@ from typing import Any, TypeVar
 
 import numpy as np
 
+from tvm import te
 from tvm import tir as _tir
+from tvm.script import tir as T
 
 from ... import expr as rx
 from ... import op as _op
+from . import _ffi_api
 from .core import Tensor, _unwrap_ffi_result, get_default_dtype, wrap_nested
 
 IntExpr = int | _tir.PrimExpr
 
 # ---------------------------------------------------------------------------
-# FFI API – populated by init_ffi_api("relax.frontend.nn.op") at import time.
+# FFI API - populated by init_ffi_api("relax.frontend.nn.op") at import time.
 # Each attribute corresponds to a C++ global registered as
 # "relax.frontend.nn.op.<Name>" (the dot-free suffix becomes the attribute).
 # ---------------------------------------------------------------------------
@@ -143,8 +146,11 @@ def conv1d(
     name: str = "conv1d",
 ) -> Tensor:
     """1D convolution."""
-        return _t(_ffi_op.conv1d(_v(x), _v(weight), _v(bias) if bias else None,
-                         stride, padding, dilation, groups, name))
+    return _t(
+        _ffi_op.conv1d(
+            _v(x), _v(weight), _v(bias) if bias else None, stride, padding, dilation, groups, name
+        )
+    )
 
 
 def conv2d(
@@ -159,8 +165,19 @@ def conv2d(
     name: str = "conv2d",
 ) -> Tensor:
     """Applies a 2D convolution."""
-        return _t(_ffi_op.conv2d(_v(x), _v(weight), _v(bias) if bias else None,
-                         stride, padding, dilation, groups, data_layout, name))
+    return _t(
+        _ffi_op.conv2d(
+            _v(x),
+            _v(weight),
+            _v(bias) if bias else None,
+            stride,
+            padding,
+            dilation,
+            groups,
+            data_layout,
+            name,
+        )
+    )
 
 
 def conv3d(
@@ -175,8 +192,19 @@ def conv3d(
     name: str = "conv3d",
 ) -> Tensor:
     """Applies a 3D convolution."""
-        return _t(_ffi_op.conv3d(_v(x), _v(weight), _v(bias) if bias else None,
-                         stride, padding, dilation, groups, data_layout, name))
+    return _t(
+        _ffi_op.conv3d(
+            _v(x),
+            _v(weight),
+            _v(bias) if bias else None,
+            stride,
+            padding,
+            dilation,
+            groups,
+            data_layout,
+            name,
+        )
+    )
 
 
 def conv1d_transpose(
@@ -191,8 +219,19 @@ def conv1d_transpose(
     name: str = "conv1d_transpose",
 ) -> Tensor:
     """1D transposed convolution operator."""
-        return _t(_ffi_op.conv1d_transpose(_v(x), _v(weight), _v(bias) if bias else None,
-                                   stride, padding, output_padding, dilation, groups, name))
+    return _t(
+        _ffi_op.conv1d_transpose(
+            _v(x),
+            _v(weight),
+            _v(bias) if bias else None,
+            stride,
+            padding,
+            output_padding,
+            dilation,
+            groups,
+            name,
+        )
+    )
 
 
 def maximum(x1: Tensor, x2: Tensor, name: str = "maximum"):
@@ -374,12 +413,18 @@ def group_norm(
     dim = len(x._expr.struct_info.shape)
     if axes is None:
         axes = list(range(2, dim))
-        return _t(_ffi_op.group_norm(
-        _v(x),
-        _v(weight) if weight is not None else None,
-        _v(bias) if bias is not None else None,
-        num_groups, channel_axis, axes, eps, name,
-    ))
+    return _t(
+        _ffi_op.group_norm(
+            _v(x),
+            _v(weight) if weight is not None else None,
+            _v(bias) if bias is not None else None,
+            num_groups,
+            channel_axis,
+            axes,
+            eps,
+            name,
+        )
+    )
 
 
 def triu(x: Tensor, diagonal: int = 0, name: str = "triu") -> Tensor:
@@ -482,9 +527,18 @@ def get_timestep_embedding(
 ) -> Tensor:
     """Timestep calculation as described in Denoising Diffusion Probabilistic Models."""
     dtype = get_default_dtype()
-    return _t(_ffi_op.get_timestep_embedding(
-        _v(x), embedding_dim, flip_sin_to_cos,
-        downscale_freq_shift, scale, max_period, dtype, name))
+    return _t(
+        _ffi_op.get_timestep_embedding(
+            _v(x),
+            embedding_dim,
+            flip_sin_to_cos,
+            downscale_freq_shift,
+            scale,
+            max_period,
+            dtype,
+            name,
+        )
+    )
 
 
 def scaled_dot_product_attention(
@@ -499,7 +553,11 @@ def scaled_dot_product_attention(
     """Computes a scaled dot product attention."""
     assert attn_mask is None, "attn_mask not yet supported."
     causal_mask = "TopLeft" if is_causal else None
-    return _t(_ffi_op.scaled_dot_product_attention(_v(query), _v(key), _v(value), causal_mask, scale, name))
+    return _t(
+        _ffi_op.scaled_dot_product_attention(
+            _v(query), _v(key), _v(value), causal_mask, scale, name
+        )
+    )
 
 
 def interpolate(
@@ -566,12 +624,22 @@ def tensor_expr_op(
             return arg._expr  # pylint: disable=protected-access
         return arg
 
-    return _t(_ffi_op.tensor_expr_op(
-        tensor_expr_func,
-        name_hint,
-        [_convert(arg) for arg in args],
-        attrs,
-    ))
+    def _wrapped_func(te_inputs):
+        """Unpack Array<te.Tensor>, call user func, repack result into Array."""
+        unpacked = list(te_inputs)
+        result = tensor_expr_func(*unpacked)
+        if isinstance(result, list | tuple):
+            return list(result)
+        return [result]
+
+    return _t(
+        _ffi_op.tensor_expr_op(
+            _wrapped_func,
+            name_hint,
+            [_convert(arg) for arg in args],
+            attrs,
+        )
+    )
 
 
 OutType = TypeVar("OutType", bound=Tensor | Sequence[Tensor])
@@ -590,6 +658,8 @@ def tensor_ir_op(
     def _convert(arg):
         if isinstance(arg, Tensor):
             return arg._expr
+        if isinstance(arg, rx.Var):
+            return arg
         if isinstance(arg, rx.ShapeExpr):
             return arg
         if isinstance(arg, _tir.PrimExpr):
@@ -601,12 +671,14 @@ def tensor_ir_op(
     else:
         out_list = list(out)
 
-    return _t(_ffi_op.tensor_ir_op(
-        func,
-        name_hint,
-        [_convert(a) for a in args],
-        [o._expr for o in out_list],
-    ))
+    return _t(
+        _ffi_op.tensor_ir_op(
+            func,
+            name_hint,
+            [_convert(a) for a in args],
+            [o._expr for o in out_list],
+        )
+    )
 
 
 def tensor_ir_inplace_op(
@@ -625,6 +697,8 @@ def tensor_ir_inplace_op(
     def _convert(arg):
         if isinstance(arg, Tensor):
             return arg._expr
+        if isinstance(arg, rx.Var):
+            return arg
         if isinstance(arg, rx.ShapeExpr):
             return arg
         if isinstance(arg, _tir.PrimExpr):
@@ -636,13 +710,15 @@ def tensor_ir_inplace_op(
     else:
         out_list = list(out)
 
-    return _t(_ffi_op.tensor_ir_inplace_op(
-        func,
-        name_hint,
-        [_convert(a) for a in args],
-        inplace_indices,
-        [o._expr for o in out_list],
-    ))
+    return _t(
+        _ffi_op.tensor_ir_inplace_op(
+            func,
+            name_hint,
+            [_convert(a) for a in args],
+            inplace_indices,
+            [o._expr for o in out_list],
+        )
+    )
 
 
 def extern(
@@ -651,6 +727,7 @@ def extern(
     out: OutType,
 ) -> OutType:
     """Invoke an extern function during runtime."""
+
     def _convert(arg):
         if isinstance(arg, Tensor):
             return arg._expr
@@ -661,11 +738,13 @@ def extern(
     else:
         out_list = list(out)
 
-    return _t(_ffi_op.extern(
-        name,
-        [_convert(a) for a in args],
-        [o._expr for o in out_list],
-    ))
+    return _t(
+        _ffi_op.extern(
+            name,
+            [_convert(a) for a in args],
+            [o._expr for o in out_list],
+        )
+    )
 
 
 def debug_func(
@@ -674,11 +753,16 @@ def debug_func(
     _line_info: str | None = None,
 ):
     """Call a debug function during runtime."""
-    from .exporter import Exporter  # pylint: disable=import-outside-toplevel
+    # Get the current _io var from the C++ thread-local (set by ExportToIRModule)
+    # or fall back to the Python Exporter if available.
+    io_var = _ffi_api.GetCurrentIOVar()
+    if io_var is None:
+        # Python Exporter path
+        from .exporter import Exporter  # pylint: disable=import-outside-toplevel
 
-    if Exporter.current().io_effect is None:
-        raise RuntimeError("Debugging is only supported when debug mode is on.")
-    io_var = Exporter.current().io_effect.effect  # the current _io Var
+        if not hasattr(Exporter._tls, "current"):
+            raise RuntimeError("Debugging is only supported when debug mode is on.")
+        io_var = Exporter.current().io_effect.effect
 
     if _line_info is None:
         filename, line_number = inspect.getframeinfo(inspect.currentframe().f_back)[:2]
@@ -695,7 +779,8 @@ def debug_func(
         io_var,
         _line_info,
     )
-    Exporter.current().io_effect.effect = new_io
+    # Update the C++ thread-local so subsequent debug_func calls chain correctly
+    _ffi_api.SetCurrentIOVar(new_io)
 
 
 def print_(tensor: Tensor):
@@ -796,34 +881,11 @@ def multinomial_from_uniform(
             "Number of samples must match the number of probability distributions."
         )
         sample_indices = Tensor.from_const(np.arange(out_batch).reshape(out_batch, 1))
-    return _t(_ffi_op.multinomial_from_uniform(_v(prob), _v(uniform_sample), _v(sample_indices), dtype, name))
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+    return _t(
+        _ffi_op.multinomial_from_uniform(
+            _v(prob), _v(uniform_sample), _v(sample_indices), dtype, name
+        )
+    )
 
 
 def sample_top_p_top_k_from_sorted_prob(

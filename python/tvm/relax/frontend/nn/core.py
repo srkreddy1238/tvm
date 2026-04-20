@@ -1,4 +1,4 @@
-﻿# Licensed to the Apache Software Foundation (ASF) under one
+# Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
 # distributed with this work for additional information
 # regarding copyright ownership.  The ASF licenses this file
@@ -17,17 +17,17 @@
 """nn frontend core types.
 
 Native C++ objects (registered via tvm_ffi.register_object):
-  Tensor       – relax.Var wrapper with TensorStructInfo
-  Parameter    – Tensor subclass with optional data + attrs
-  Object       – relax.Var wrapper with ObjectStructInfo
-  ModuleList   – ordered list of sub-modules (ffi::Array<Any>)
-  ModuleDict   – ordered string-keyed map of sub-modules (ffi::Map<String,Any>)
+  Tensor       - relax.Var wrapper with TensorStructInfo
+  Parameter    - Tensor subclass with optional data + attrs
+  Object       - relax.Var wrapper with ObjectStructInfo
+  ModuleList   - ordered list of sub-modules (ffi::Array<Any>)
+  ModuleDict   - ordered string-keyed map of sub-modules (ffi::Map<String,Any>)
 
 Pure Python (cannot be ported):
-  SubroutineMixin – uses __init_subclass__, inspect.signature, functools.wraps
-  Module          – forward() is Python-defined; export_tvm/jit use Python-only
+  SubroutineMixin - uses __init_subclass__, inspect.signature, functools.wraps
+  Module          - forward() is Python-defined; export_tvm/jit use Python-only
                     infrastructure (Exporter, spec, VirtualMachine)
-  Effect          – abstract base with Python virtual dispatch
+  Effect          - abstract base with Python virtual dispatch
 
 Module data-management methods (named_parameters, state_dict, load_state_dict,
 to) delegate to C++ FFI helpers that traverse both Python __dict__ and native
@@ -36,7 +36,7 @@ C++ field metadata, so no traversal logic lives in Python.
 
 from collections import OrderedDict
 from collections.abc import Callable, Iterator, Sequence
-from typing import TYPE_CHECKING, Any, Union
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import tvm_ffi
@@ -44,7 +44,6 @@ import tvm_ffi
 import tvm
 import tvm.runtime
 from tvm import tir
-from tvm.ir import IRModule
 from tvm.ir.transform import Pass
 from tvm.runtime import Device
 from tvm.runtime import device as as_device
@@ -53,26 +52,24 @@ from tvm.target import Target
 
 from .... import relax as rx
 from ...block_builder import BlockBuilder
-from ...struct_info import ObjectStructInfo, ShapeStructInfo, TensorStructInfo, TupleStructInfo
+from ...struct_info import TensorStructInfo
 from ._tensor_op import _TensorOp
 from .subroutine import SubroutineMixin
 
 if TYPE_CHECKING:
-    import torch
     from . import spec as _spec
-    from .extern import ExternModule
 
 # ---------------------------------------------------------------------------
-# FFI API – populated by init_ffi_api("relax.frontend.nn") at import time.
+# FFI API - populated by init_ffi_api("relax.frontend.nn") at import time.
 # Each attribute corresponds to a C++ global registered as
 # "relax.frontend.nn.<Name>" (the dot-free suffix becomes the attribute).
 # ---------------------------------------------------------------------------
-from . import _ffi_api  # noqa: E402  pylint: disable=wrong-import-position
-
+from . import _ffi_api
 
 # ---------------------------------------------------------------------------
 # Default dtype
 # ---------------------------------------------------------------------------
+
 
 def get_default_dtype() -> str:
     """Return the current default parameter dtype (default: float32)."""
@@ -84,24 +81,78 @@ def set_default_dtype(dtype: str) -> None:
     _ffi_api.SetDefaultDtype(dtype)
 
 
+# ---------------------------------------------------------------------------
+# _ConstTensor  -  lightweight Python wrapper for inline constants
+#
+# from_const / from_scalar return this instead of a full Tensor so that
+# the Constant expr is passed inline to op calls (e.g. R.full fill_value)
+# without being emitted as a separate dataflow binding.
+# ---------------------------------------------------------------------------
+
+
+class _ConstTensor(_TensorOp):
+    """Python-only Tensor wrapper for relax.Constant values.
+
+    Holds the Constant expr directly so it can be passed inline to ops
+    without being emitted as a standalone dataflow binding.
+    """
+
+    def __init__(self, const_expr: rx.Constant) -> None:
+        self._const_expr = const_expr
+
+    @property
+    def _expr(self) -> rx.Constant:
+        return self._const_expr
+
+    @property
+    def shape(self) -> list[int | tir.PrimExpr]:
+        sinfo = self._const_expr.struct_info_
+        if sinfo is None or not isinstance(sinfo, TensorStructInfo):
+            return []
+        if sinfo.shape is None:
+            return []
+        shape_sinfo = sinfo.shape.struct_info_
+        if shape_sinfo is None or not hasattr(shape_sinfo, "values") or shape_sinfo.values is None:
+            return []
+        return [int(x) if isinstance(x, tir.IntImm) else x for x in shape_sinfo.values]
+
+    @property
+    def ndim(self) -> int:
+        sinfo = self._const_expr.struct_info_
+        if sinfo is None or not isinstance(sinfo, TensorStructInfo):
+            return 0
+        return sinfo.ndim
+
+    @property
+    def dtype(self) -> str:
+        sinfo = self._const_expr.struct_info_
+        if sinfo is None or not isinstance(sinfo, TensorStructInfo):
+            return ""
+        return str(sinfo.dtype)
+
+    def __repr__(self) -> str:
+        return f'ConstTensor({self.shape}, "{self.dtype}")'
+
+
 # ===========================================================================
-# Tensor  –  native C++ object
+# Tensor  -  native C++ object
 # ===========================================================================
+
 
 @tvm_ffi.register_object("relax.frontend.nn.Tensor")
 class Tensor(_TensorOp):
     """Symbolic tensor backed by a relax.Var with TensorStructInfo."""
 
     def __init__(self, *, _expr: rx.Var) -> None:
-        self.__init_handle_by_constructor__(_ffi_api.Tensor, _expr)
+        self.__ffi_init__(_expr)
 
     @staticmethod
     def from_const(data) -> "Tensor":
-        return Tensor(_expr=rx.const(data))
+        return _ConstTensor(rx.const(data))
 
     @staticmethod
     def from_scalar(data: int | float, dtype: str) -> "Tensor":
-        return Tensor(_expr=rx.const(data, dtype=dtype))
+        return _ConstTensor(rx.const(data, dtype=dtype))
 
     @staticmethod
     def from_struct_info(struct_info: rx.TensorStructInfo, name: str = "tensor") -> "Tensor":
@@ -117,28 +168,42 @@ class Tensor(_TensorOp):
 
     @property
     def shape(self) -> list[int | tir.PrimExpr]:
-        raw = self.__object_handle__.shape()  # type: ignore[attr-defined]
-        return [int(x) if isinstance(x, tir.IntImm) else x for x in raw]
+        sinfo = self._expr.struct_info_
+        if sinfo is None or not isinstance(sinfo, TensorStructInfo):
+            return []
+        if sinfo.shape is None:
+            return []
+        shape_sinfo = sinfo.shape.struct_info_
+        if shape_sinfo is None or not hasattr(shape_sinfo, "values") or shape_sinfo.values is None:
+            return []
+        return [int(x) if isinstance(x, tir.IntImm) else x for x in shape_sinfo.values]
 
     @property
     def ndim(self) -> int:
-        return int(self.__object_handle__.ndim())  # type: ignore[attr-defined]
+        sinfo = self._expr.struct_info_
+        if sinfo is None or not isinstance(sinfo, TensorStructInfo):
+            return -1
+        return sinfo.ndim
 
     @property
     def dtype(self) -> str:
-        return str(self.__object_handle__.dtype())  # type: ignore[attr-defined]
+        sinfo = self._expr.struct_info_
+        if sinfo is None or not isinstance(sinfo, TensorStructInfo):
+            return ""
+        return str(sinfo.dtype)
 
     @property
     def _expr(self) -> rx.Var:
-        return self.__object_handle__.expr  # type: ignore[attr-defined]
+        return tvm_ffi.Object.__getattribute__(self, "expr")  # C++ field
 
     def __repr__(self) -> str:
         return f'Tensor({self.shape}, "{self.dtype}")'
 
 
 # ===========================================================================
-# Parameter  –  native C++ object (subclass of Tensor)
+# Parameter  -  native C++ object (subclass of Tensor)
 # ===========================================================================
+
 
 @tvm_ffi.register_object("relax.frontend.nn.Parameter")
 class Parameter(Tensor):
@@ -151,21 +216,21 @@ class Parameter(Tensor):
     ) -> None:
         if dtype is None:
             dtype = get_default_dtype()
-        self.__init_handle_by_constructor__(
-            _ffi_api.Parameter,
+        self.__ffi_init__(
             _ffi_api.MakePlaceholder(list(shape), dtype, "param"),
             None,  # data
-            {},    # attrs
+            {},  # attrs
         )
 
     @property
     def data(self) -> tvm.runtime.Tensor | None:
-        return self.__object_handle__.data  # type: ignore[attr-defined]
+        # Read C++ 'data' field directly via its FieldGetter (bypasses this property).
+        return _PARAMETER_DATA_GETTER(self)
 
     @data.setter
-    def data(self, value: Union[None, tvm.runtime.Tensor, np.ndarray, Any]) -> None:
+    def data(self, value: None | tvm.runtime.Tensor | np.ndarray | Any) -> None:
         if value is None:
-            self.__object_handle__.data = None  # type: ignore[attr-defined]
+            _PARAMETER_DATA_SETTER(self, None)
             return
         if isinstance(value, tvm.runtime.Tensor):
             pass
@@ -179,38 +244,88 @@ class Parameter(Tensor):
             raise ValueError(f"Shape mismatch: expected {tuple(self.shape)}, got {value.shape}")
         if value.dtype != self.dtype:
             raise ValueError(f"Dtype mismatch: expected {self.dtype}, got {value.dtype}")
-        self.__object_handle__.data = value  # type: ignore[attr-defined]
+        _PARAMETER_DATA_SETTER(self, value)
 
     @property
     def attrs(self) -> dict:
-        return dict(self.__object_handle__.attrs)  # type: ignore[attr-defined]
+        return dict(_PARAMETER_ATTRS_GETTER(self))
 
     def to(self, dtype: str | None = None) -> None:
         if dtype is not None:
-            self.__object_handle__.to(dtype)  # type: ignore[attr-defined]
+            _PARAMETER_TO_METHOD(self, dtype)
+
+
+# ---------------------------------------------------------------------------
+# Lazy C++ field/method accessors for Parameter.
+# These are populated on first use after register_object has run, so the
+# C++ descriptors are available.  We cannot use self.field_name inside the
+# class body because our @property definitions shadow the C++ descriptors.
+# ---------------------------------------------------------------------------
+
+
+def _get_parameter_type_info():
+    return tvm_ffi.core._type_cls_to_type_info(Parameter)
+
+
+def _PARAMETER_DATA_GETTER(self):
+    ti = _get_parameter_type_info()
+    if ti:
+        for f in ti.fields:
+            if f.name == "data":
+                return f.getter(self)
+    return None
+
+
+def _PARAMETER_DATA_SETTER(self, value):
+    ti = _get_parameter_type_info()
+    if ti:
+        for f in ti.fields:
+            if f.name == "data":
+                f.setter(self, value)
+                return
+
+
+def _PARAMETER_ATTRS_GETTER(self):
+    ti = _get_parameter_type_info()
+    if ti:
+        for f in ti.fields:
+            if f.name == "attrs":
+                return f.getter(self)
+    return {}
+
+
+def _PARAMETER_TO_METHOD(self, dtype):
+    ti = _get_parameter_type_info()
+    if ti:
+        for m in ti.methods:
+            if m.name == "to":
+                m.func(self, dtype)
+                return
 
 
 # ===========================================================================
-# Object  –  native C++ object
+# Object  -  native C++ object
 # ===========================================================================
+
 
 @tvm_ffi.register_object("relax.frontend.nn.Object")
-class Object:
+class Object(tvm_ffi.Object):
     """Wrapper around a relax.Var with ObjectStructInfo (e.g. KVCache handle)."""
 
     def __init__(self, *, _expr: rx.Expr, _name: str) -> None:
         if not isinstance(_expr, rx.Var):
             _expr = BlockBuilder.current().emit(_expr, _name)
-        self.__init_handle_by_constructor__(_ffi_api.Object, _expr)
+        self.__ffi_init__(_expr)
 
     @property
     def _expr(self) -> rx.Var:
-        return self.__object_handle__.expr  # type: ignore[attr-defined]
+        return tvm_ffi.Object.__getattribute__(self, "expr")  # C++ field
 
 
 # ---------------------------------------------------------------------------
 # wrap_nested / _unwrap_ffi_result
 # ---------------------------------------------------------------------------
+
 
 def wrap_nested(expr: rx.Expr, name: str) -> "Tensor | tuple":
     result = _ffi_api.WrapNested(expr, name)
@@ -224,8 +339,9 @@ def _unwrap_ffi_result(result) -> "Tensor | tuple":
 
 
 # ===========================================================================
-# Effect  (pure Python – abstract base, Python virtual dispatch)
+# Effect  (pure Python - abstract base, Python virtual dispatch)
 # ===========================================================================
+
 
 class Effect:
     """Abstract base for side-effecting operations (IO, KVCache, etc.)."""
@@ -247,11 +363,12 @@ class Effect:
 
 
 # ===========================================================================
-# ModuleList  –  native C++ object
+# ModuleList  -  native C++ object
 # ===========================================================================
 
+
 @tvm_ffi.register_object("relax.frontend.nn.ModuleList")
-class ModuleList(SubroutineMixin):
+class ModuleList(tvm_ffi.Object, SubroutineMixin):
     """Ordered list of sub-modules backed by a native C++ ffi::Array<Any>.
 
     All elements are stored in C++.  Python provides the standard list
@@ -259,33 +376,33 @@ class ModuleList(SubroutineMixin):
     """
 
     def __init__(self, modules: list) -> None:
-        self.__init_handle_by_constructor__(_ffi_api.ModuleList, list(modules))
+        self.__ffi_init__(list(modules))
 
     # ---- list interface (delegates to C++ ffi::Array field) ----------------
 
     def __iter__(self):
-        return iter(self.__object_handle__.modules)  # type: ignore[attr-defined]
+        return iter(self.modules)
 
     def __getitem__(self, idx: int):
-        return self.__object_handle__.modules[idx]  # type: ignore[attr-defined]
+        return self.modules[idx]
 
     def __setitem__(self, idx: int, module) -> None:
-        mods = list(self.__object_handle__.modules)  # type: ignore[attr-defined]
+        mods = list(self.modules)
         mods[idx] = module
-        self.__object_handle__.modules = mods  # type: ignore[attr-defined]
+        self.modules = mods
 
     def __len__(self) -> int:
-        return len(self.__object_handle__.modules)  # type: ignore[attr-defined]
+        return len(self.modules)
 
     def append(self, module) -> None:
-        mods = list(self.__object_handle__.modules)  # type: ignore[attr-defined]
+        mods = list(self.modules)
         mods.append(module)
-        self.__object_handle__.modules = mods  # type: ignore[attr-defined]
+        self.modules = mods
 
     # ---- parameter / dtype helpers -----------------------------------------
 
     def named_parameters(self, prefix: str = "") -> Iterator[tuple[str, Parameter]]:
-        params = _ffi_api.GetContainerParameters(self.__object_handle__, prefix)  # type: ignore[attr-defined]
+        params = _ffi_api.GetContainerParameters(self, prefix)
         yield from params.items()
 
     def parameters(self) -> Iterator[Parameter]:
@@ -294,7 +411,7 @@ class ModuleList(SubroutineMixin):
 
     def to(self, dtype: str | None = None) -> None:
         if dtype is not None:
-            _ffi_api.ContainerApplyTo(self.__object_handle__, dtype)  # type: ignore[attr-defined]
+            _ffi_api.ContainerApplyTo(self, dtype)
 
     def forward(self, x):
         for m in self:
@@ -306,11 +423,12 @@ class ModuleList(SubroutineMixin):
 
 
 # ===========================================================================
-# ModuleDict  –  native C++ object
+# ModuleDict  -  native C++ object
 # ===========================================================================
 
+
 @tvm_ffi.register_object("relax.frontend.nn.ModuleDict")
-class ModuleDict(SubroutineMixin):
+class ModuleDict(tvm_ffi.Object, SubroutineMixin):
     """Ordered string-keyed map of sub-modules backed by a native C++ ffi::Map<String,Any>.
 
     All elements are stored in C++.  Python provides the standard dict
@@ -318,55 +436,55 @@ class ModuleDict(SubroutineMixin):
     """
 
     def __init__(self, modules: OrderedDict | None = None) -> None:
-        self.__init_handle_by_constructor__(_ffi_api.ModuleDict, dict(modules) if modules else {})
+        self.__ffi_init__(dict(modules) if modules else {})
 
     # ---- dict interface (delegates to C++ ffi::Map field) ------------------
 
     def __iter__(self):
-        return iter(self.__object_handle__.modules)  # type: ignore[attr-defined]
+        return iter(self.modules)
 
     def __getitem__(self, key: str):
-        return self.__object_handle__.modules[key]  # type: ignore[attr-defined]
+        return self.modules[key]
 
     def __setitem__(self, key: str, module) -> None:
-        self.__object_handle__.modules[key] = module  # type: ignore[attr-defined]
+        self.modules[key] = module
 
     def __len__(self) -> int:
-        return len(self.__object_handle__.modules)  # type: ignore[attr-defined]
+        return len(self.modules)
 
     def __contains__(self, key: str) -> bool:
-        return key in self.__object_handle__.modules  # type: ignore[attr-defined]
+        return key in self.modules
 
     def keys(self):
-        return self.__object_handle__.modules.keys()  # type: ignore[attr-defined]
+        return self.modules.keys()
 
     def values(self):
-        return self.__object_handle__.modules.values()  # type: ignore[attr-defined]
+        return self.modules.values()
 
     def items(self):
-        return self.__object_handle__.modules.items()  # type: ignore[attr-defined]
+        return self.modules.items()
 
     def get(self, key: str, default=None):
-        m = self.__object_handle__.modules  # type: ignore[attr-defined]
+        m = self.modules
         return m[key] if key in m else default
 
     def update(self, modules: dict) -> None:
         for k, v in modules.items():
-            self.__object_handle__.modules[k] = v  # type: ignore[attr-defined]
+            self.modules[k] = v
 
     def clear(self) -> None:
-        self.__object_handle__.modules = {}  # type: ignore[attr-defined]
+        self.modules = {}
 
     def pop(self, key: str):
-        m = dict(self.__object_handle__.modules)  # type: ignore[attr-defined]
+        m = dict(self.modules)
         val = m.pop(key)
-        self.__object_handle__.modules = m  # type: ignore[attr-defined]
+        self.modules = m
         return val
 
     # ---- parameter / dtype helpers -----------------------------------------
 
     def named_parameters(self, prefix: str = "") -> Iterator[tuple[str, Parameter]]:
-        params = _ffi_api.GetContainerParameters(self.__object_handle__, prefix)  # type: ignore[attr-defined]
+        params = _ffi_api.GetContainerParameters(self, prefix)
         yield from params.items()
 
     def parameters(self) -> Iterator[Parameter]:
@@ -375,22 +493,23 @@ class ModuleDict(SubroutineMixin):
 
     def to(self, dtype: str | None = None) -> None:
         if dtype is not None:
-            _ffi_api.ContainerApplyTo(self.__object_handle__, dtype)  # type: ignore[attr-defined]
+            _ffi_api.ContainerApplyTo(self, dtype)
 
 
 # ===========================================================================
-# Module  (pure Python – forward() dispatch + export_tvm/jit)
+# Module  (pure Python - forward() dispatch + export_tvm/jit)
 #
 # Cannot be ported to C++ because:
 #   1. forward() is defined by Python subclasses and dispatched via Python MRO.
 #   2. SubroutineMixin uses __init_subclass__, inspect.signature, functools.wraps
-#      – all Python-only metaprogramming.
+#      - all Python-only metaprogramming.
 #   3. export_tvm / jit depend on Exporter, spec, VirtualMachine, Target
-#      – all Python-only orchestration infrastructure.
+#      - all Python-only orchestration infrastructure.
 #
 # Data-management methods (named_parameters, state_dict, load_state_dict, to)
 # delegate entirely to C++ FFI helpers so no traversal logic lives in Python.
 # ===========================================================================
+
 
 class Module(SubroutineMixin):
     """Base class for neural network components.
@@ -451,10 +570,10 @@ class Module(SubroutineMixin):
     def to(self, dtype: str | None = None) -> None:
         """Recursively convert all parameters and sub-modules to dtype."""
         for item in self.__dict__.values():
-            if isinstance(item, (ModuleList, ModuleDict)):
+            if isinstance(item, ModuleList | ModuleDict):
                 # Native containers: delegate to C++ ContainerApplyTo
                 if dtype is not None:
-                    _ffi_api.ContainerApplyTo(item.__object_handle__, dtype)
+                    _ffi_api.ContainerApplyTo(item, dtype)
             elif hasattr(item, "to") and callable(item.to):
                 item.to(dtype=dtype)
         if dtype is not None and isinstance(getattr(self, "dtype", None), str):
@@ -480,14 +599,13 @@ class Module(SubroutineMixin):
 
         # Check whether any method uses spec.Object (Python-only path)
         has_object_spec = any(
-            isinstance(s, _spec.Object)
-            for ms in module_spec.method_specs
-            for s in ms.arg_specs
+            isinstance(s, _spec.Object) for ms in module_spec.method_specs for s in ms.arg_specs
         )
 
         if has_object_spec or allow_extern:
             # Fall back to Python Exporter (handles spec.Object, ExternModules)
             from .exporter import Exporter  # pylint: disable=import-outside-toplevel
+
             mod, params, ext_mods = Exporter(debug=debug).build(
                 _spec._PythonModuleSpec(module_spec)
             )
@@ -498,7 +616,7 @@ class Module(SubroutineMixin):
             return mod, params
 
         # Native C++ path: ExportToIRModule
-        mod = _ffi_api.ExportToIRModule(module_spec.__object_handle__, debug)
+        mod = _ffi_api.ExportToIRModule(module_spec, debug)
         # Collect params in the same order as named_params
         params = list(module_spec.named_params.items())
         return mod, params
@@ -528,12 +646,13 @@ class Module(SubroutineMixin):
         params = _param_to_tensor(params, device)
         if out_format == "torch":
             from . import torch  # pylint: disable=import-outside-toplevel
+
             return torch.TorchModule(spec=spec, params=params, vm=vm)
         raise ValueError(f"Unknown out_format: {out_format!r}")
 
 
 # ===========================================================================
-# _attribute_finder  –  unified parameter traversal
+# _attribute_finder  -  unified parameter traversal
 #
 # Handles three cases:
 #   1. ModuleList / ModuleDict  -> delegate to C++ GetContainerParameters
@@ -541,21 +660,22 @@ class Module(SubroutineMixin):
 #   3. Pure-Python Module       -> walk __dict__ recursively
 # ===========================================================================
 
+
 def _attribute_finder(root, prefix: str, condition_yield: Callable[[Any], bool]):
     """Recursively yield (dotted_name, value) pairs satisfying condition_yield."""
 
     # --- Case 1: native container types ------------------------------------
-    if isinstance(root, (ModuleList, ModuleDict)):
-        params = _ffi_api.GetContainerParameters(root.__object_handle__, prefix)
+    if isinstance(root, ModuleList | ModuleDict):
+        params = _ffi_api.GetContainerParameters(root, prefix)
         for name, param in params.items():
             if condition_yield(param):
                 yield name, param
         return
 
-    # --- Case 2: native C++ module (has __object_handle__, not a container) -
-    if hasattr(root, "__object_handle__") and not isinstance(root, (ModuleList, ModuleDict)):
+    # --- Case 2: native C++ module (not a container) -----------------------
+    if isinstance(root, tvm_ffi.Object) and not isinstance(root, ModuleList | ModuleDict):
         try:
-            native_params = _ffi_api.GetNativeParameters(root.__object_handle__)
+            native_params = _ffi_api.GetNativeParameters(root)
             for fname, param in native_params.items():
                 full = f"{prefix}{fname}" if prefix else fname
                 if condition_yield(param):
@@ -563,14 +683,14 @@ def _attribute_finder(root, prefix: str, condition_yield: Callable[[Any], bool])
         except Exception:  # pylint: disable=broad-except
             pass
 
-    # --- Case 3: pure-Python Module – walk __dict__ -------------------------
+    # --- Case 3: pure-Python Module - walk __dict__ -------------------------
     if not hasattr(root, "__dict__"):
         return
     for name, item in root.__dict__.items():
         child_prefix = f"{prefix}{name}."
         if condition_yield(item):
             yield f"{prefix}{name}", item
-        elif isinstance(item, (ModuleList, ModuleDict)):
+        elif isinstance(item, ModuleList | ModuleDict):
             yield from _attribute_finder(item, child_prefix, condition_yield)
         elif isinstance(item, Module):
             yield from _attribute_finder(item, child_prefix, condition_yield)
@@ -579,6 +699,7 @@ def _attribute_finder(root, prefix: str, condition_yield: Callable[[Any], bool])
 # ===========================================================================
 # Internal helpers
 # ===========================================================================
+
 
 def _from_dlpack(tensor) -> tvm.runtime.Tensor:
     try:

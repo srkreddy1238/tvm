@@ -26,11 +26,11 @@
 
 #include "core.h"
 
-#include <tvm/ffi/reflection/registry.h>
+#include <tvm/ffi/reflection/accessor.h>
 #include <tvm/relax/block_builder.h>
 #include <tvm/relax/expr.h>
 #include <tvm/relax/struct_info.h>
-#include <tvm/runtime/ndarray.h>
+#include <tvm/runtime/tensor.h>
 
 #include <string>
 
@@ -38,6 +38,18 @@ namespace tvm {
 namespace relax {
 namespace frontend {
 namespace nn {
+
+// ===========================================================================
+// Thread-local BlockBuilder tracker
+// Provides BlockBuilder::Current() semantics for WrapNested / Emit helpers.
+// exporter.cc installs the current BB via BBScope before calling forward().
+// ===========================================================================
+
+static thread_local BlockBuilder* g_current_bb = nullptr;  // NOLINT(*)
+
+BlockBuilder BlockBuilder_Current() { return g_current_bb ? *g_current_bb : BlockBuilder(); }
+
+void BlockBuilder_SetCurrent(BlockBuilder* bb) { g_current_bb = bb; }
 
 // ===========================================================================
 // Default dtype (thread-local so nested scopes can override independently)
@@ -55,22 +67,23 @@ void SetDefaultDtype(ffi::String dtype) { g_default_dtype = std::string(dtype); 
 static ShapeExpr BuildShapeExpr(const ffi::Array<ffi::Any>& shape) {
   ffi::Array<PrimExpr> dims;
   for (const ffi::Any& elem : shape) {
-    if (auto opt = elem.TryAs<int64_t>()) {
+    if (auto opt = elem.try_cast<int64_t>()) {
       int64_t v = opt.value();
       TVM_FFI_ICHECK(v >= 0) << "Shape dimension must be non-negative, got " << v;
-      dims.push_back(tir::IntImm(DataType::Int(64), v));
-    } else if (auto opt = elem.TryAs<ffi::String>()) {
+      dims.push_back(IntImm(DataType::Int(64), v));
+    } else if (auto opt = elem.try_cast<ffi::String>()) {
       dims.push_back(tir::Var(opt.value(), DataType::Int(64)));
-    } else if (auto opt = elem.TryAs<tir::Var>()) {
+    } else if (auto opt = elem.try_cast<tir::Var>()) {
       TVM_FFI_ICHECK(opt.value()->dtype == DataType::Int(64))
           << "Symbolic shape var must have dtype int64";
       dims.push_back(opt.value());
-    } else if (auto opt = elem.TryAs<PrimExpr>()) {
+    } else if (auto opt = elem.try_cast<PrimExpr>()) {
       TVM_FFI_ICHECK(opt.value()->dtype == DataType::Int(64))
           << "PrimExpr shape must have dtype int64";
       dims.push_back(opt.value());
     } else {
       TVM_FFI_THROW(TypeError) << "Invalid shape element type: " << elem.GetTypeKey();
+      TVM_FFI_UNREACHABLE();
     }
   }
   return ShapeExpr(dims);
@@ -81,8 +94,7 @@ static ShapeExpr BuildShapeExpr(const ffi::Array<ffi::Any>& shape) {
 // ===========================================================================
 
 TensorNode::TensorNode(Var expr) : expr(std::move(expr)) {
-  TVM_FFI_ICHECK(this->expr->struct_info_.defined())
-      << "TensorNode: Var must have struct_info set";
+  TVM_FFI_ICHECK(this->expr->struct_info_.defined()) << "TensorNode: Var must have struct_info set";
   TVM_FFI_ICHECK(this->expr->struct_info_->IsInstance<TensorStructInfoNode>())
       << "TensorNode: Var struct_info must be TensorStructInfo, got "
       << this->expr->struct_info_->GetTypeKey();
@@ -90,8 +102,7 @@ TensorNode::TensorNode(Var expr) : expr(std::move(expr)) {
 
 ffi::Array<PrimExpr> TensorNode::GetShape() const {
   const auto* sinfo = expr->struct_info_.as<TensorStructInfoNode>();
-  TVM_FFI_ICHECK(sinfo && sinfo->shape.defined())
-      << "TensorNode::GetShape: shape is not available";
+  TVM_FFI_ICHECK(sinfo && sinfo->shape.defined()) << "TensorNode::GetShape: shape is not available";
   const auto* shape_sinfo = sinfo->shape.value()->struct_info_.as<ShapeStructInfoNode>();
   TVM_FFI_ICHECK(shape_sinfo && shape_sinfo->values.defined())
       << "TensorNode::GetShape: shape values are not available";
@@ -107,13 +118,13 @@ int64_t TensorNode::GetNdim() const {
 ffi::String TensorNode::GetDtype() const {
   const auto* sinfo = expr->struct_info_.as<TensorStructInfoNode>();
   TVM_FFI_ICHECK(sinfo) << "TensorNode::GetDtype: missing TensorStructInfo";
-  return ffi::String(runtime::DLDataType2String(sinfo->dtype));
+  return ffi::String(ffi::DLDataTypeToString(sinfo->dtype));
 }
 
 TensorNode* TensorNode::MakePlaceholder(ffi::Array<ffi::Any> shape, ffi::String dtype,
                                         ffi::String name) {
   ShapeExpr shape_expr = BuildShapeExpr(shape);
-  Var v(name, TensorStructInfo(shape_expr, DataType(runtime::String2DLDataType(dtype))));
+  Var v(name, TensorStructInfo(shape_expr, DataType(ffi::StringToDLDataType(dtype))));
   return new TensorNode(std::move(v));
 }
 
@@ -121,9 +132,7 @@ TensorNode* TensorNode::MakeFromStructInfo(TensorStructInfo sinfo, ffi::String n
   return new TensorNode(Var(name, sinfo));
 }
 
-NNTensor::NNTensor(Var expr) {
-  data_ = ffi::make_object<TensorNode>(std::move(expr));
-}
+NNTensor::NNTensor(Var expr) { data_ = ffi::make_object<TensorNode>(std::move(expr)); }
 
 // ===========================================================================
 // ParameterNode
@@ -134,15 +143,15 @@ ParameterNode::ParameterNode(Var expr, ffi::Optional<runtime::Tensor> data,
     : TensorNode(std::move(expr)), data(std::move(data)), attrs(std::move(attrs)) {}
 
 void ParameterNode::To(ffi::String new_dtype) {
-  TVM_FFI_ICHECK(!data.defined())
+  TVM_FFI_ICHECK(!data.has_value())
       << "ParameterNode::To: cannot change dtype of a bound parameter";
   // Re-create the placeholder Var with the new dtype
   ffi::Array<PrimExpr> old_shape = GetShape();
   ffi::Array<ffi::Any> shape_any;
   for (const PrimExpr& dim : old_shape) shape_any.push_back(ffi::Any(dim));
   ShapeExpr shape_expr = BuildShapeExpr(shape_any);
-  expr = Var(expr->name_hint(), TensorStructInfo(shape_expr,
-             DataType(runtime::String2DLDataType(new_dtype))));
+  expr = Var(expr->name_hint(),
+             TensorStructInfo(shape_expr, DataType(ffi::StringToDLDataType(new_dtype))));
 }
 
 NNParameter::NNParameter(Var expr, ffi::Optional<runtime::Tensor> data,
@@ -162,9 +171,7 @@ NNObjectNode::NNObjectNode(Var expr) : expr(std::move(expr)) {
       << this->expr->struct_info_->GetTypeKey();
 }
 
-NNObject::NNObject(Var expr) {
-  data_ = ffi::make_object<NNObjectNode>(std::move(expr));
-}
+NNObject::NNObject(Var expr) { data_ = ffi::make_object<NNObjectNode>(std::move(expr)); }
 
 // ===========================================================================
 // ModuleListNode / ModuleDictNode
@@ -183,7 +190,7 @@ ModuleDict::ModuleDict(ffi::Map<ffi::String, ffi::Any> modules) {
 // ===========================================================================
 
 ffi::Any WrapNested(Expr expr, ffi::String name) {
-  BlockBuilder bb = BlockBuilder::Current();
+  BlockBuilder bb = BlockBuilder_Current();
   TVM_FFI_ICHECK(bb.defined()) << "WrapNested must be called inside a BlockBuilder scope";
 
   if (!expr->IsInstance<DataflowVarNode>()) {
@@ -206,6 +213,7 @@ ffi::Any WrapNested(Expr expr, ffi::String name) {
   }
 
   TVM_FFI_THROW(TypeError) << "WrapNested: unsupported struct_info: " << sinfo->GetTypeKey();
+  TVM_FFI_UNREACHABLE();
 }
 
 // ===========================================================================
@@ -215,7 +223,7 @@ ffi::Any WrapNested(Expr expr, ffi::String name) {
 static Var FFIMakePlaceholder(ffi::Array<ffi::Any> shape, ffi::String dtype,
                               ffi::String name = "tensor") {
   ShapeExpr shape_expr = BuildShapeExpr(shape);
-  return Var(name, TensorStructInfo(shape_expr, DataType(runtime::String2DLDataType(dtype))));
+  return Var(name, TensorStructInfo(shape_expr, DataType(ffi::StringToDLDataType(dtype))));
 }
 
 static Var FFIMakeTensorFromStructInfo(TensorStructInfo sinfo, ffi::String name = "tensor") {
@@ -223,7 +231,7 @@ static Var FFIMakeTensorFromStructInfo(TensorStructInfo sinfo, ffi::String name 
 }
 
 static ffi::Optional<BlockBuilder> GetCurrentBlockBuilder() {
-  BlockBuilder bb = BlockBuilder::Current();
+  BlockBuilder bb = BlockBuilder_Current();
   if (!bb.defined()) return std::nullopt;
   return bb;
 }
@@ -237,32 +245,26 @@ ffi::Map<ffi::String, NNParameter> GetNativeParameters(runtime::ObjectRef obj) {
   if (!obj.defined()) return result;
 
   int32_t type_index = obj->type_index();
-  int32_t num_fields = 0;
-  TVM_FFI_CHECK_SAFE_CALL(TVMFFITypeGetNumFields(type_index, &num_fields));
+  const TVMFFITypeInfo* type_info = TVMFFIGetTypeInfo(type_index);
+  if (!type_info) return result;
 
-  for (int32_t i = 0; i < num_fields; ++i) {
-    const TVMFFIFieldInfo* info = nullptr;
-    TVM_FFI_CHECK_SAFE_CALL(TVMFFITypeGetField(type_index, i, &info));
-    if (!info) continue;
-
-    TVMFFIAny raw;
-    if (TVMFFIObjectGetField(obj.get(), i, &raw) != 0) continue;
-    ffi::Any val = ffi::AnyView::CopyFromTVMFFIAny(raw);
-
-    ffi::String field_name(info->name.data, info->name.size);
+  ffi::reflection::ForEachFieldInfo(type_info, [&](const TVMFFIFieldInfo* field_info) {
+    ffi::String field_name(field_info->name.data, field_info->name.size);
+    ffi::reflection::FieldGetter getter(field_info);
+    ffi::Any val = getter(obj);
 
     // Case 1: field is directly a ParameterNode
-    if (auto opt = val.TryAs<NNParameter>()) {
+    if (auto opt = val.try_cast<NNParameter>()) {
       result.Set(field_name, opt.value());
-      continue;
+      return;
     }
-    // Case 2: field is Optional<NNParameter>
-    if (auto opt_ref = val.TryAs<runtime::ObjectRef>()) {
+    // Case 2: field is Optional<NNParameter> stored as ObjectRef
+    if (auto opt_ref = val.try_cast<runtime::ObjectRef>()) {
       if (opt_ref.value().defined() && opt_ref.value()->IsInstance<ParameterNode>()) {
         result.Set(field_name, Downcast<NNParameter>(opt_ref.value()));
       }
     }
-  }
+  });
   return result;
 }
 
@@ -278,8 +280,8 @@ ffi::Map<ffi::String, NNParameter> GetNativeParameters(runtime::ObjectRef obj) {
  *   - A ModuleDictNode            -> recurse
  *   - Anything else               -> skip (Python-side Module handled in Python)
  */
-ffi::Map<ffi::String, NNParameter> GetContainerParameters(
-    runtime::ObjectRef container, ffi::String prefix) {
+ffi::Map<ffi::String, NNParameter> GetContainerParameters(runtime::ObjectRef container,
+                                                          ffi::String prefix) {
   ffi::Map<ffi::String, NNParameter> result;
   if (!container.defined()) return result;
 
@@ -287,7 +289,7 @@ ffi::Map<ffi::String, NNParameter> GetContainerParameters(
     std::string child_prefix =
         prefix.empty() ? std::string(key) : std::string(prefix) + "." + std::string(key);
 
-    if (auto opt = elem.TryAs<runtime::ObjectRef>()) {
+    if (auto opt = elem.try_cast<runtime::ObjectRef>()) {
       runtime::ObjectRef child = opt.value();
       if (!child.defined()) return;
 
@@ -326,7 +328,7 @@ void ContainerApplyTo(runtime::ObjectRef container, ffi::String dtype) {
   if (!container.defined()) return;
 
   auto apply_elem = [&](const ffi::Any& elem) {
-    if (auto opt = elem.TryAs<runtime::ObjectRef>()) {
+    if (auto opt = elem.try_cast<runtime::ObjectRef>()) {
       runtime::ObjectRef child = opt.value();
       if (!child.defined()) return;
       if (child->IsInstance<ModuleListNode>() || child->IsInstance<ModuleDictNode>()) {

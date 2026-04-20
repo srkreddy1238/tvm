@@ -21,7 +21,6 @@
  */
 
 #include "modules.h"
-#include "core.h"
 
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/relax/block_builder.h>
@@ -30,12 +29,13 @@
 
 #include <string>
 
-#include "../../op/nn/nn.h"
 #include "../../op/nn/convolution.h"
+#include "../../op/nn/nn.h"
 #include "../../op/tensor/binary.h"
 #include "../../op/tensor/index.h"
 #include "../../op/tensor/linear_algebra.h"
 #include "../../op/tensor/manipulate.h"
+#include "core.h"
 
 namespace tvm {
 namespace relax {
@@ -47,16 +47,17 @@ namespace nn {
 // ---------------------------------------------------------------------------
 
 static Var Emit(Expr expr, const std::string& name) {
-  BlockBuilder bb = BlockBuilder::Current();
+  BlockBuilder bb = BlockBuilder_Current();
   TVM_FFI_ICHECK(bb.defined()) << "forward() called outside a BlockBuilder scope";
   return bb->Emit(expr, name);
 }
 
 // Build a ShapeExpr from a mixed ffi::Any element (int64 or PrimExpr).
 static PrimExpr AnyToDim(const ffi::Any& v) {
-  if (auto opt = v.TryAs<int64_t>()) return tir::IntImm(DataType::Int(64), opt.value());
-  if (auto opt = v.TryAs<PrimExpr>())  return opt.value();
+  if (auto opt = v.try_cast<int64_t>()) return IntImm(DataType::Int(64), opt.value());
+  if (auto opt = v.try_cast<PrimExpr>()) return opt.value();
   TVM_FFI_THROW(TypeError) << "Expected int64 or PrimExpr, got " << v.GetTypeKey();
+  TVM_FFI_UNREACHABLE();
 }
 
 // ---------------------------------------------------------------------------
@@ -66,8 +67,7 @@ static PrimExpr AnyToDim(const ffi::Any& v) {
 NNParameter MakeParam(ffi::Array<ffi::Any> shape, ffi::String dtype) {
   ffi::Array<PrimExpr> dims;
   for (const auto& s : shape) dims.push_back(AnyToDim(s));
-  Var v("param", TensorStructInfo(ShapeExpr(dims),
-                                  DataType(runtime::String2DLDataType(dtype))));
+  Var v("param", TensorStructInfo(ShapeExpr(dims), DataType(ffi::StringToDLDataType(dtype))));
   return NNParameter(v);
 }
 
@@ -98,26 +98,25 @@ Var GELUModuleNode::Forward(Var x) const {
 // ---------------------------------------------------------------------------
 LinearModule::LinearModule(NNParameter weight, ffi::Optional<NNParameter> bias,
                            ffi::Optional<ffi::String> out_dtype) {
-  data_ = ffi::make_object<LinearModuleNode>(std::move(weight), std::move(bias),
-                                             std::move(out_dtype));
+  data_ =
+      ffi::make_object<LinearModuleNode>(std::move(weight), std::move(bias), std::move(out_dtype));
 }
 
 Var LinearModuleNode::Forward(Var x) const {
   Expr w = relax::permute_dims(weight->expr, std::nullopt);
   ffi::Optional<DataType> dt =
-      out_dtype.defined()
-          ? ffi::Optional<DataType>(DataType(runtime::String2DLDataType(out_dtype.value())))
+      out_dtype.has_value()
+          ? ffi::Optional<DataType>(DataType(ffi::StringToDLDataType(out_dtype.value())))
           : std::nullopt;
   Expr out = relax::matmul(x, w, dt);
-  if (bias.defined()) out = relax::add(out, bias.value()->expr);
+  if (bias.has_value()) out = relax::add(out, bias.value()->expr);
   return Emit(out, "linear");
 }
 
-LinearModule MakeLinear(ffi::Any in_features, ffi::Any out_features,
-                        bool has_bias, ffi::Optional<ffi::String> dtype,
-                        ffi::Optional<ffi::String> out_dtype) {
+LinearModule MakeLinear(ffi::Any in_features, ffi::Any out_features, bool has_bias,
+                        ffi::Optional<ffi::String> dtype, ffi::Optional<ffi::String> out_dtype) {
   ffi::String dt = dtype.value_or(ffi::String(GetDefaultDtype()));
-  ffi::String bias_dt = out_dtype.defined() ? out_dtype.value() : dt;
+  ffi::String bias_dt = out_dtype.has_value() ? out_dtype.value() : dt;
   NNParameter w = MakeParam({out_features, in_features}, dt);
   ffi::Optional<NNParameter> b =
       has_bias ? ffi::Optional<NNParameter>(MakeParam({out_features}, bias_dt)) : std::nullopt;
@@ -135,7 +134,7 @@ Var EmbeddingModuleNode::Forward(Var x, ffi::Array<ffi::Any> out_shape_if_nd) co
   if (out_shape_if_nd.empty()) {
     return Emit(relax::take(weight->expr, x, ffi::Optional<int64_t>(0)), "embedding");
   }
-  Expr flat = relax::reshape(x, ShapeExpr({tir::IntImm(DataType::Int(64), -1)}));
+  Expr flat = relax::reshape(x, ShapeExpr(ffi::Array<PrimExpr>{IntImm(DataType::Int(64), -1)}));
   Expr taken = relax::take(weight->expr, flat, ffi::Optional<int64_t>(0));
   ffi::Array<PrimExpr> new_shape;
   for (const auto& s : out_shape_if_nd) new_shape.push_back(AnyToDim(s));
@@ -150,32 +149,31 @@ EmbeddingModule MakeEmbedding(ffi::Any num, ffi::Any dim, ffi::Optional<ffi::Str
 // ---------------------------------------------------------------------------
 // LayerNorm
 // ---------------------------------------------------------------------------
-LayerNormModule::LayerNormModule(ffi::Optional<NNParameter> weight,
-                                 ffi::Optional<NNParameter> bias,
+LayerNormModule::LayerNormModule(ffi::Optional<NNParameter> weight, ffi::Optional<NNParameter> bias,
                                  ffi::Array<Integer> axes, double epsilon,
                                  bool elementwise_affine) {
-  data_ = ffi::make_object<LayerNormModuleNode>(std::move(weight), std::move(bias),
-                                                std::move(axes), epsilon, elementwise_affine);
+  data_ = ffi::make_object<LayerNormModuleNode>(std::move(weight), std::move(bias), std::move(axes),
+                                                epsilon, elementwise_affine);
 }
 
 Var LayerNormModuleNode::Forward(Var x) const {
   // When elementwise_affine=false we still need weight/bias exprs for the op.
   // The factory stores constant ones/zeros as ParameterNode with no data.
   TVM_FFI_ICHECK(weight.defined() && bias.defined());
-  return Emit(relax::layer_norm(x, weight.value()->expr, bias.value()->expr,
-                                axes, epsilon, true, true), "layer_norm");
+  return Emit(
+      relax::layer_norm(x, weight.value()->expr, bias.value()->expr, axes, epsilon, true, true),
+      "layer_norm");
 }
 
-LayerNormModule MakeLayerNorm(ffi::Any normalized_shape, double eps,
-                              bool elementwise_affine,
+LayerNormModule MakeLayerNorm(ffi::Any normalized_shape, double eps, bool elementwise_affine,
                               ffi::Optional<ffi::String> dtype) {
   ffi::String dt = dtype.value_or(ffi::String(elementwise_affine ? GetDefaultDtype() : "float32"));
   // Build axes: [-dim_num, ..., -1]
   int64_t dim_num = 1;
   ffi::Array<ffi::Any> shape_arr;
-  if (auto opt = normalized_shape.TryAs<int64_t>()) {
+  if (auto opt = normalized_shape.try_cast<int64_t>()) {
     shape_arr.push_back(normalized_shape);
-  } else if (auto opt = normalized_shape.TryAs<ffi::Array<ffi::Any>>()) {
+  } else if (auto opt = normalized_shape.try_cast<ffi::Array<ffi::Any>>()) {
     shape_arr = opt.value();
     dim_num = static_cast<int64_t>(shape_arr.size());
   }
@@ -195,19 +193,18 @@ LayerNormModule MakeLayerNorm(ffi::Any normalized_shape, double eps,
 // ---------------------------------------------------------------------------
 RMSNormModule::RMSNormModule(NNParameter weight, ffi::Optional<NNParameter> bias,
                              ffi::Array<Integer> axes, double epsilon) {
-  data_ = ffi::make_object<RMSNormModuleNode>(std::move(weight), std::move(bias),
-                                              std::move(axes), epsilon);
+  data_ = ffi::make_object<RMSNormModuleNode>(std::move(weight), std::move(bias), std::move(axes),
+                                              epsilon);
 }
 
 Var RMSNormModuleNode::Forward(Var x) const {
   Expr out = relax::rms_norm(x, weight->expr, axes, epsilon);
-  if (bias.defined()) out = relax::add(out, bias.value()->expr);
+  if (bias.has_value()) out = relax::add(out, bias.value()->expr);
   return Emit(out, "rms_norm");
 }
 
-RMSNormModule MakeRMSNorm(int64_t hidden_size, ffi::Array<Integer> axes,
-                          double epsilon, bool has_bias,
-                          ffi::Optional<ffi::String> dtype) {
+RMSNormModule MakeRMSNorm(int64_t hidden_size, ffi::Array<Integer> axes, double epsilon,
+                          bool has_bias, ffi::Optional<ffi::String> dtype) {
   ffi::String dt = dtype.value_or(ffi::String(GetDefaultDtype()));
   NNParameter w = MakeParam({ffi::Any(hidden_size)}, dt);
   ffi::Optional<NNParameter> b =
@@ -220,21 +217,18 @@ RMSNormModule MakeRMSNorm(int64_t hidden_size, ffi::Array<Integer> axes,
 // ---------------------------------------------------------------------------
 GroupNormModule::GroupNormModule(int64_t num_groups, ffi::Optional<NNParameter> weight,
                                  ffi::Optional<NNParameter> bias, double epsilon) {
-  data_ = ffi::make_object<GroupNormModuleNode>(num_groups, std::move(weight),
-                                                std::move(bias), epsilon);
+  data_ = ffi::make_object<GroupNormModuleNode>(num_groups, std::move(weight), std::move(bias),
+                                                epsilon);
 }
 
-Var GroupNormModuleNode::Forward(Var x, int64_t channel_axis,
-                                 ffi::Array<Integer> axes) const {
-  TVM_FFI_ICHECK(weight.defined() && bias.defined())
-      << "GroupNorm requires both weight and bias";
-  return Emit(relax::group_norm(x, weight.value()->expr, bias.value()->expr,
-                                num_groups, static_cast<int>(channel_axis),
-                                axes, epsilon, true, true), "group_norm");
+Var GroupNormModuleNode::Forward(Var x, int64_t channel_axis, ffi::Array<Integer> axes) const {
+  TVM_FFI_ICHECK(weight.defined() && bias.defined()) << "GroupNorm requires both weight and bias";
+  return Emit(relax::group_norm(x, weight.value()->expr, bias.value()->expr, num_groups,
+                                static_cast<int>(channel_axis), axes, epsilon, true, true),
+              "group_norm");
 }
 
-GroupNormModule MakeGroupNorm(int64_t num_groups, int64_t num_channels,
-                              double eps, bool affine,
+GroupNormModule MakeGroupNorm(int64_t num_groups, int64_t num_channels, double eps, bool affine,
                               ffi::Optional<ffi::String> dtype) {
   ffi::String dt = dtype.value_or(ffi::String(GetDefaultDtype()));
   ffi::Optional<NNParameter> w, b;
@@ -248,20 +242,20 @@ GroupNormModule MakeGroupNorm(int64_t num_groups, int64_t num_channels,
 // ---------------------------------------------------------------------------
 // Conv1D
 // ---------------------------------------------------------------------------
-Conv1DModule::Conv1DModule(NNParameter weight, ffi::Optional<NNParameter> bias,
-                           int64_t stride, int64_t padding, int64_t dilation, int64_t groups) {
-  data_ = ffi::make_object<Conv1DModuleNode>(std::move(weight), std::move(bias),
-                                             stride, padding, dilation, groups);
+Conv1DModule::Conv1DModule(NNParameter weight, ffi::Optional<NNParameter> bias, int64_t stride,
+                           int64_t padding, int64_t dilation, int64_t groups) {
+  data_ = ffi::make_object<Conv1DModuleNode>(std::move(weight), std::move(bias), stride, padding,
+                                             dilation, groups);
 }
 
 Var Conv1DModuleNode::Forward(Var x) const {
   Expr out = relax::conv1d(x, weight->expr, {stride}, {padding}, {dilation},
                            static_cast<int>(groups), "NCW", "OIW", std::nullopt, std::nullopt);
-  if (bias.defined()) {
-    Expr b = relax::reshape(bias.value()->expr,
-                            ShapeExpr({tir::IntImm(DataType::Int(64), 1),
-                                       tir::IntImm(DataType::Int(64), -1),
-                                       tir::IntImm(DataType::Int(64), 1)}));
+  if (bias.has_value()) {
+    Expr b = relax::reshape(
+        bias.value()->expr,
+        ShapeExpr(ffi::Array<PrimExpr>{IntImm(DataType::Int(64), 1), IntImm(DataType::Int(64), -1),
+                                       IntImm(DataType::Int(64), 1)}));
     out = relax::add(out, b);
   }
   return Emit(out, "conv1d");
@@ -272,8 +266,8 @@ Conv1DModule MakeConv1D(int64_t in_channels, int64_t out_channels, int64_t kerne
                         bool has_bias, ffi::Optional<ffi::String> dtype) {
   ffi::String dt = dtype.value_or(ffi::String(GetDefaultDtype()));
   int64_t in_per_group = in_channels / groups;
-  NNParameter w = MakeParam({ffi::Any(out_channels), ffi::Any(in_per_group),
-                              ffi::Any(kernel_size)}, dt);
+  NNParameter w =
+      MakeParam({ffi::Any(out_channels), ffi::Any(in_per_group), ffi::Any(kernel_size)}, dt);
   ffi::Optional<NNParameter> b =
       has_bias ? ffi::Optional<NNParameter>(MakeParam({ffi::Any(out_channels)}, dt)) : std::nullopt;
   return Conv1DModule(std::move(w), std::move(b), stride, padding, dilation, groups);
@@ -282,12 +276,11 @@ Conv1DModule MakeConv1D(int64_t in_channels, int64_t out_channels, int64_t kerne
 // ---------------------------------------------------------------------------
 // Conv2D
 // ---------------------------------------------------------------------------
-Conv2DModule::Conv2DModule(NNParameter weight, ffi::Optional<NNParameter> bias,
-                           int64_t stride, int64_t padding, int64_t dilation, int64_t groups,
+Conv2DModule::Conv2DModule(NNParameter weight, ffi::Optional<NNParameter> bias, int64_t stride,
+                           int64_t padding, int64_t dilation, int64_t groups,
                            ffi::String data_layout) {
-  data_ = ffi::make_object<Conv2DModuleNode>(std::move(weight), std::move(bias),
-                                             stride, padding, dilation, groups,
-                                             std::move(data_layout));
+  data_ = ffi::make_object<Conv2DModuleNode>(std::move(weight), std::move(bias), stride, padding,
+                                             dilation, groups, std::move(data_layout));
 }
 
 Var Conv2DModuleNode::Forward(Var x) const {
@@ -295,33 +288,30 @@ Var Conv2DModuleNode::Forward(Var x) const {
   std::string kl = (dl == "NCHW") ? "OIHW" : "HWIO";
   Expr out = relax::conv2d(x, weight->expr, {stride}, {padding}, {dilation},
                            static_cast<int>(groups), dl, kl, std::nullopt, std::nullopt);
-  if (bias.defined()) {
-    Expr b = (dl == "NCHW")
-        ? relax::reshape(bias.value()->expr,
-                         ShapeExpr({tir::IntImm(DataType::Int(64), 1),
-                                    tir::IntImm(DataType::Int(64), -1),
-                                    tir::IntImm(DataType::Int(64), 1),
-                                    tir::IntImm(DataType::Int(64), 1)}))
-        : relax::reshape(bias.value()->expr,
-                         ShapeExpr({tir::IntImm(DataType::Int(64), 1),
-                                    tir::IntImm(DataType::Int(64), 1),
-                                    tir::IntImm(DataType::Int(64), 1),
-                                    tir::IntImm(DataType::Int(64), -1)}));
+  if (bias.has_value()) {
+    Expr b =
+        (dl == "NCHW")
+            ? relax::reshape(bias.value()->expr,
+                             ShapeExpr(ffi::Array<PrimExpr>{
+                                 IntImm(DataType::Int(64), 1), IntImm(DataType::Int(64), -1),
+                                 IntImm(DataType::Int(64), 1), IntImm(DataType::Int(64), 1)}))
+            : relax::reshape(bias.value()->expr,
+                             ShapeExpr(ffi::Array<PrimExpr>{
+                                 IntImm(DataType::Int(64), 1), IntImm(DataType::Int(64), 1),
+                                 IntImm(DataType::Int(64), 1), IntImm(DataType::Int(64), -1)}));
     out = relax::add(out, b);
   }
   return Emit(out, "conv2d");
 }
 
-Conv2DModule MakeConv2D(int64_t in_channels, int64_t out_channels,
-                        ffi::Array<Integer> kernel_size,
+Conv2DModule MakeConv2D(int64_t in_channels, int64_t out_channels, ffi::Array<Integer> kernel_size,
                         int64_t stride, int64_t padding, int64_t dilation, int64_t groups,
-                        bool has_bias, ffi::Optional<ffi::String> dtype,
-                        ffi::String data_layout) {
+                        bool has_bias, ffi::Optional<ffi::String> dtype, ffi::String data_layout) {
   ffi::String dt = dtype.value_or(ffi::String(GetDefaultDtype()));
   int64_t in_per_group = in_channels / groups;
   int64_t kh = kernel_size[0]->value, kw = kernel_size[1]->value;
-  NNParameter w = MakeParam({ffi::Any(out_channels), ffi::Any(in_per_group),
-                              ffi::Any(kh), ffi::Any(kw)}, dt);
+  NNParameter w =
+      MakeParam({ffi::Any(out_channels), ffi::Any(in_per_group), ffi::Any(kh), ffi::Any(kw)}, dt);
   ffi::Optional<NNParameter> b =
       has_bias ? ffi::Optional<NNParameter>(MakeParam({ffi::Any(out_channels)}, dt)) : std::nullopt;
   return Conv2DModule(std::move(w), std::move(b), stride, padding, dilation, groups,
@@ -331,47 +321,42 @@ Conv2DModule MakeConv2D(int64_t in_channels, int64_t out_channels,
 // ---------------------------------------------------------------------------
 // Conv3D
 // ---------------------------------------------------------------------------
-Conv3DModule::Conv3DModule(NNParameter weight, ffi::Optional<NNParameter> bias,
-                           int64_t stride, int64_t padding, int64_t dilation, int64_t groups,
+Conv3DModule::Conv3DModule(NNParameter weight, ffi::Optional<NNParameter> bias, int64_t stride,
+                           int64_t padding, int64_t dilation, int64_t groups,
                            ffi::String data_layout) {
-  data_ = ffi::make_object<Conv3DModuleNode>(std::move(weight), std::move(bias),
-                                             stride, padding, dilation, groups,
-                                             std::move(data_layout));
+  data_ = ffi::make_object<Conv3DModuleNode>(std::move(weight), std::move(bias), stride, padding,
+                                             dilation, groups, std::move(data_layout));
 }
 
 Var Conv3DModuleNode::Forward(Var x) const {
   std::string dl = std::string(data_layout);
   Expr out = relax::conv3d(x, weight->expr, {stride}, {padding}, {dilation},
                            static_cast<int>(groups), dl, "OIDHW", std::nullopt, std::nullopt);
-  if (bias.defined()) {
+  if (bias.has_value()) {
     bool nchw = (dl == "NCDHW");
-    Expr b = nchw
-        ? relax::reshape(bias.value()->expr,
-                         ShapeExpr({tir::IntImm(DataType::Int(64), 1),
-                                    tir::IntImm(DataType::Int(64), -1),
-                                    tir::IntImm(DataType::Int(64), 1),
-                                    tir::IntImm(DataType::Int(64), 1),
-                                    tir::IntImm(DataType::Int(64), 1)}))
-        : relax::reshape(bias.value()->expr,
-                         ShapeExpr({tir::IntImm(DataType::Int(64), 1),
-                                    tir::IntImm(DataType::Int(64), 1),
-                                    tir::IntImm(DataType::Int(64), 1),
-                                    tir::IntImm(DataType::Int(64), 1),
-                                    tir::IntImm(DataType::Int(64), -1)}));
+    Expr b = nchw ? relax::reshape(bias.value()->expr,
+                                   ShapeExpr(ffi::Array<PrimExpr>{
+                                       IntImm(DataType::Int(64), 1), IntImm(DataType::Int(64), -1),
+                                       IntImm(DataType::Int(64), 1), IntImm(DataType::Int(64), 1),
+                                       IntImm(DataType::Int(64), 1)}))
+                  : relax::reshape(bias.value()->expr,
+                                   ShapeExpr(ffi::Array<PrimExpr>{
+                                       IntImm(DataType::Int(64), 1), IntImm(DataType::Int(64), 1),
+                                       IntImm(DataType::Int(64), 1), IntImm(DataType::Int(64), 1),
+                                       IntImm(DataType::Int(64), -1)}));
     out = relax::add(out, b);
   }
   return Emit(out, "conv3d");
 }
 
-Conv3DModule MakeConv3D(int64_t in_channels, int64_t out_channels,
-                        ffi::Array<Integer> kernel_size,
+Conv3DModule MakeConv3D(int64_t in_channels, int64_t out_channels, ffi::Array<Integer> kernel_size,
                         int64_t stride, int64_t padding, int64_t dilation, int64_t groups,
-                        bool has_bias, ffi::Optional<ffi::String> dtype,
-                        ffi::String data_layout) {
+                        bool has_bias, ffi::Optional<ffi::String> dtype, ffi::String data_layout) {
   ffi::String dt = dtype.value_or(ffi::String(GetDefaultDtype()));
   int64_t kd = kernel_size[0]->value, kh = kernel_size[1]->value, kw = kernel_size[2]->value;
-  NNParameter w = MakeParam({ffi::Any(out_channels), ffi::Any(in_channels),
-                              ffi::Any(kd), ffi::Any(kh), ffi::Any(kw)}, dt);
+  NNParameter w = MakeParam(
+      {ffi::Any(out_channels), ffi::Any(in_channels), ffi::Any(kd), ffi::Any(kh), ffi::Any(kw)},
+      dt);
   ffi::Optional<NNParameter> b =
       has_bias ? ffi::Optional<NNParameter>(MakeParam({ffi::Any(out_channels)}, dt)) : std::nullopt;
   return Conv3DModule(std::move(w), std::move(b), stride, padding, dilation, groups,
@@ -385,20 +370,19 @@ ConvTranspose1DModule::ConvTranspose1DModule(NNParameter weight, ffi::Optional<N
                                              int64_t stride, int64_t padding,
                                              int64_t output_padding, int64_t dilation,
                                              int64_t groups) {
-  data_ = ffi::make_object<ConvTranspose1DModuleNode>(std::move(weight), std::move(bias),
-                                                      stride, padding, output_padding,
-                                                      dilation, groups);
+  data_ = ffi::make_object<ConvTranspose1DModuleNode>(std::move(weight), std::move(bias), stride,
+                                                      padding, output_padding, dilation, groups);
 }
 
 Var ConvTranspose1DModuleNode::Forward(Var x) const {
-  Expr out = relax::conv1d_transpose(x, weight->expr, {stride}, {padding}, {output_padding},
-                                     {dilation}, static_cast<int>(groups),
-                                     "NCW", "IOW", std::nullopt, std::nullopt);
-  if (bias.defined()) {
-    Expr b = relax::reshape(bias.value()->expr,
-                            ShapeExpr({tir::IntImm(DataType::Int(64), 1),
-                                       tir::IntImm(DataType::Int(64), -1),
-                                       tir::IntImm(DataType::Int(64), 1)}));
+  Expr out =
+      relax::conv1d_transpose(x, weight->expr, {stride}, {padding}, {output_padding}, {dilation},
+                              static_cast<int>(groups), "NCW", "IOW", std::nullopt, std::nullopt);
+  if (bias.has_value()) {
+    Expr b = relax::reshape(
+        bias.value()->expr,
+        ShapeExpr(ffi::Array<PrimExpr>{IntImm(DataType::Int(64), 1), IntImm(DataType::Int(64), -1),
+                                       IntImm(DataType::Int(64), 1)}));
     out = relax::add(out, b);
   }
   return Emit(out, "conv1d_transpose");
@@ -410,12 +394,12 @@ ConvTranspose1DModule MakeConvTranspose1D(int64_t in_channels, int64_t out_chann
                                           bool has_bias, ffi::Optional<ffi::String> dtype) {
   ffi::String dt = dtype.value_or(ffi::String(GetDefaultDtype()));
   int64_t out_per_group = out_channels / groups;
-  NNParameter w = MakeParam({ffi::Any(in_channels), ffi::Any(out_per_group),
-                              ffi::Any(kernel_size)}, dt);
+  NNParameter w =
+      MakeParam({ffi::Any(in_channels), ffi::Any(out_per_group), ffi::Any(kernel_size)}, dt);
   ffi::Optional<NNParameter> b =
       has_bias ? ffi::Optional<NNParameter>(MakeParam({ffi::Any(out_channels)}, dt)) : std::nullopt;
-  return ConvTranspose1DModule(std::move(w), std::move(b), stride, padding,
-                               output_padding, dilation, groups);
+  return ConvTranspose1DModule(std::move(w), std::move(b), stride, padding, output_padding,
+                               dilation, groups);
 }
 
 // ---------------------------------------------------------------------------
@@ -439,8 +423,8 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef()
       .def("relax.frontend.nn.MakeLinear",
-           [](ffi::Any in_f, ffi::Any out_f, bool bias,
-              ffi::Optional<ffi::String> dtype, ffi::Optional<ffi::String> out_dtype) {
+           [](ffi::Any in_f, ffi::Any out_f, bool bias, ffi::Optional<ffi::String> dtype,
+              ffi::Optional<ffi::String> out_dtype) {
              return MakeLinear(in_f, out_f, bias, dtype, out_dtype);
            })
       .def("relax.frontend.nn.MakeEmbedding",
@@ -453,8 +437,8 @@ TVM_FFI_STATIC_INIT_BLOCK() {
              return MakeLayerNorm(normalized_shape, eps, elementwise_affine, dtype);
            })
       .def("relax.frontend.nn.MakeRMSNorm",
-           [](int64_t hidden_size, ffi::Array<Integer> axes, double epsilon,
-              bool has_bias, ffi::Optional<ffi::String> dtype) {
+           [](int64_t hidden_size, ffi::Array<Integer> axes, double epsilon, bool has_bias,
+              ffi::Optional<ffi::String> dtype) {
              return MakeRMSNorm(hidden_size, axes, epsilon, has_bias, dtype);
            })
       .def("relax.frontend.nn.MakeGroupNorm",
@@ -468,25 +452,25 @@ TVM_FFI_STATIC_INIT_BLOCK() {
              return MakeConv1D(in_ch, out_ch, ks, stride, padding, dilation, groups, bias, dtype);
            })
       .def("relax.frontend.nn.MakeConv2D",
-           [](int64_t in_ch, int64_t out_ch, ffi::Array<Integer> ks,
-              int64_t stride, int64_t padding, int64_t dilation, int64_t groups,
-              bool bias, ffi::Optional<ffi::String> dtype, ffi::String layout) {
-             return MakeConv2D(in_ch, out_ch, ks, stride, padding, dilation, groups,
-                               bias, dtype, layout);
+           [](int64_t in_ch, int64_t out_ch, ffi::Array<Integer> ks, int64_t stride,
+              int64_t padding, int64_t dilation, int64_t groups, bool bias,
+              ffi::Optional<ffi::String> dtype, ffi::String layout) {
+             return MakeConv2D(in_ch, out_ch, ks, stride, padding, dilation, groups, bias, dtype,
+                               layout);
            })
       .def("relax.frontend.nn.MakeConv3D",
-           [](int64_t in_ch, int64_t out_ch, ffi::Array<Integer> ks,
-              int64_t stride, int64_t padding, int64_t dilation, int64_t groups,
-              bool bias, ffi::Optional<ffi::String> dtype, ffi::String layout) {
-             return MakeConv3D(in_ch, out_ch, ks, stride, padding, dilation, groups,
-                               bias, dtype, layout);
+           [](int64_t in_ch, int64_t out_ch, ffi::Array<Integer> ks, int64_t stride,
+              int64_t padding, int64_t dilation, int64_t groups, bool bias,
+              ffi::Optional<ffi::String> dtype, ffi::String layout) {
+             return MakeConv3D(in_ch, out_ch, ks, stride, padding, dilation, groups, bias, dtype,
+                               layout);
            })
       .def("relax.frontend.nn.MakeConvTranspose1D",
            [](int64_t in_ch, int64_t out_ch, int64_t ks, int64_t stride, int64_t padding,
-              int64_t out_pad, int64_t dilation, int64_t groups,
-              bool bias, ffi::Optional<ffi::String> dtype) {
-             return MakeConvTranspose1D(in_ch, out_ch, ks, stride, padding, out_pad,
-                                        dilation, groups, bias, dtype);
+              int64_t out_pad, int64_t dilation, int64_t groups, bool bias,
+              ffi::Optional<ffi::String> dtype) {
+             return MakeConvTranspose1D(in_ch, out_ch, ks, stride, padding, out_pad, dilation,
+                                        groups, bias, dtype);
            });
 }
 

@@ -1,4 +1,4 @@
-﻿# Licensed to the Apache Software Foundation (ASF) under one
+# Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
 # distributed with this work for additional information
 # regarding copyright ownership.  The ASF licenses this file
@@ -41,14 +41,13 @@ import tvm_ffi
 from tvm import relax as rx
 from tvm import tir
 
-from . import op
+from . import _ffi_api, op
 from .core import Effect, Module, ModuleList, Parameter, Tensor, get_default_dtype
-from . import _ffi_api
-
 
 # ===========================================================================
 # IOEffect  (pure Python)
 # ===========================================================================
+
 
 class IOEffect(Effect):
     """Modeling IO side effect."""
@@ -75,6 +74,7 @@ class IOEffect(Effect):
 # Identity  (pure Python)
 # ===========================================================================
 
+
 class Identity(Module):
     """Pass-through module."""
 
@@ -85,6 +85,7 @@ class Identity(Module):
 # ===========================================================================
 # ReLU
 # ===========================================================================
+
 
 @tvm_ffi.register_object("relax.frontend.nn.ReLU")
 class ReLU(Module):
@@ -101,6 +102,7 @@ class ReLU(Module):
 # SiLU
 # ===========================================================================
 
+
 @tvm_ffi.register_object("relax.frontend.nn.SiLU")
 class SiLU(Module):
     """SiLU activation."""
@@ -115,6 +117,7 @@ class SiLU(Module):
 # ===========================================================================
 # GELU
 # ===========================================================================
+
 
 @tvm_ffi.register_object("relax.frontend.nn.GELU")
 class GELU(Module):
@@ -135,6 +138,7 @@ class GELU(Module):
 # Linear
 # ===========================================================================
 
+
 @tvm_ffi.register_object("relax.frontend.nn.Linear")
 class Linear(Module):
     """Linear layer: out = x @ W^T + b.
@@ -152,7 +156,11 @@ class Linear(Module):
     ) -> None:
         self.__init_handle_by_constructor__(
             _ffi_api.MakeLinear,
-            in_features, out_features, bias, dtype, out_dtype,
+            in_features,
+            out_features,
+            bias,
+            dtype,
+            out_dtype,
         )
 
     # -- properties read directly from C++ fields --
@@ -183,6 +191,7 @@ class Linear(Module):
 # Embedding
 # ===========================================================================
 
+
 @tvm_ffi.register_object("relax.frontend.nn.Embedding")
 class Embedding(Module):
     """Embedding lookup. All state lives in C++."""
@@ -193,21 +202,21 @@ class Embedding(Module):
         dim: int | str | tir.PrimExpr,
         dtype: str | None = None,
     ) -> None:
-        self.__init_handle_by_constructor__(
-            _ffi_api.MakeEmbedding, num, dim, dtype)
+        self.__init_handle_by_constructor__(_ffi_api.MakeEmbedding, num, dim, dtype)
 
     @property
     def weight(self) -> Parameter:
         return self.__object_handle__.weight
 
     def forward(self, x: Tensor) -> Tensor:
-        out_shape = [] if x.ndim == 1 else list(x.shape) + [self.weight.shape[1]]
+        out_shape = [] if x.ndim == 1 else [*list(x.shape), self.weight.shape[1]]
         return Tensor(_expr=self.__object_handle__.forward(x._expr, out_shape))
 
 
 # ===========================================================================
 # LayerNorm
 # ===========================================================================
+
 
 @tvm_ffi.register_object("relax.frontend.nn.LayerNorm")
 class LayerNorm(Module):
@@ -252,6 +261,7 @@ class LayerNorm(Module):
 # RMSNorm
 # ===========================================================================
 
+
 @tvm_ffi.register_object("relax.frontend.nn.RMSNorm")
 class RMSNorm(Module):
     """RMS Normalization. All state lives in C++."""
@@ -267,7 +277,11 @@ class RMSNorm(Module):
         ax = [axes] if isinstance(axes, int) else list(axes)
         self.__init_handle_by_constructor__(
             _ffi_api.MakeRMSNorm,
-            hidden_size, ax, float(epsilon), bias, dtype,
+            hidden_size,
+            ax,
+            float(epsilon),
+            bias,
+            dtype,
         )
 
     @property
@@ -290,6 +304,7 @@ class RMSNorm(Module):
 # GroupNorm
 # ===========================================================================
 
+
 @tvm_ffi.register_object("relax.frontend.nn.GroupNorm")
 class GroupNorm(Module):
     """Group Normalization. All state lives in C++."""
@@ -304,7 +319,11 @@ class GroupNorm(Module):
     ) -> None:
         self.__init_handle_by_constructor__(
             _ffi_api.MakeGroupNorm,
-            num_groups, num_channels, float(eps), affine, dtype,
+            num_groups,
+            num_channels,
+            float(eps),
+            affine,
+            dtype,
         )
 
     @property
@@ -333,6 +352,7 @@ class GroupNorm(Module):
 # Conv1D
 # ===========================================================================
 
+
 @tvm_ffi.register_object("relax.frontend.nn.Conv1D")
 class Conv1D(Module):
     """1D Convolution. All state lives in C++."""
@@ -351,8 +371,15 @@ class Conv1D(Module):
     ) -> None:
         self.__init_handle_by_constructor__(
             _ffi_api.MakeConv1D,
-            in_channels, out_channels, kernel_size,
-            stride, padding, dilation, groups, bias, dtype,
+            in_channels,
+            out_channels,
+            kernel_size,
+            stride,
+            padding,
+            dilation,
+            groups,
+            bias,
+            dtype,
         )
 
     @property
@@ -370,6 +397,7 @@ class Conv1D(Module):
 # ===========================================================================
 # Conv2D
 # ===========================================================================
+
 
 @tvm_ffi.register_object("relax.frontend.nn.Conv2D")
 class Conv2D(Module):
@@ -391,8 +419,16 @@ class Conv2D(Module):
         ks = [kernel_size, kernel_size] if isinstance(kernel_size, int) else list(kernel_size)
         self.__init_handle_by_constructor__(
             _ffi_api.MakeConv2D,
-            in_channels, out_channels, ks,
-            stride, padding, dilation, groups, bias, dtype, data_layout,
+            in_channels,
+            out_channels,
+            ks,
+            stride,
+            padding,
+            dilation,
+            groups,
+            bias,
+            dtype,
+            data_layout,
         )
 
     @property
@@ -415,6 +451,7 @@ class Conv2D(Module):
 # Conv3D
 # ===========================================================================
 
+
 @tvm_ffi.register_object("relax.frontend.nn.Conv3D")
 class Conv3D(Module):
     """3D Convolution. All state lives in C++."""
@@ -433,12 +470,20 @@ class Conv3D(Module):
         data_layout: str = "NCDHW",
     ) -> None:
         ks = [kernel_size] * 3 if isinstance(kernel_size, int) else list(kernel_size)
-        s = stride[0] if isinstance(stride, (list, tuple)) else stride
-        p = padding[0] if isinstance(padding, (list, tuple)) else padding
+        s = stride[0] if isinstance(stride, list | tuple) else stride
+        p = padding[0] if isinstance(padding, list | tuple) else padding
         self.__init_handle_by_constructor__(
             _ffi_api.MakeConv3D,
-            in_channels, out_channels, ks,
-            s, p, dilation, groups, bias, dtype, data_layout,
+            in_channels,
+            out_channels,
+            ks,
+            s,
+            p,
+            dilation,
+            groups,
+            bias,
+            dtype,
+            data_layout,
         )
 
     @property
@@ -461,6 +506,7 @@ class Conv3D(Module):
 # ConvTranspose1D
 # ===========================================================================
 
+
 @tvm_ffi.register_object("relax.frontend.nn.ConvTranspose1D")
 class ConvTranspose1D(Module):
     """1D Transposed Convolution. All state lives in C++."""
@@ -480,8 +526,16 @@ class ConvTranspose1D(Module):
     ) -> None:
         self.__init_handle_by_constructor__(
             _ffi_api.MakeConvTranspose1D,
-            in_channels, out_channels, kernel_size,
-            stride, padding, output_padding, dilation, groups, bias, dtype,
+            in_channels,
+            out_channels,
+            kernel_size,
+            stride,
+            padding,
+            output_padding,
+            dilation,
+            groups,
+            bias,
+            dtype,
         )
 
     @property
@@ -500,6 +554,7 @@ class ConvTranspose1D(Module):
 # KVCache  (pure Python)
 # ===========================================================================
 
+
 class KVCache(Effect):
     """KVCache effect for attention layers."""
 
@@ -512,11 +567,19 @@ class KVCache(Effect):
         self.cache = None
 
     def emit_init(self, name_hint, bb):
-        init_shape = rx.ShapeExpr([self.init_seq_len] + self.unit_shape)
-        return [bb.emit(rx.op.call_pure_packed(
-            "vm.builtin.attention_kv_cache_create",
-            rx.op.zeros(init_shape, self.dtype), init_shape, rx.PrimValue(0),
-            sinfo_args=rx.ObjectStructInfo()), name_hint=name_hint)]
+        init_shape = rx.ShapeExpr([self.init_seq_len, *self.unit_shape])
+        return [
+            bb.emit(
+                rx.op.call_pure_packed(
+                    "vm.builtin.attention_kv_cache_create",
+                    rx.op.zeros(init_shape, self.dtype),
+                    init_shape,
+                    rx.PrimValue(0),
+                    sinfo_args=rx.ObjectStructInfo(),
+                ),
+                name_hint=name_hint,
+            )
+        ]
 
     def create(self, name_hint):
         self.cache = rx.Var(name_hint, struct_info=rx.ObjectStructInfo())
@@ -534,34 +597,53 @@ class KVCache(Effect):
             self.dtype = dtype
 
     def view(self, seq_len) -> Tensor:
-        shape = rx.ShapeExpr([seq_len] + self.unit_shape)
-        return Tensor(_expr=rx.BlockBuilder.current().emit(
-            rx.op.call_pure_packed("vm.builtin.attention_kv_cache_view",
-                                   self.cache, shape,
-                                   sinfo_args=rx.TensorStructInfo(shape, self.dtype))))
+        shape = rx.ShapeExpr([seq_len, *self.unit_shape])
+        return Tensor(
+            _expr=rx.BlockBuilder.current().emit(
+                rx.op.call_pure_packed(
+                    "vm.builtin.attention_kv_cache_view",
+                    self.cache,
+                    shape,
+                    sinfo_args=rx.TensorStructInfo(shape, self.dtype),
+                )
+            )
+        )
 
     def append(self, new_element: Tensor) -> None:
         if new_element.dtype != self.dtype:
             raise TypeError(f'KVCache dtype "{self.dtype}" != "{new_element.dtype}"')
         self.cache = rx.BlockBuilder.current().emit(
-            rx.op.call_inplace_packed("vm.builtin.attention_kv_cache_append",
-                                      self.cache, new_element._expr,
-                                      inplace_indices=[0],
-                                      sinfo_args=rx.ObjectStructInfo()))
+            rx.op.call_inplace_packed(
+                "vm.builtin.attention_kv_cache_append",
+                self.cache,
+                new_element._expr,
+                inplace_indices=[0],
+                sinfo_args=rx.ObjectStructInfo(),
+            )
+        )
 
 
 # ===========================================================================
 # TimestepEmbedding  (pure Python)
 # ===========================================================================
 
+
 class TimestepEmbedding(Module):
     """HF TimestepEmbedding layer."""
 
-    def __init__(self, in_channels, time_embed_dim, act_fn="silu",
-                 out_dim=None, post_act_fn=None, cond_proj_dim=None):
+    def __init__(
+        self,
+        in_channels,
+        time_embed_dim,
+        act_fn="silu",
+        out_dim=None,
+        post_act_fn=None,
+        cond_proj_dim=None,
+    ):
         self.linear_1 = Linear(in_channels, time_embed_dim)
-        self.cond_proj = Linear(cond_proj_dim, in_channels, bias=False) \
-            if cond_proj_dim is not None else None
+        self.cond_proj = (
+            Linear(cond_proj_dim, in_channels, bias=False) if cond_proj_dim is not None else None
+        )
         assert act_fn == "silu"
         self.act = SiLU()
         self.linear_2 = Linear(time_embed_dim, out_dim if out_dim else time_embed_dim)
@@ -581,6 +663,7 @@ class TimestepEmbedding(Module):
 # Timesteps  (pure Python)
 # ===========================================================================
 
+
 class Timesteps(Module):
     """HF Timesteps layer."""
 
@@ -591,20 +674,32 @@ class Timesteps(Module):
 
     def forward(self, x: Tensor) -> Tensor:
         return op.get_timestep_embedding(
-            x, embedding_dim=self.num_channels,
+            x,
+            embedding_dim=self.num_channels,
             flip_sin_to_cos=self.flip_sin_to_cos,
-            downscale_freq_shift=self.downscale_freq_shift)
+            downscale_freq_shift=self.downscale_freq_shift,
+        )
 
 
 # ===========================================================================
 # Attention  (pure Python)
 # ===========================================================================
 
+
 class Attention(Module):
     """Cross-attention layer."""
 
-    def __init__(self, query_dim, cross_attention_dim=None, heads=8, dim_head=64,
-                 bias=False, norm_num_groups=None, out_bias=True, scale_qk=True):
+    def __init__(
+        self,
+        query_dim,
+        cross_attention_dim=None,
+        heads=8,
+        dim_head=64,
+        bias=False,
+        norm_num_groups=None,
+        out_bias=True,
+        scale_qk=True,
+    ):
         self.heads = heads
         self.inner_dim = dim_head * heads
         cross_dim = cross_attention_dim if cross_attention_dim else query_dim
@@ -613,7 +708,9 @@ class Attention(Module):
         self.to_v = Linear(cross_dim, self.inner_dim, bias=bias)
         self.group_norm = (
             GroupNorm(num_channels=query_dim, num_groups=norm_num_groups, affine=True)
-            if norm_num_groups is not None else None)
+            if norm_num_groups is not None
+            else None
+        )
         self.to_out = ModuleList([Linear(self.inner_dim, query_dim, bias=out_bias)])
 
     def forward(self, hidden_states, encoder_hidden_states=None, attention_mask=None, **kw):

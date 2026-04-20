@@ -43,13 +43,13 @@
 #ifndef TVM_RELAX_FRONTEND_NN_MODULES_H_
 #define TVM_RELAX_FRONTEND_NN_MODULES_H_
 
-#include "core.h"
-
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/relax/expr.h>
 #include <tvm/runtime/object.h>
 
 #include <string>
+
+#include "core.h"
 
 namespace tvm {
 namespace relax {
@@ -72,9 +72,7 @@ class ReLUModuleNode : public runtime::Object {
 
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
-    refl::ObjectDef<ReLUModuleNode>()
-        .def(refl::init<>())
-        .def("forward", &ReLUModuleNode::Forward);
+    refl::ObjectDef<ReLUModuleNode>().def(refl::init<>()).def("forward", &ReLUModuleNode::Forward);
   }
   static constexpr bool _type_mutable = false;
   TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.frontend.nn.ReLU", ReLUModuleNode, runtime::Object);
@@ -95,9 +93,7 @@ class SiLUModuleNode : public runtime::Object {
 
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
-    refl::ObjectDef<SiLUModuleNode>()
-        .def(refl::init<>())
-        .def("forward", &SiLUModuleNode::Forward);
+    refl::ObjectDef<SiLUModuleNode>().def(refl::init<>()).def("forward", &SiLUModuleNode::Forward);
   }
   static constexpr bool _type_mutable = false;
   TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.frontend.nn.SiLU", SiLUModuleNode, runtime::Object);
@@ -141,8 +137,8 @@ class GELUModule : public runtime::ObjectRef {
 
 class LinearModuleNode : public runtime::Object {
  public:
-  NNParameter weight;                  //!< shape [out_features, in_features]
-  ffi::Optional<NNParameter> bias;     //!< shape [out_features], or nullopt
+  NNParameter weight;               //!< shape [out_features, in_features]
+  ffi::Optional<NNParameter> bias;  //!< shape [out_features], or nullopt
   ffi::Optional<ffi::String> out_dtype;
 
   LinearModuleNode(NNParameter weight, ffi::Optional<NNParameter> bias,
@@ -155,8 +151,8 @@ class LinearModuleNode : public runtime::Object {
     namespace refl = tvm::ffi::reflection;
     refl::ObjectDef<LinearModuleNode>()
         .def(refl::init<NNParameter, ffi::Optional<NNParameter>, ffi::Optional<ffi::String>>())
-        .def_ro("weight",    &LinearModuleNode::weight)
-        .def_ro("bias",      &LinearModuleNode::bias)
+        .def_ro("weight", &LinearModuleNode::weight)
+        .def_ro("bias", &LinearModuleNode::bias)
         .def_ro("out_dtype", &LinearModuleNode::out_dtype)
         .def("forward", &LinearModuleNode::Forward);
   }
@@ -170,9 +166,8 @@ class LinearModule : public runtime::ObjectRef {
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(LinearModule, runtime::ObjectRef, LinearModuleNode);
 };
 /*! \brief Factory: creates Parameters internally, returns LinearModule. */
-LinearModule MakeLinear(ffi::Any in_features, ffi::Any out_features,
-                        bool bias, ffi::Optional<ffi::String> dtype,
-                        ffi::Optional<ffi::String> out_dtype);
+LinearModule MakeLinear(ffi::Any in_features, ffi::Any out_features, bool bias,
+                        ffi::Optional<ffi::String> dtype, ffi::Optional<ffi::String> out_dtype);
 
 // ---------------------------------------------------------------------------
 // Embedding
@@ -203,8 +198,7 @@ class EmbeddingModule : public runtime::ObjectRef {
                                                 EmbeddingModuleNode);
 };
 /*! \brief Factory: creates the weight Parameter internally. */
-EmbeddingModule MakeEmbedding(ffi::Any num, ffi::Any dim,
-                              ffi::Optional<ffi::String> dtype);
+EmbeddingModule MakeEmbedding(ffi::Any num, ffi::Any dim, ffi::Optional<ffi::String> dtype);
 
 // ---------------------------------------------------------------------------
 // LayerNorm
@@ -220,20 +214,23 @@ class LayerNormModuleNode : public runtime::Object {
 
   LayerNormModuleNode(ffi::Optional<NNParameter> weight, ffi::Optional<NNParameter> bias,
                       ffi::Array<Integer> axes, double epsilon, bool elementwise_affine)
-      : weight(std::move(weight)), bias(std::move(bias)), axes(std::move(axes)),
-        epsilon(epsilon), elementwise_affine(elementwise_affine) {}
+      : weight(std::move(weight)),
+        bias(std::move(bias)),
+        axes(std::move(axes)),
+        epsilon(epsilon),
+        elementwise_affine(elementwise_affine) {}
 
   Var Forward(Var x) const;
 
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
     refl::ObjectDef<LayerNormModuleNode>()
-        .def(refl::init<ffi::Optional<NNParameter>, ffi::Optional<NNParameter>,
-                        ffi::Array<Integer>, double, bool>())
-        .def_ro("weight",             &LayerNormModuleNode::weight)
-        .def_ro("bias",               &LayerNormModuleNode::bias)
-        .def_ro("axes",               &LayerNormModuleNode::axes)
-        .def_ro("epsilon",            &LayerNormModuleNode::epsilon)
+        .def(refl::init<ffi::Optional<NNParameter>, ffi::Optional<NNParameter>, ffi::Array<Integer>,
+                        double, bool>())
+        .def_ro("weight", &LayerNormModuleNode::weight)
+        .def_ro("bias", &LayerNormModuleNode::bias)
+        .def_ro("axes", &LayerNormModuleNode::axes)
+        .def_ro("epsilon", &LayerNormModuleNode::epsilon)
         .def_ro("elementwise_affine", &LayerNormModuleNode::elementwise_affine)
         .def("forward", &LayerNormModuleNode::Forward);
   }
@@ -249,8 +246,7 @@ class LayerNormModule : public runtime::ObjectRef {
                                                 LayerNormModuleNode);
 };
 /*! \brief Factory: creates Parameters internally. */
-LayerNormModule MakeLayerNorm(ffi::Any normalized_shape, double eps,
-                              bool elementwise_affine,
+LayerNormModule MakeLayerNorm(ffi::Any normalized_shape, double eps, bool elementwise_affine,
                               ffi::Optional<ffi::String> dtype);
 
 // ---------------------------------------------------------------------------
@@ -264,10 +260,9 @@ class RMSNormModuleNode : public runtime::Object {
   ffi::Array<Integer> axes;
   double epsilon;
 
-  RMSNormModuleNode(NNParameter weight, ffi::Optional<NNParameter> bias,
-                    ffi::Array<Integer> axes, double epsilon)
-      : weight(std::move(weight)), bias(std::move(bias)),
-        axes(std::move(axes)), epsilon(epsilon) {}
+  RMSNormModuleNode(NNParameter weight, ffi::Optional<NNParameter> bias, ffi::Array<Integer> axes,
+                    double epsilon)
+      : weight(std::move(weight)), bias(std::move(bias)), axes(std::move(axes)), epsilon(epsilon) {}
 
   Var Forward(Var x) const;
 
@@ -275,9 +270,9 @@ class RMSNormModuleNode : public runtime::Object {
     namespace refl = tvm::ffi::reflection;
     refl::ObjectDef<RMSNormModuleNode>()
         .def(refl::init<NNParameter, ffi::Optional<NNParameter>, ffi::Array<Integer>, double>())
-        .def_ro("weight",  &RMSNormModuleNode::weight)
-        .def_ro("bias",    &RMSNormModuleNode::bias)
-        .def_ro("axes",    &RMSNormModuleNode::axes)
+        .def_ro("weight", &RMSNormModuleNode::weight)
+        .def_ro("bias", &RMSNormModuleNode::bias)
+        .def_ro("axes", &RMSNormModuleNode::axes)
         .def_ro("epsilon", &RMSNormModuleNode::epsilon)
         .def("forward", &RMSNormModuleNode::Forward);
   }
@@ -293,9 +288,8 @@ class RMSNormModule : public runtime::ObjectRef {
                                                 RMSNormModuleNode);
 };
 /*! \brief Factory: creates Parameters internally. */
-RMSNormModule MakeRMSNorm(int64_t hidden_size, ffi::Array<Integer> axes,
-                          double epsilon, bool has_bias,
-                          ffi::Optional<ffi::String> dtype);
+RMSNormModule MakeRMSNorm(int64_t hidden_size, ffi::Array<Integer> axes, double epsilon,
+                          bool has_bias, ffi::Optional<ffi::String> dtype);
 
 // ---------------------------------------------------------------------------
 // GroupNorm
@@ -310,8 +304,10 @@ class GroupNormModuleNode : public runtime::Object {
 
   GroupNormModuleNode(int64_t num_groups, ffi::Optional<NNParameter> weight,
                       ffi::Optional<NNParameter> bias, double epsilon)
-      : num_groups(num_groups), weight(std::move(weight)),
-        bias(std::move(bias)), epsilon(epsilon) {}
+      : num_groups(num_groups),
+        weight(std::move(weight)),
+        bias(std::move(bias)),
+        epsilon(epsilon) {}
 
   Var Forward(Var x, int64_t channel_axis, ffi::Array<Integer> axes) const;
 
@@ -320,9 +316,9 @@ class GroupNormModuleNode : public runtime::Object {
     refl::ObjectDef<GroupNormModuleNode>()
         .def(refl::init<int64_t, ffi::Optional<NNParameter>, ffi::Optional<NNParameter>, double>())
         .def_ro("num_groups", &GroupNormModuleNode::num_groups)
-        .def_ro("weight",     &GroupNormModuleNode::weight)
-        .def_ro("bias",       &GroupNormModuleNode::bias)
-        .def_ro("epsilon",    &GroupNormModuleNode::epsilon)
+        .def_ro("weight", &GroupNormModuleNode::weight)
+        .def_ro("bias", &GroupNormModuleNode::bias)
+        .def_ro("epsilon", &GroupNormModuleNode::epsilon)
         .def("forward", &GroupNormModuleNode::Forward);
   }
   static constexpr bool _type_mutable = false;
@@ -337,8 +333,7 @@ class GroupNormModule : public runtime::ObjectRef {
                                                 GroupNormModuleNode);
 };
 /*! \brief Factory: creates Parameters internally. */
-GroupNormModule MakeGroupNorm(int64_t num_groups, int64_t num_channels,
-                              double eps, bool affine,
+GroupNormModule MakeGroupNorm(int64_t num_groups, int64_t num_channels, double eps, bool affine,
                               ffi::Optional<ffi::String> dtype);
 
 // ---------------------------------------------------------------------------
@@ -351,24 +346,28 @@ class Conv1DModuleNode : public runtime::Object {
   ffi::Optional<NNParameter> bias;
   int64_t stride, padding, dilation, groups;
 
-  Conv1DModuleNode(NNParameter weight, ffi::Optional<NNParameter> bias,
-                   int64_t stride, int64_t padding, int64_t dilation, int64_t groups)
-      : weight(std::move(weight)), bias(std::move(bias)),
-        stride(stride), padding(padding), dilation(dilation), groups(groups) {}
+  Conv1DModuleNode(NNParameter weight, ffi::Optional<NNParameter> bias, int64_t stride,
+                   int64_t padding, int64_t dilation, int64_t groups)
+      : weight(std::move(weight)),
+        bias(std::move(bias)),
+        stride(stride),
+        padding(padding),
+        dilation(dilation),
+        groups(groups) {}
 
   Var Forward(Var x) const;
 
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
     refl::ObjectDef<Conv1DModuleNode>()
-        .def(refl::init<NNParameter, ffi::Optional<NNParameter>,
-                        int64_t, int64_t, int64_t, int64_t>())
-        .def_ro("weight",   &Conv1DModuleNode::weight)
-        .def_ro("bias",     &Conv1DModuleNode::bias)
-        .def_ro("stride",   &Conv1DModuleNode::stride)
-        .def_ro("padding",  &Conv1DModuleNode::padding)
+        .def(refl::init<NNParameter, ffi::Optional<NNParameter>, int64_t, int64_t, int64_t,
+                        int64_t>())
+        .def_ro("weight", &Conv1DModuleNode::weight)
+        .def_ro("bias", &Conv1DModuleNode::bias)
+        .def_ro("stride", &Conv1DModuleNode::stride)
+        .def_ro("padding", &Conv1DModuleNode::padding)
         .def_ro("dilation", &Conv1DModuleNode::dilation)
-        .def_ro("groups",   &Conv1DModuleNode::groups)
+        .def_ro("groups", &Conv1DModuleNode::groups)
         .def("forward", &Conv1DModuleNode::Forward);
   }
   static constexpr bool _type_mutable = false;
@@ -376,8 +375,8 @@ class Conv1DModuleNode : public runtime::Object {
 };
 class Conv1DModule : public runtime::ObjectRef {
  public:
-  explicit Conv1DModule(NNParameter weight, ffi::Optional<NNParameter> bias,
-                        int64_t stride, int64_t padding, int64_t dilation, int64_t groups);
+  explicit Conv1DModule(NNParameter weight, ffi::Optional<NNParameter> bias, int64_t stride,
+                        int64_t padding, int64_t dilation, int64_t groups);
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(Conv1DModule, runtime::ObjectRef, Conv1DModuleNode);
 };
 /*! \brief Factory: creates Parameters internally. */
@@ -396,11 +395,14 @@ class Conv2DModuleNode : public runtime::Object {
   int64_t stride, padding, dilation, groups;
   ffi::String data_layout;
 
-  Conv2DModuleNode(NNParameter weight, ffi::Optional<NNParameter> bias,
-                   int64_t stride, int64_t padding, int64_t dilation, int64_t groups,
-                   ffi::String data_layout)
-      : weight(std::move(weight)), bias(std::move(bias)),
-        stride(stride), padding(padding), dilation(dilation), groups(groups),
+  Conv2DModuleNode(NNParameter weight, ffi::Optional<NNParameter> bias, int64_t stride,
+                   int64_t padding, int64_t dilation, int64_t groups, ffi::String data_layout)
+      : weight(std::move(weight)),
+        bias(std::move(bias)),
+        stride(stride),
+        padding(padding),
+        dilation(dilation),
+        groups(groups),
         data_layout(std::move(data_layout)) {}
 
   Var Forward(Var x) const;
@@ -408,14 +410,14 @@ class Conv2DModuleNode : public runtime::Object {
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
     refl::ObjectDef<Conv2DModuleNode>()
-        .def(refl::init<NNParameter, ffi::Optional<NNParameter>,
-                        int64_t, int64_t, int64_t, int64_t, ffi::String>())
-        .def_ro("weight",      &Conv2DModuleNode::weight)
-        .def_ro("bias",        &Conv2DModuleNode::bias)
-        .def_ro("stride",      &Conv2DModuleNode::stride)
-        .def_ro("padding",     &Conv2DModuleNode::padding)
-        .def_ro("dilation",    &Conv2DModuleNode::dilation)
-        .def_ro("groups",      &Conv2DModuleNode::groups)
+        .def(refl::init<NNParameter, ffi::Optional<NNParameter>, int64_t, int64_t, int64_t, int64_t,
+                        ffi::String>())
+        .def_ro("weight", &Conv2DModuleNode::weight)
+        .def_ro("bias", &Conv2DModuleNode::bias)
+        .def_ro("stride", &Conv2DModuleNode::stride)
+        .def_ro("padding", &Conv2DModuleNode::padding)
+        .def_ro("dilation", &Conv2DModuleNode::dilation)
+        .def_ro("groups", &Conv2DModuleNode::groups)
         .def_ro("data_layout", &Conv2DModuleNode::data_layout)
         .def("forward", &Conv2DModuleNode::Forward);
   }
@@ -424,17 +426,14 @@ class Conv2DModuleNode : public runtime::Object {
 };
 class Conv2DModule : public runtime::ObjectRef {
  public:
-  explicit Conv2DModule(NNParameter weight, ffi::Optional<NNParameter> bias,
-                        int64_t stride, int64_t padding, int64_t dilation, int64_t groups,
-                        ffi::String data_layout);
+  explicit Conv2DModule(NNParameter weight, ffi::Optional<NNParameter> bias, int64_t stride,
+                        int64_t padding, int64_t dilation, int64_t groups, ffi::String data_layout);
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(Conv2DModule, runtime::ObjectRef, Conv2DModuleNode);
 };
 /*! \brief Factory: creates Parameters internally, handles kernel_size expansion. */
-Conv2DModule MakeConv2D(int64_t in_channels, int64_t out_channels,
-                        ffi::Array<Integer> kernel_size,
+Conv2DModule MakeConv2D(int64_t in_channels, int64_t out_channels, ffi::Array<Integer> kernel_size,
                         int64_t stride, int64_t padding, int64_t dilation, int64_t groups,
-                        bool has_bias, ffi::Optional<ffi::String> dtype,
-                        ffi::String data_layout);
+                        bool has_bias, ffi::Optional<ffi::String> dtype, ffi::String data_layout);
 
 // ---------------------------------------------------------------------------
 // Conv3D
@@ -447,11 +446,14 @@ class Conv3DModuleNode : public runtime::Object {
   int64_t stride, padding, dilation, groups;
   ffi::String data_layout;
 
-  Conv3DModuleNode(NNParameter weight, ffi::Optional<NNParameter> bias,
-                   int64_t stride, int64_t padding, int64_t dilation, int64_t groups,
-                   ffi::String data_layout)
-      : weight(std::move(weight)), bias(std::move(bias)),
-        stride(stride), padding(padding), dilation(dilation), groups(groups),
+  Conv3DModuleNode(NNParameter weight, ffi::Optional<NNParameter> bias, int64_t stride,
+                   int64_t padding, int64_t dilation, int64_t groups, ffi::String data_layout)
+      : weight(std::move(weight)),
+        bias(std::move(bias)),
+        stride(stride),
+        padding(padding),
+        dilation(dilation),
+        groups(groups),
         data_layout(std::move(data_layout)) {}
 
   Var Forward(Var x) const;
@@ -459,14 +461,14 @@ class Conv3DModuleNode : public runtime::Object {
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
     refl::ObjectDef<Conv3DModuleNode>()
-        .def(refl::init<NNParameter, ffi::Optional<NNParameter>,
-                        int64_t, int64_t, int64_t, int64_t, ffi::String>())
-        .def_ro("weight",      &Conv3DModuleNode::weight)
-        .def_ro("bias",        &Conv3DModuleNode::bias)
-        .def_ro("stride",      &Conv3DModuleNode::stride)
-        .def_ro("padding",     &Conv3DModuleNode::padding)
-        .def_ro("dilation",    &Conv3DModuleNode::dilation)
-        .def_ro("groups",      &Conv3DModuleNode::groups)
+        .def(refl::init<NNParameter, ffi::Optional<NNParameter>, int64_t, int64_t, int64_t, int64_t,
+                        ffi::String>())
+        .def_ro("weight", &Conv3DModuleNode::weight)
+        .def_ro("bias", &Conv3DModuleNode::bias)
+        .def_ro("stride", &Conv3DModuleNode::stride)
+        .def_ro("padding", &Conv3DModuleNode::padding)
+        .def_ro("dilation", &Conv3DModuleNode::dilation)
+        .def_ro("groups", &Conv3DModuleNode::groups)
         .def_ro("data_layout", &Conv3DModuleNode::data_layout)
         .def("forward", &Conv3DModuleNode::Forward);
   }
@@ -475,17 +477,14 @@ class Conv3DModuleNode : public runtime::Object {
 };
 class Conv3DModule : public runtime::ObjectRef {
  public:
-  explicit Conv3DModule(NNParameter weight, ffi::Optional<NNParameter> bias,
-                        int64_t stride, int64_t padding, int64_t dilation, int64_t groups,
-                        ffi::String data_layout);
+  explicit Conv3DModule(NNParameter weight, ffi::Optional<NNParameter> bias, int64_t stride,
+                        int64_t padding, int64_t dilation, int64_t groups, ffi::String data_layout);
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(Conv3DModule, runtime::ObjectRef, Conv3DModuleNode);
 };
 /*! \brief Factory: creates Parameters internally, handles kernel_size expansion. */
-Conv3DModule MakeConv3D(int64_t in_channels, int64_t out_channels,
-                        ffi::Array<Integer> kernel_size,
+Conv3DModule MakeConv3D(int64_t in_channels, int64_t out_channels, ffi::Array<Integer> kernel_size,
                         int64_t stride, int64_t padding, int64_t dilation, int64_t groups,
-                        bool has_bias, ffi::Optional<ffi::String> dtype,
-                        ffi::String data_layout);
+                        bool has_bias, ffi::Optional<ffi::String> dtype, ffi::String data_layout);
 
 // ---------------------------------------------------------------------------
 // ConvTranspose1D
@@ -497,32 +496,36 @@ class ConvTranspose1DModuleNode : public runtime::Object {
   ffi::Optional<NNParameter> bias;
   int64_t stride, padding, output_padding, dilation, groups;
 
-  ConvTranspose1DModuleNode(NNParameter weight, ffi::Optional<NNParameter> bias,
-                            int64_t stride, int64_t padding, int64_t output_padding,
-                            int64_t dilation, int64_t groups)
-      : weight(std::move(weight)), bias(std::move(bias)),
-        stride(stride), padding(padding), output_padding(output_padding),
-        dilation(dilation), groups(groups) {}
+  ConvTranspose1DModuleNode(NNParameter weight, ffi::Optional<NNParameter> bias, int64_t stride,
+                            int64_t padding, int64_t output_padding, int64_t dilation,
+                            int64_t groups)
+      : weight(std::move(weight)),
+        bias(std::move(bias)),
+        stride(stride),
+        padding(padding),
+        output_padding(output_padding),
+        dilation(dilation),
+        groups(groups) {}
 
   Var Forward(Var x) const;
 
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
     refl::ObjectDef<ConvTranspose1DModuleNode>()
-        .def(refl::init<NNParameter, ffi::Optional<NNParameter>,
-                        int64_t, int64_t, int64_t, int64_t, int64_t>())
-        .def_ro("weight",         &ConvTranspose1DModuleNode::weight)
-        .def_ro("bias",           &ConvTranspose1DModuleNode::bias)
-        .def_ro("stride",         &ConvTranspose1DModuleNode::stride)
-        .def_ro("padding",        &ConvTranspose1DModuleNode::padding)
+        .def(refl::init<NNParameter, ffi::Optional<NNParameter>, int64_t, int64_t, int64_t, int64_t,
+                        int64_t>())
+        .def_ro("weight", &ConvTranspose1DModuleNode::weight)
+        .def_ro("bias", &ConvTranspose1DModuleNode::bias)
+        .def_ro("stride", &ConvTranspose1DModuleNode::stride)
+        .def_ro("padding", &ConvTranspose1DModuleNode::padding)
         .def_ro("output_padding", &ConvTranspose1DModuleNode::output_padding)
-        .def_ro("dilation",       &ConvTranspose1DModuleNode::dilation)
-        .def_ro("groups",         &ConvTranspose1DModuleNode::groups)
+        .def_ro("dilation", &ConvTranspose1DModuleNode::dilation)
+        .def_ro("groups", &ConvTranspose1DModuleNode::groups)
         .def("forward", &ConvTranspose1DModuleNode::Forward);
   }
   static constexpr bool _type_mutable = false;
-  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.frontend.nn.ConvTranspose1D",
-                                    ConvTranspose1DModuleNode, runtime::Object);
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.frontend.nn.ConvTranspose1D", ConvTranspose1DModuleNode,
+                                    runtime::Object);
 };
 class ConvTranspose1DModule : public runtime::ObjectRef {
  public:

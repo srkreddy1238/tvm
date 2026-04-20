@@ -46,8 +46,8 @@
 #include <tvm/relax/block_builder.h>
 #include <tvm/relax/expr.h>
 #include <tvm/relax/struct_info.h>
-#include <tvm/runtime/ndarray.h>
 #include <tvm/runtime/object.h>
+#include <tvm/runtime/tensor.h>
 
 #include <string>
 
@@ -200,9 +200,7 @@ class NNObjectNode : public runtime::Object {
 
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
-    refl::ObjectDef<NNObjectNode>()
-        .def(refl::init<Var>())
-        .def_ro("expr", &NNObjectNode::expr);
+    refl::ObjectDef<NNObjectNode>().def(refl::init<Var>()).def_ro("expr", &NNObjectNode::expr);
   }
 
   static constexpr bool _type_mutable = false;
@@ -268,8 +266,7 @@ class ModuleDictNode : public runtime::Object {
   ffi::Map<ffi::String, ffi::Any> modules;
 
   explicit ModuleDictNode() = default;
-  explicit ModuleDictNode(ffi::Map<ffi::String, ffi::Any> modules)
-      : modules(std::move(modules)) {}
+  explicit ModuleDictNode(ffi::Map<ffi::String, ffi::Any> modules) : modules(std::move(modules)) {}
 
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
@@ -293,11 +290,21 @@ class ModuleDict : public runtime::ObjectRef {
 // Free functions (also registered as FFI globals)
 // ---------------------------------------------------------------------------
 
-/*! \brief Get the thread-local default dtype string. */
+/*! \ brief Get the thread-local default dtype string. */
 ffi::String GetDefaultDtype();
 
 /*! \brief Set the thread-local default dtype string. */
 void SetDefaultDtype(ffi::String dtype);
+
+/*!
+ * \brief Return the thread-local current BlockBuilder, or a null BlockBuilder
+ *        if none is active.  Installed by exporter.cc's BBScope before
+ *        calling forward() so that WrapNested / Emit helpers work.
+ */
+BlockBuilder BlockBuilder_Current();
+
+/*! \brief Install (or clear) the thread-local current BlockBuilder. */
+void BlockBuilder_SetCurrent(BlockBuilder* bb);
 
 /*!
  * \brief Emit expr into the current BlockBuilder and return the bound Var.
@@ -322,8 +329,8 @@ ffi::Map<ffi::String, NNParameter> GetNativeParameters(runtime::ObjectRef obj);
  * keyed by its dotted path (e.g. "0.weight", "encoder.bias").
  * Used by Module.named_parameters() for native container types.
  */
-ffi::Map<ffi::String, NNParameter> GetContainerParameters(
-    runtime::ObjectRef container, ffi::String prefix);
+ffi::Map<ffi::String, NNParameter> GetContainerParameters(runtime::ObjectRef container,
+                                                          ffi::String prefix);
 
 /*!
  * \brief Apply to(dtype) to every NNParameter inside a ModuleList or
