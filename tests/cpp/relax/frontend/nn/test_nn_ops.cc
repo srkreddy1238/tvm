@@ -45,7 +45,10 @@
 #include <tvm/tir/op.h>
 #include <tvm/tir/stmt.h>
 
+#include <cmath>
+
 // Internal op headers (test lives in src tree, so relative includes are fine)
+#include "../../../../../src/relax/op/image/resize.h"
 #include "../../../../../src/relax/op/nn/attention.h"
 #include "../../../../../src/relax/op/nn/nn.h"
 #include "../../../../../src/relax/op/tensor/binary.h"
@@ -65,6 +68,7 @@
 #include "../../../../../src/relax/frontend/nn/spec.h"
 #include "../../../../../src/relax/ir/emit_te.h"
 #include "../../../../../src/te/operation/create_primfunc.h"
+#include "../../../../../src/tir/ir/script/script_complete.h"
 
 namespace tvm {
 namespace relax {
@@ -1354,6 +1358,446 @@ TEST(NNOps, TestMultinomialFromUniform) {
                     "foo");
   }
   AssertStructEqual(actual, bb->Finalize());
+}
+
+// ===========================================================================
+// TestImage (resize2d / interpolate)
+// ===========================================================================
+TEST(NNOps, TestImage) {
+  static const ffi::Function op_resize2d = NNOp("resize2d");
+
+  ffi::TypedFunction<ffi::Any(ffi::Map<ffi::String, ffi::Any>)> forward =
+      [](ffi::Map<ffi::String, ffi::Any> args) -> ffi::Any {
+    NNTensor x = args.at("x").cast<NNTensor>();
+    return op_resize2d(x->expr, ffi::Array<Integer>{Integer(4), Integer(4)}, ffi::String("NCHW"),
+                       ffi::String("linear"), ffi::String("half_pixel"), ffi::String("resize2d"));
+  };
+
+  IRModule actual =
+      ExportSingle("foo", forward, {"x"}, {ffi::Any(MakeSpecTensor({1, 3, 2, 2}, "float32"))});
+
+  BlockBuilder bb = BlockBuilder::Create(std::nullopt);
+  EmitInitEffect(bb);
+  {
+    Var x("x", TSInfo({1, 3, 2, 2}, DataType::Float(32)));
+    Var io("_io", ObjectStructInfo());
+    ffi::Array<Var> params{x, io};
+    bb->BeginScope(params);
+    bb->BeginDataflowBlock();
+
+    ffi::Array<PrimExpr> size_prim{IntImm(DataType::Int(64), 4), IntImm(DataType::Int(64), 4)};
+    ffi::Array<FloatImm> roi{FloatImm(DataType::Float(32), 0.0), FloatImm(DataType::Float(32), 0.0),
+                             FloatImm(DataType::Float(32), 0.0),
+                             FloatImm(DataType::Float(32), 0.0)};
+    Var r = bb->Emit(relax::resize2d(x, ShapeExpr(size_prim), roi, "NCHW", "linear", "half_pixel",
+                                     "round", -0.75, 0, 0.0, std::nullopt),
+                     "resize2d");
+    Var gv1 = EmitDebugOutput(bb, r, io);
+    BindingBlock df = bb->EndBlock();
+    Expr body = bb->Normalize(SeqExpr({df}, gv1));
+    bb->EndScope();
+    ffi::Map<ffi::String, ffi::Any> attrs;
+    attrs.Set("num_input", ffi::Any(int64_t(2)));
+    attrs.Set("global_symbol", ffi::Any(ffi::String("foo")));
+    bb->AddFunction(Function(params, body, std::nullopt, /*is_pure=*/true, DictAttrs(attrs)),
+                    "foo");
+  }
+  AssertStructEqual(actual, bb->Finalize());
+}
+
+// ===========================================================================
+// TestTimestepEmbedding
+// ===========================================================================
+TEST(NNOps, TestTimestepEmbedding) {
+  static const ffi::Function op_tse = NNOp("get_timestep_embedding");
+
+  ffi::TypedFunction<ffi::Any(ffi::Map<ffi::String, ffi::Any>)> forward =
+      [](ffi::Map<ffi::String, ffi::Any> args) -> ffi::Any {
+    NNTensor x = args.at("x").cast<NNTensor>();
+    return op_tse(x->expr, int64_t(32), bool(true), double(1.0), double(1.0), int64_t(10000),
+                  ffi::String("float32"), ffi::String("timestep_embedding"));
+  };
+
+  IRModule actual = ExportSingle("foo", forward, {"x"}, {ffi::Any(MakeSpecTensor({3}, "float32"))});
+
+  // Build expected: mirrors the Python test_timestep_embedding expected IR.
+  // The op emits a sequence of relax ops; we replicate the exact binding names.
+  BlockBuilder bb = BlockBuilder::Create(std::nullopt);
+  EmitInitEffect(bb);
+  {
+    DataType f32 = DataType::Float(32);
+    auto I64 = [](int64_t v) { return IntImm(DataType::Int(64), v); };
+    auto MakeConst = [](float v) -> Expr {
+      auto t = runtime::Tensor::Empty(ffi::Shape({}), DLDataType{kDLFloat, 32, 1},
+                                      DLDevice{kDLCPU, 0}, std::nullopt);
+      t.CopyFromBytes(&v, sizeof(float));
+      return relax::Constant(t, std::nullopt);
+    };
+
+    Var x("x", TSInfo({3}, f32));
+    Var io("_io", ObjectStructInfo());
+    ffi::Array<Var> params{x, io};
+    bb->BeginScope(params);
+    bb->BeginDataflowBlock();
+
+    // timesteps = astype(x, float32)  — no-op since x is already float32,
+    // but the op always emits it.
+    Var timesteps = bb->Emit(relax::astype(x, f32), "timesteps");
+    Var ts_exp = bb->Emit(relax::expand_dims(timesteps, {1}), "timesteps");
+
+    // half_dim = 16; log_val = -log(10000) / (16 - 1.0)
+    double log_val = -std::log(10000.0);
+    Var arange_v = bb->Emit(
+        relax::arange(PrimValue(I64(0)), PrimValue(I64(16)), PrimValue(I64(1)), f32), "arange");
+    Var exponent =
+        bb->Emit(relax::multiply(MakeConst(static_cast<float>(log_val)), arange_v), "exponent");
+    Var exponent2 =
+        bb->Emit(relax::divide(exponent, MakeConst(static_cast<float>(16.0 - 1.0))), "exponent");
+    Var emb = bb->Emit(relax::exp(exponent2), "emb");
+    Var emb_exp = bb->Emit(relax::expand_dims(emb, {0}), "emb");
+    Var emb2 = bb->Emit(relax::multiply(ts_exp, emb_exp), "emb");
+    // scale == 1.0 → no multiply
+    Var sin_emb = bb->Emit(relax::sin(emb2), "sin");
+    Var cos_emb = bb->Emit(relax::cos(emb2), "cos");
+    // flip_sin_to_cos=true → concat([cos, sin])
+    Var emb4 = bb->Emit(relax::concat(relax::Tuple({cos_emb, sin_emb}), ffi::Optional<int64_t>(-1)),
+                        "emb");
+    // embedding_dim=32 is even → no pad
+    // out_dtype="float32" → astype is no-op but still emitted
+    Var out = bb->Emit(relax::astype(emb4, f32), "timestep_embedding");
+
+    Var gv1 = EmitDebugOutput(bb, out, io);
+    BindingBlock df = bb->EndBlock();
+    Expr body = bb->Normalize(SeqExpr({df}, gv1));
+    bb->EndScope();
+    ffi::Map<ffi::String, ffi::Any> attrs;
+    attrs.Set("num_input", ffi::Any(int64_t(2)));
+    attrs.Set("global_symbol", ffi::Any(ffi::String("foo")));
+    bb->AddFunction(Function(params, body, std::nullopt, /*is_pure=*/true, DictAttrs(attrs)),
+                    "foo");
+  }
+  AssertStructEqual(actual, bb->Finalize());
+}
+
+// ===========================================================================
+// TestTensorExprOpCustom  (mirrors test_tensor_expr_op from Python)
+// ===========================================================================
+TEST(NNOps, TestTensorExprOpCustom) {
+  static const ffi::Function op_te_op = NNOp("tensor_expr_op");
+
+  // te_func: output[i,j] = A[i,j] + B[i,j]
+  ffi::TypedFunction<ffi::Array<te::Tensor>(ffi::Array<te::Tensor>)> te_func =
+      [](ffi::Array<te::Tensor> inputs) -> ffi::Array<te::Tensor> {
+    te::Tensor A = inputs[0];
+    te::Tensor B = inputs[1];
+    te::Tensor out = te::compute(
+        A->shape, [&](const ffi::Array<tir::Var>& idx) -> PrimExpr { return A(idx) + B(idx); },
+        "T_add");
+    return {out};
+  };
+
+  ffi::TypedFunction<ffi::Any(ffi::Map<ffi::String, ffi::Any>)> forward =
+      [&te_func](ffi::Map<ffi::String, ffi::Any> args) -> ffi::Any {
+    NNTensor x = args.at("x").cast<NNTensor>();
+    NNTensor y = args.at("y").cast<NNTensor>();
+    return op_te_op(te_func, ffi::String("add"), ffi::Array<Expr>{x->expr, y->expr},
+                    ffi::Optional<ffi::Map<ffi::String, ffi::Any>>());
+  };
+
+  IRModule actual = ExportSingle(
+      "foo", forward, {"x", "y"},
+      {ffi::Any(MakeSpecTensor({2, 3}, "float32")), ffi::Any(MakeSpecTensor({2, 3}, "float32"))});
+
+  BlockBuilder bb = BlockBuilder::Create(std::nullopt);
+  EmitInitEffect(bb);
+  {
+    Var x("x", TSInfo({2, 3}, DataType::Float(32)));
+    Var y("y", TSInfo({2, 3}, DataType::Float(32)));
+    Var io("_io", ObjectStructInfo());
+    ffi::Array<Var> params{x, y, io};
+    bb->BeginScope(params);
+    bb->BeginDataflowBlock();
+
+    ffi::Map<tir::Var, PrimExpr> empty_map;
+    te::Tensor te_x = TETensor(x, empty_map, "input_0");
+    te::Tensor te_y = TETensor(y, empty_map, "input_1");
+    te::Tensor te_out = te::compute(
+        te_x->shape,
+        [&](const ffi::Array<tir::Var>& idx) -> PrimExpr { return te_x(idx) + te_y(idx); },
+        "T_add");
+    tir::PrimFunc pf = tir::CreatePrimFunc({te_x, te_y, te_out});
+    pf = WithoutAttr(pf, "global_symbol");
+    GlobalVar gv_func = bb->AddFunction(pf, "add");
+
+    static const Op& call_tir_op = Op::Get("relax.call_tir");
+    TensorStructInfo out_sinfo = TSInfo({2, 3}, DataType::Float(32));
+    Var lv1 = bb->Emit(
+        Call(call_tir_op, {gv_func, relax::Tuple({x, y})}, tvm::Attrs(), {out_sinfo}), "add");
+    Var gv1 = EmitDebugOutput(bb, lv1, io);
+    BindingBlock df = bb->EndBlock();
+    Expr body = bb->Normalize(SeqExpr({df}, gv1));
+    bb->EndScope();
+    ffi::Map<ffi::String, ffi::Any> attrs;
+    attrs.Set("num_input", ffi::Any(int64_t(3)));
+    attrs.Set("global_symbol", ffi::Any(ffi::String("foo")));
+    bb->AddFunction(Function(params, body, std::nullopt, /*is_pure=*/true, DictAttrs(attrs)),
+                    "foo");
+  }
+  AssertStructEqual(actual, bb->Finalize());
+}
+
+// ===========================================================================
+// TestExtern  (mirrors test_extern from Python)
+// ===========================================================================
+TEST(NNOps, TestExtern) {
+  static const ffi::Function op_extern = NNOp("extern");
+
+  ffi::TypedFunction<ffi::Any(ffi::Map<ffi::String, ffi::Any>)> forward =
+      [](ffi::Map<ffi::String, ffi::Any> args) -> ffi::Any {
+    NNTensor x = args.at("x").cast<NNTensor>();
+    NNTensor y = args.at("y").cast<NNTensor>();
+    // out placeholder: same shape/dtype as x
+    Var out_ph("out", TSInfo({2, 3}, DataType::Float(32)));
+    return op_extern(ffi::String("my_extern"),
+                     ffi::Array<ffi::Any>{ffi::Any(x->expr), ffi::Any(y->expr)},
+                     ffi::Array<ffi::Any>{ffi::Any(out_ph)});
+  };
+
+  IRModule actual = ExportSingle(
+      "foo", forward, {"x", "y"},
+      {ffi::Any(MakeSpecTensor({2, 3}, "float32")), ffi::Any(MakeSpecTensor({2, 3}, "float32"))});
+
+  BlockBuilder bb = BlockBuilder::Create(std::nullopt);
+  EmitInitEffect(bb);
+  {
+    Var x("x", TSInfo({2, 3}, DataType::Float(32)));
+    Var y("y", TSInfo({2, 3}, DataType::Float(32)));
+    Var io("_io", ObjectStructInfo());
+    ffi::Array<Var> params{x, y, io};
+    bb->BeginScope(params);
+    bb->BeginDataflowBlock();
+
+    static const Op& call_dps_op = Op::Get("relax.call_dps_packed");
+    TensorStructInfo out_sinfo = TSInfo({2, 3}, DataType::Float(32));
+    Var lv1 = bb->Emit(Call(call_dps_op, {ExternFunc("my_extern"), relax::Tuple({x, y})},
+                            tvm::Attrs(), {out_sinfo}),
+                       "my_extern");
+    Var gv1 = EmitDebugOutput(bb, lv1, io);
+    BindingBlock df = bb->EndBlock();
+    Expr body = bb->Normalize(SeqExpr({df}, gv1));
+    bb->EndScope();
+    ffi::Map<ffi::String, ffi::Any> attrs;
+    attrs.Set("num_input", ffi::Any(int64_t(3)));
+    attrs.Set("global_symbol", ffi::Any(ffi::String("foo")));
+    bb->AddFunction(Function(params, body, std::nullopt, /*is_pure=*/true, DictAttrs(attrs)),
+                    "foo");
+  }
+  AssertStructEqual(actual, bb->Finalize());
+}
+
+// ===========================================================================
+// TestEmpty  (mirrors test_empty from Python)
+// ===========================================================================
+TEST(NNOps, TestEmpty) {
+  // A forward function that takes no tensor inputs and returns nothing
+  // (just the effect tuple). The module should still have _initialize_effect.
+  ffi::TypedFunction<ffi::Any(ffi::Map<ffi::String, ffi::Any>)> forward =
+      [](ffi::Map<ffi::String, ffi::Any> /*args*/) -> ffi::Any {
+    return ffi::Any(ffi::Array<ffi::Any>{});
+  };
+
+  IRModule actual = ExportSingle("foo", forward, {}, {});
+
+  BlockBuilder bb = BlockBuilder::Create(std::nullopt);
+  EmitInitEffect(bb);
+  {
+    Var io("_io", ObjectStructInfo());
+    ffi::Array<Var> params{io};
+    bb->BeginScope(params);
+    bb->BeginDataflowBlock();
+    // Empty output tuple + effect
+    Var gv1 =
+        bb->EmitOutput(relax::Tuple({relax::Tuple(ffi::Array<Expr>{}), relax::Tuple({io})}), "gv");
+    BindingBlock df = bb->EndBlock();
+    Expr body = bb->Normalize(SeqExpr({df}, gv1));
+    bb->EndScope();
+    ffi::Map<ffi::String, ffi::Any> attrs;
+    attrs.Set("num_input", ffi::Any(int64_t(1)));
+    attrs.Set("global_symbol", ffi::Any(ffi::String("foo")));
+    bb->AddFunction(Function(params, body, std::nullopt, /*is_pure=*/true, DictAttrs(attrs)),
+                    "foo");
+  }
+  AssertStructEqual(actual, bb->Finalize());
+}
+
+// ===========================================================================
+// TestEmptyAssert  (mirrors test_empty_assert from Python)
+// ===========================================================================
+TEST(NNOps, TestEmptyAssert) {
+  // Same as TestEmpty — just verifies the module can be exported without error
+  // when there are no tensor ops (regression for assert-on-empty-output).
+  ffi::TypedFunction<ffi::Any(ffi::Map<ffi::String, ffi::Any>)> forward =
+      [](ffi::Map<ffi::String, ffi::Any> /*args*/) -> ffi::Any {
+    return ffi::Any(ffi::Array<ffi::Any>{});
+  };
+
+  // Should not throw.
+  EXPECT_NO_THROW({
+    IRModule mod = ExportSingle("foo", forward, {}, {});
+    EXPECT_TRUE(mod.defined());
+  });
+}
+
+// ===========================================================================
+// TestSampleTopPTopKFromSortedProb
+// ===========================================================================
+TEST(NNOps, TestSampleTopPTopKFromSortedProb) {
+  static const ffi::Function op_sample = NNOp("sample_top_p_top_k_from_sorted_prob");
+
+  ffi::TypedFunction<ffi::Any(ffi::Map<ffi::String, ffi::Any>)> forward =
+      [](ffi::Map<ffi::String, ffi::Any> args) -> ffi::Any {
+    NNTensor prob = args.at("prob").cast<NNTensor>();
+    NNTensor index = args.at("index").cast<NNTensor>();
+    NNTensor top_p = args.at("top_p").cast<NNTensor>();
+    NNTensor top_k = args.at("top_k").cast<NNTensor>();
+    NNTensor uniform_sample = args.at("uniform_sample").cast<NNTensor>();
+    NNTensor sample_indices = args.at("sample_indices").cast<NNTensor>();
+    return op_sample(prob->expr, index->expr, top_p->expr, top_k->expr, uniform_sample->expr,
+                     ffi::Optional<Var>(sample_indices->expr));
+  };
+
+  IRModule actual = ExportSingle(
+      "foo", forward, {"prob", "index", "top_p", "top_k", "uniform_sample", "sample_indices"},
+      {ffi::Any(MakeSpecTensor({2, 3}, "float32")), ffi::Any(MakeSpecTensor({2, 3}, "int64")),
+       ffi::Any(MakeSpecTensor({2, 1}, "float32")), ffi::Any(MakeSpecTensor({2, 1}, "int64")),
+       ffi::Any(MakeSpecTensor({3, 1}, "float32")), ffi::Any(MakeSpecTensor({3, 1}, "int64"))});
+
+  // The expected IR is structurally equal to what the Python test checks.
+  // Rather than rebuilding the full TIR PrimFuncs here (which are already
+  // tested by the Python suite), we verify the Relax function structure
+  // and that the two private TIR functions were added.
+  const auto& funcs = actual->functions;
+  EXPECT_EQ(funcs.size(), 4u)  // foo, _initialize_effect, get_renorm_prob, get_index_from_sorted
+      << "Expected 4 functions in module";
+
+  // Verify the Relax function 'foo' exists and has the right signature.
+  bool found_foo = false;
+  bool found_renorm = false;
+  bool found_index = false;
+  for (const auto& [gv, func] : funcs) {
+    std::string name = gv->name_hint;
+    if (name == "foo") found_foo = true;
+    if (name == "get_renorm_prob") found_renorm = true;
+    if (name == "get_index_from_sorted") found_index = true;
+  }
+  EXPECT_TRUE(found_foo) << "Missing 'foo' function";
+  EXPECT_TRUE(found_renorm) << "Missing 'get_renorm_prob' TIR function";
+  EXPECT_TRUE(found_index) << "Missing 'get_index_from_sorted' TIR function";
+
+  // Verify the Relax 'foo' function body has the expected bindings:
+  // cumsum, get_renorm_prob, get_index_from_sorted.
+  GlobalVar foo_gv;
+  for (const auto& [gv, func] : funcs) {
+    if (gv->name_hint == "foo") {
+      foo_gv = gv;
+      break;
+    }
+  }
+  ASSERT_TRUE(foo_gv.defined());
+  const auto* foo_func = funcs[foo_gv].as<FunctionNode>();
+  ASSERT_NE(foo_func, nullptr);
+  const auto* seq = foo_func->body.as<SeqExprNode>();
+  ASSERT_NE(seq, nullptr);
+  // Find the dataflow block
+  bool has_cumsum = false, has_renorm_call = false, has_index_call = false;
+  for (const auto& block : seq->blocks) {
+    for (const auto& binding : block->bindings) {
+      if (const auto* vb = binding.as<VarBindingNode>()) {
+        std::string hint = vb->var->name_hint();
+        if (hint == "cumsum") has_cumsum = true;
+        if (hint == "get_renorm_prob1") has_renorm_call = true;
+        if (hint == "get_index_from_sorted1") has_index_call = true;
+      }
+    }
+  }
+  EXPECT_TRUE(has_cumsum) << "Missing 'cumsum' binding";
+  EXPECT_TRUE(has_renorm_call) << "Missing 'get_renorm_prob1' call_tir binding";
+  EXPECT_TRUE(has_index_call) << "Missing 'get_index_from_sorted1' call_tir binding";
+}
+
+// ===========================================================================
+// TestRenormalizeTopPTopKProb
+// ===========================================================================
+TEST(NNOps, TestRenormalizeTopPTopKProb) {
+  static const ffi::Function op_renorm = NNOp("renormalize_top_p_top_k_prob");
+
+  ffi::TypedFunction<ffi::Any(ffi::Map<ffi::String, ffi::Any>)> forward =
+      [](ffi::Map<ffi::String, ffi::Any> args) -> ffi::Any {
+    NNTensor prob = args.at("prob").cast<NNTensor>();
+    NNTensor sorted_prob = args.at("sorted_prob").cast<NNTensor>();
+    NNTensor top_p = args.at("top_p").cast<NNTensor>();
+    NNTensor top_k = args.at("top_k").cast<NNTensor>();
+    return op_renorm(prob->expr, sorted_prob->expr, top_p->expr, top_k->expr);
+  };
+
+  IRModule actual = ExportSingle(
+      "foo", forward, {"prob", "sorted_prob", "top_p", "top_k"},
+      {ffi::Any(MakeSpecTensor({2, 3}, "float32")), ffi::Any(MakeSpecTensor({2, 3}, "float32")),
+       ffi::Any(MakeSpecTensor({2, 1}, "float32")), ffi::Any(MakeSpecTensor({2, 1}, "int64"))});
+
+  // Verify module structure: 3 functions expected
+  // (_initialize_effect, get_renorm_cutoff, filter_with_top_p_top_k)
+  const auto& funcs = actual->functions;
+  EXPECT_EQ(funcs.size(), 4u)
+      << "Expected 4 functions (foo, init_effect, get_renorm_cutoff, filter_with_top_p_top_k)";
+
+  bool found_foo = false;
+  bool found_cutoff = false;
+  bool found_filter = false;
+  for (const auto& [gv, func] : funcs) {
+    std::string name = gv->name_hint;
+    if (name == "foo") found_foo = true;
+    if (name == "get_renorm_cutoff") found_cutoff = true;
+    if (name == "filter_with_top_p_top_k") found_filter = true;
+  }
+  EXPECT_TRUE(found_foo) << "Missing 'foo' function";
+  EXPECT_TRUE(found_cutoff) << "Missing 'get_renorm_cutoff' TIR function";
+  EXPECT_TRUE(found_filter) << "Missing 'filter_with_top_p_top_k' TIR function";
+
+  // Verify the Relax 'foo' function has the expected bindings:
+  // cumsum, get_renorm_cutoff, filter_with_top_p_top_k, sum, renorm_prob.
+  GlobalVar foo_gv;
+  for (const auto& [gv, func] : funcs) {
+    if (gv->name_hint == "foo") {
+      foo_gv = gv;
+      break;
+    }
+  }
+  ASSERT_TRUE(foo_gv.defined());
+  const auto* foo_func = funcs[foo_gv].as<FunctionNode>();
+  ASSERT_NE(foo_func, nullptr);
+  const auto* seq = foo_func->body.as<SeqExprNode>();
+  ASSERT_NE(seq, nullptr);
+
+  bool has_cumsum = false, has_cutoff_call = false, has_filter_call = false;
+  bool has_sum = false, has_renorm = false;
+  for (const auto& block : seq->blocks) {
+    for (const auto& binding : block->bindings) {
+      if (const auto* vb = binding.as<VarBindingNode>()) {
+        std::string hint = vb->var->name_hint();
+        if (hint == "cumsum") has_cumsum = true;
+        if (hint == "get_renorm_cutoff1") has_cutoff_call = true;
+        if (hint == "filter_with_top_p_top_k1") has_filter_call = true;
+        if (hint == "sum") has_sum = true;
+        if (hint == "renorm_prob") has_renorm = true;
+      }
+    }
+  }
+  EXPECT_TRUE(has_cumsum) << "Missing 'cumsum' binding";
+  EXPECT_TRUE(has_cutoff_call) << "Missing 'get_renorm_cutoff1' call_tir binding";
+  EXPECT_TRUE(has_filter_call) << "Missing 'filter_with_top_p_top_k1' call_tir binding";
+  EXPECT_TRUE(has_sum) << "Missing 'sum' binding";
+  EXPECT_TRUE(has_renorm) << "Missing 'renorm_prob' binding";
 }
 
 }  // namespace testing
