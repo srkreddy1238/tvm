@@ -96,8 +96,8 @@ class Exporter(tvm_ffi.Object):
         # pylint: disable=protected-access
         all_symbols: list[str] = []
         for extern_mod in self.extern_mods:
-            all_symbols.extend(extern_mod._symbols.keys())
-        duplicated_symbols = list(set(mod._symbols.keys()) & set(all_symbols))
+            all_symbols.extend(list(extern_mod.symbols.keys()))
+        duplicated_symbols = list(set(mod.symbols.keys()) & set(all_symbols))
         # pylint: enable=protected-access
         if duplicated_symbols:
             raise ValueError(f"Duplicate symbols: {duplicated_symbols}")
