@@ -1170,7 +1170,7 @@ TEST(NNOps, TestTensorIrOp) {
   ffi::TypedFunction<ffi::Any(ffi::Map<ffi::String, ffi::Any>)> forward =
       [fused_rope](ffi::Map<ffi::String, ffi::Any> args) -> ffi::Any {
     NNTensor qkv = args.at("qkv").cast<NNTensor>();
-    Var offset_var = args.at("offset").cast<Var>();
+    tir::Var offset_var = args.at("offset").cast<tir::Var>();  // Expect tir::Var, not relax::Var
     DataType f16 = DataType::Float(16);
     auto I64 = [](int64_t v) { return IntImm(DataType::Int(64), v); };
     auto make_out = [&](int heads) -> Var {
@@ -1179,7 +1179,7 @@ TEST(NNOps, TestTensorIrOp) {
           TensorStructInfo(
               ShapeExpr(ffi::Array<PrimExpr>{I64(1), I64(1), I64(heads), I64(kHeadDim)}), f16));
     };
-    ffi::Array<Expr> call_args{qkv->expr, offset_var};
+    ffi::Array<Expr> call_args{qkv->expr, PrimValue(offset_var)};  // Wrap tir::Var in PrimValue
     ffi::Array<ffi::Any> out_list{ffi::Any(make_out(kNumQHeads)), ffi::Any(make_out(kNumKVHeads)),
                                   ffi::Any(make_out(kNumKVHeads))};
     return op_tensor_ir_op(fused_rope, ffi::String("llama_fused_rope"), call_args, out_list);
@@ -1238,13 +1238,13 @@ TEST(NNOps, TestTensorIrInplaceOp) {
     NNTensor embedding_table = args.at("embedding_table").cast<NNTensor>();
     NNTensor input_ids = args.at("input_ids").cast<NNTensor>();
     NNTensor embedding_dst = args.at("embedding_dst").cast<NNTensor>();
-    Var offset_var = args.at("offset").cast<Var>();
+    tir::Var offset_var = args.at("offset").cast<tir::Var>();  // SpecInt passed as tir::Var
     StructInfo dst_sinfo = GetStructInfo(embedding_dst->expr);
     const auto* ts = dst_sinfo.as<TensorStructInfoNode>();
     TVM_FFI_ICHECK(ts) << "embedding_dst must have TensorStructInfo";
     Var out_ph("out", ffi::GetRef<TensorStructInfo>(ts));
     ffi::Array<Expr> call_args{embedding_table->expr, input_ids->expr, embedding_dst->expr,
-                               offset_var};
+                               PrimValue(offset_var)};  // Wrap tir::Var in PrimValue
     ffi::Array<Integer> inplace_indices{Integer(2)};
     ffi::Array<ffi::Any> out_list{ffi::Any(out_ph)};
     return op_inplace(inplace_take, ffi::String("inplace_take"), call_args, inplace_indices,

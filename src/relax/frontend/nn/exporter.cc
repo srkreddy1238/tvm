@@ -317,7 +317,8 @@ static void EmitMethod(BlockBuilder& bb, const ffi::String& method_name, const M
         str2var[std::string(arg_name)] = tvar;
         Var v(std::string(arg_name), ShapeStructInfo(ffi::Array<PrimExpr>{tvar}));
         input_vars.push_back(v);
-        explicit_inputs.push_back(ffi::Any(v));
+        // Pass the tir::Var to forward() (matches Python exporter behavior)
+        explicit_inputs.push_back(ffi::Any(tvar));
 
       } else if (spec_obj->IsInstance<SpecTupleNode>()) {
         const auto* st = spec_obj.as<SpecTupleNode>();
@@ -643,6 +644,47 @@ static void EmitMethod(BlockBuilder& bb, const ffi::String& method_name, const M
 // ExportToIRModule
 // ===========================================================================
 
+// ===========================================================================
+// Exporter class - implementation
+// ===========================================================================
+
+ExporterNode::ExporterNode(bool debug)
+    : builder(BlockBuilder::Create(std::nullopt)), debug(debug) {}
+
+void ExporterNode::AddExternalModule(runtime::ObjectRef extern_mod) {
+  // Check for duplicate symbols (Python-side validation)
+  extern_mods.push_back(extern_mod);
+}
+
+ffi::Array<ffi::Any> ExporterNode::Build(ModuleSpec spec) {
+  // Delegate to ExportToIRModule
+  IRModule mod = ExportToIRModule(spec, debug);
+
+  // Return [mod, named_params, extern_mods] as Array<Any>
+  ffi::Array<ffi::Any> result;
+  result.push_back(ffi::Any(mod));
+  result.push_back(ffi::Any(spec.get()->named_params));
+  result.push_back(ffi::Any(extern_mods));
+  return result;
+}
+
+void ExporterNode::RegisterReflection() {
+  namespace refl = tvm::ffi::reflection;
+  refl::ObjectDef<ExporterNode>()
+      .def(refl::init<bool>())
+      .def_rw("builder", &ExporterNode::builder)
+      .def_rw("debug", &ExporterNode::debug)
+      .def_rw("extern_mods", &ExporterNode::extern_mods)
+      .def("add_external_module", &ExporterNode::AddExternalModule)
+      .def("_build_cpp", &ExporterNode::Build);  // Use _build_cpp to avoid name collision
+}
+
+Exporter::Exporter(bool debug) { data_ = ffi::make_object<ExporterNode>(debug); }
+
+// ===========================================================================
+// ExportToIRModule
+// ===========================================================================
+
 IRModule ExportToIRModule(ModuleSpec spec, bool debug) {
   const ModuleSpecNode* ms_node = spec.get();
   BlockBuilder bb = BlockBuilder::Create(std::nullopt);
@@ -673,6 +715,8 @@ IRModule ExportToIRModule(ModuleSpec spec, bool debug) {
 // ===========================================================================
 
 TVM_FFI_STATIC_INIT_BLOCK() {
+  ExporterNode::RegisterReflection();
+
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef()
       .def("relax.frontend.nn.ExportToIRModule",
@@ -680,7 +724,9 @@ TVM_FFI_STATIC_INIT_BLOCK() {
              return ExportToIRModule(std::move(spec), debug);
            })
       .def("relax.frontend.nn.GetCurrentIOVar", GetCurrentIOVar)
-      .def("relax.frontend.nn.SetCurrentIOVar", SetCurrentIOVar);
+
+      .def("relax.frontend.nn.SetCurrentIOVar", SetCurrentIOVar)
+      .def("relax.frontend.nn.Exporter", [](bool debug) { return Exporter(debug); });
 }
 
 }  // namespace nn

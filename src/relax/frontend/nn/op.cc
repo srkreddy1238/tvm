@@ -716,6 +716,8 @@ static ffi::Any NNTensorIrOp(tir::PrimFunc func, ffi::String name_hint, ffi::Arr
       TVM_FFI_ICHECK(shape_sinfo->values.defined() && shape_sinfo->values.value().size() == 1)
           << "tensor_ir_op: tir_var arg must be a Shape with exactly one value";
       tir_vars.push_back(shape_sinfo->values.value()[0]);
+    } else if (const auto* prim_sinfo = sinfo.as<PrimStructInfoNode>()) {
+      tir_vars.push_back(prim_sinfo->value.value());
     } else {
       TVM_FFI_THROW(TypeError) << "tensor_ir_op: unsupported arg struct_info: "
                                << sinfo->GetTypeKey();
@@ -761,6 +763,8 @@ static ffi::Any NNTensorIrInplaceOp(tir::PrimFunc func, ffi::String name_hint,
       TVM_FFI_ICHECK(shape_sinfo->values.defined() && shape_sinfo->values.value().size() == 1)
           << "tensor_ir_inplace_op: tir_var arg must be a Shape with exactly one value";
       tir_vars.push_back(shape_sinfo->values.value()[0]);
+    } else if (const auto* prim_sinfo = sinfo.as<PrimStructInfoNode>()) {
+      tir_vars.push_back(prim_sinfo->value.value());
     } else {
       TVM_FFI_THROW(TypeError) << "tensor_ir_inplace_op: unsupported arg struct_info: "
                                << sinfo->GetTypeKey();

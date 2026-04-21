@@ -78,6 +78,46 @@ ffi::Optional<Var> GetCurrentIOVar();
  */
 void SetCurrentIOVar(ffi::Optional<Var> v);
 
+// ===========================================================================
+// Exporter class - wraps ExportToIRModule with support for spec.Object
+// ===========================================================================
+
+/*!
+ * \brief Exporter node that wraps ExportToIRModule functionality.
+ *
+ * This class provides a stateful interface for building IRModules,
+ * maintaining a BlockBuilder and tracking external modules.
+ * The Python Exporter class wraps this for the fast path (no spec.Object).
+ */
+class ExporterNode : public runtime::Object {
+ public:
+  BlockBuilder builder;
+  bool debug;
+  ffi::Array<runtime::ObjectRef> extern_mods;  // Array of ExternModule objects
+
+  ExporterNode(bool debug);
+
+  void AddExternalModule(runtime::ObjectRef extern_mod);
+
+  /*!
+   * \brief Build the ModuleSpec to TVM IRModule.
+   * \param spec The ModuleSpec to export.
+   * \return Array[IRModule, named_params as Map, extern_mods as Array]
+   */
+  ffi::Array<ffi::Any> Build(ModuleSpec spec);
+
+  static void RegisterReflection();
+
+  static constexpr bool _type_mutable = true;
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.frontend.nn.Exporter", ExporterNode, runtime::Object);
+};
+
+class Exporter : public runtime::ObjectRef {
+ public:
+  explicit Exporter(bool debug);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(Exporter, runtime::ObjectRef, ExporterNode);
+};
+
 }  // namespace nn
 }  // namespace frontend
 }  // namespace relax

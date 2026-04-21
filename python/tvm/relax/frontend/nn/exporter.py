@@ -21,6 +21,8 @@ import operator
 import threading
 import typing
 
+import tvm_ffi
+
 from tvm import tir
 from tvm.ir import IRModule
 
@@ -59,19 +61,19 @@ def add_extern(mod: extern.ExternModule) -> None:
     exporter.add_external_module(mod)
 
 
-class Exporter:
-    """Builder of ModuleSpec, which exports an nn.Module to TVM IRModule."""
+@tvm_ffi.register_object("relax.frontend.nn.Exporter")
+class Exporter(tvm_ffi.Object):
+    """Builder of ModuleSpec, which exports an nn.Module to TVM IRModule.
+
+    This is a thin Python wrapper around the C++ Exporter implementation.
+    The C++ implementation handles all the heavy lifting (EmitMethod, EmitInitializeEffect, etc.).
+    Python is only needed for spec.Object support (Python-side object instantiation).
+    """
 
     _tls = threading.local()
 
-    builder: BlockBuilder
-    io_effect: core.Effect
-    extern_mods: list[extern.ExternModule]
-
     def __init__(self, debug: bool) -> None:
-        self.builder = BlockBuilder()
-        self.io_effect = IOEffect() if debug else None
-        self.extern_mods = []
+        self.__ffi_init__(debug)
 
     @staticmethod
     def current() -> "Exporter":
@@ -90,6 +92,7 @@ class Exporter:
 
     def add_external_module(self, mod: extern.ExternModule) -> None:
         """Add an external module to the exporter."""
+        # Check for duplicate symbols
         # pylint: disable=protected-access
         all_symbols: list[str] = []
         for extern_mod in self.extern_mods:
@@ -98,9 +101,9 @@ class Exporter:
         # pylint: enable=protected-access
         if duplicated_symbols:
             raise ValueError(f"Duplicate symbols: {duplicated_symbols}")
-        self.extern_mods.append(mod)
+        self._add_external_module(mod)
 
-    def build(  # pylint: disable=too-many-locals
+    def build(
         self,
         spec: _spec.ModuleSpec,
     ) -> tuple[
@@ -108,9 +111,40 @@ class Exporter:
         list[tuple[str, core.Parameter]],
         list[extern.ExternModule],
     ]:
-        """Build the ModuleSpec to TVM IRModule. Returns the IRModule and the parameters."""
+        """Build the ModuleSpec to TVM IRModule. Returns the IRModule and the parameters.
 
-        # pylint: disable=protected-access
+        For spec.Object support, we need to use the Python _emit_method implementation
+        since it requires Python-side object instantiation. For all other cases,
+        the C++ implementation is used.
+        """
+        # Check if any method uses spec.Object
+        has_object_spec = any(
+            isinstance(s, _spec.Object) for ms in spec.method_specs for s in ms.arg_specs
+        )
+
+        if has_object_spec:
+            # Use Python implementation for spec.Object support
+            return self._build_python(spec)
+        else:
+            # Delegate to C++ implementation (fast path)
+            result = self._build_cpp(spec)  # Returns Array[IRModule, named_params, extern_mods]
+            mod = result[0]
+            named_params = result[1]  # Map<String, NNParameter>
+            extern_mods = result[2]  # Array<ExternModule>
+
+            # Convert named_params Map to list of tuples
+            params = list(named_params.items())
+
+            # Convert extern_mods Array to list
+            ext_mods = list(extern_mods)
+
+            return mod, params, ext_mods
+
+    def _build_python(self, spec: _spec.ModuleSpec):
+        """Python implementation for spec.Object support (fallback)."""
+
+        # This is the old Python implementation, kept only for spec.Object
+        # pylint: disable=protected-access,import-outside-toplevel
         def _params() -> list[tuple[str, core.Parameter]]:
             params = []
             for name, param in core._attribute_finder(
@@ -121,18 +155,19 @@ class Exporter:
 
         def _effects() -> list[tuple[str, core.Effect]]:
             result = []
-            if self.io_effect is not None:
-                result.append(("", self.io_effect))
+            # Add IOEffect if debug=True
+            if self.debug:
+                result.append(("", IOEffect()))
             for name, effect in core._attribute_finder(
                 spec._module, "", condition_yield=lambda x: isinstance(x, core.Effect)
             ):
                 result.append((name, effect))
             return result
 
-        # pylint: enable=protected-access
         params = None
         effects = _effects()
-        ext_mods = self.extern_mods
+        ext_mods = list(self.extern_mods)
+
         with self:
             if effects:
                 with self.builder.function("_initialize_effect"):

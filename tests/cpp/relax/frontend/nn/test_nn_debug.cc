@@ -267,8 +267,8 @@ TEST(NNDebug, TestDebugFunc) {
   ffi::TypedFunction<ffi::Any(ffi::Map<ffi::String, ffi::Any>)> forward =
       [kFuncName, kLineInfo](ffi::Map<ffi::String, ffi::Any> args) -> ffi::Any {
     NNTensor x = args.at("x").cast<NNTensor>();
-    // v is a SpecInt → its relax Var has ShapeStructInfo([v_sym])
-    Var v_var = args.at("v").cast<Var>();
+    // v is a SpecInt → passed as tir::Var to forward()
+    tir::Var v_var = args.at("v").cast<tir::Var>();
 
     auto get_io = ffi::Function::GetGlobal("relax.frontend.nn.GetCurrentIOVar");
     TVM_FFI_ICHECK(get_io.has_value());
@@ -325,12 +325,13 @@ TEST(NNDebug, TestDebugFunc) {
 
     // _io1 = call_pure_packed(ExternFunc(kFuncName), StringImm(kLineInfo),
     //                         x, PrimValue(1i64), PrimValue(2.0f64),
-    //                         StringImm("test"), v)
+    //                         StringImm("test"), PrimValue(v_sym))
     static const Op& call_pure_packed_op = Op::Get("relax.call_pure_packed");
     Expr call = Call(
         call_pure_packed_op,
         {ExternFunc(kFuncName), StringImm(kLineInfo), x, PrimValue(IntImm(DataType::Int(64), 1)),
-         PrimValue(FloatImm(DataType::Float(64), 2.0)), StringImm("test"), v},
+         PrimValue(FloatImm(DataType::Float(64), 2.0)), StringImm("test"),
+         PrimValue(v_sym)},  // Pass tir::Var wrapped in PrimValue, not relax::Var
         tvm::Attrs(), {ObjectStructInfo()});
     Var io1 = bb->Emit(call, "_io");
 
@@ -524,23 +525,23 @@ TEST(NNDebug, TestDebugFuncJIT) {
   g_debug_called = false;
 
   namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def("testing.relax.frontend.nn.test_debug_func_jit",
-                        [](ffi::String lineno, runtime::Tensor tensor, int64_t const_int,
-                           double const_float, ffi::String const_str, ffi::Shape var_int_shape) {
-                          // lineno contains the source location string
-                          EXPECT_FALSE(std::string(lineno).empty());
-                          // tensor shape must be [10, 5]
-                          ASSERT_EQ(tensor.Shape().size(), 2);
-                          EXPECT_EQ(tensor.Shape()[0], 10);
-                          EXPECT_EQ(tensor.Shape()[1], 5);
-                          EXPECT_EQ(const_int, 1);
-                          EXPECT_DOUBLE_EQ(const_float, 2.0);
-                          EXPECT_EQ(std::string(const_str), "test");
-                          // SpecInt args arrive as ffi::Shape({value}) at runtime.
-                          ASSERT_EQ(var_int_shape.size(), 1);
-                          EXPECT_EQ(var_int_shape[0], 8);
-                          g_debug_called = true;
-                        });
+  refl::GlobalDef().def(
+      "testing.relax.frontend.nn.test_debug_func_jit",
+      [](ffi::String lineno, runtime::Tensor tensor, int64_t const_int, double const_float,
+         ffi::String const_str, int64_t var_int) {  // SpecInt arrives as int64_t at runtime
+        // lineno contains the source location string
+        EXPECT_FALSE(std::string(lineno).empty());
+        // tensor shape must be [10, 5]
+        ASSERT_EQ(tensor.Shape().size(), 2);
+        EXPECT_EQ(tensor.Shape()[0], 10);
+        EXPECT_EQ(tensor.Shape()[1], 5);
+        EXPECT_EQ(const_int, 1);
+        EXPECT_DOUBLE_EQ(const_float, 2.0);
+        EXPECT_EQ(std::string(const_str), "test");
+        // SpecInt args arrive as int64_t at runtime (tir::Var wrapped in PrimValue)
+        EXPECT_EQ(var_int, 8);
+        g_debug_called = true;
+      });
 
   const ffi::String kFuncName = "testing.relax.frontend.nn.test_debug_func_jit";
   const ffi::String kLineInfo = "test_nn_debug.cc:0";
@@ -549,7 +550,7 @@ TEST(NNDebug, TestDebugFuncJIT) {
   ffi::TypedFunction<ffi::Any(ffi::Map<ffi::String, ffi::Any>)> forward =
       [kFuncName, kLineInfo](ffi::Map<ffi::String, ffi::Any> args) -> ffi::Any {
     NNTensor x = args.at("x").cast<NNTensor>();
-    Var v_var = args.at("v").cast<Var>();
+    tir::Var v_var = args.at("v").cast<tir::Var>();  // SpecInt passed as tir::Var
     auto get_io = ffi::Function::GetGlobal("relax.frontend.nn.GetCurrentIOVar");
     TVM_FFI_ICHECK(get_io.has_value());
     Var io_var = (*get_io)().cast<Var>();
