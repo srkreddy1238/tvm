@@ -181,6 +181,11 @@ class NNParameter : public runtime::ObjectRef {
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(NNParameter, runtime::ObjectRef, ParameterNode);
 };
 
+// Forward declarations needed by NNModuleNode::ExportTVM / Jit.
+// Full definitions are in spec.h and cpp_module.h respectively.
+class ModuleSpecNode;
+class ModuleSpec;
+
 // ---------------------------------------------------------------------------
 // NNObjectNode
 // ---------------------------------------------------------------------------
@@ -262,6 +267,34 @@ class NNModuleNode : public runtime::Object {
   /*! \brief Recursively convert all parameters and sub-modules to dtype. */
   void To(ffi::String dtype) const;
 
+  // ---- export / jit -------------------------------------------------------
+
+  /*!
+   * \brief Export this module to a TVM IRModule.
+   *
+   * Mirrors Python Module.export_tvm(). The ModuleSpec must be fully
+   * constructed (forward functions, arg specs, named_params) before calling.
+   *
+   * \param spec    ModuleSpec describing methods and parameters.
+   * \param debug   If true, add IOEffect (_io) to every method signature.
+   * \return        The compiled IRModule.
+   */
+  IRModule ExportTVM(ModuleSpec spec, bool debug) const;
+
+  /*!
+   * \brief JIT-compile this module to a CppModule ready for inference.
+   *
+   * Mirrors Python Module.jit(): export → attach extern mods → compile → wrap.
+   *
+   * \param spec      ModuleSpec describing methods and parameters.
+   * \param device    Execution device (default: CPU 0).
+   * \param pipeline  Relax pipeline name (default: "cpu_generic").
+   * \param debug     If true, add IOEffect to every method.
+   * \return          A CppModule (as ObjectRef) wrapping the compiled VM.
+   */
+  runtime::ObjectRef Jit(ModuleSpec spec, tvm::Device device, ffi::String pipeline,
+                         bool debug) const;
+
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
     refl::ObjectDef<NNModuleNode>()
@@ -270,7 +303,9 @@ class NNModuleNode : public runtime::Object {
         .def("named_parameters", &NNModuleNode::NamedParameters)
         .def("state_dict", &NNModuleNode::StateDict)
         .def("load_state_dict", &NNModuleNode::LoadStateDict)
-        .def("to", &NNModuleNode::To);
+        .def("to", &NNModuleNode::To)
+        .def("export_tvm", &NNModuleNode::ExportTVM)
+        .def("jit", &NNModuleNode::Jit);
   }
 
   static constexpr bool _type_mutable = true;

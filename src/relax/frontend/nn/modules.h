@@ -50,6 +50,7 @@
 #include <string>
 
 #include "core.h"
+#include "spec.h"
 
 namespace tvm {
 namespace relax {

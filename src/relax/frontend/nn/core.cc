@@ -35,6 +35,12 @@
 #include <sstream>
 #include <string>
 
+// ExportTVM and Jit delegate to ExportToIRModule and nn::Jit respectively.
+// Include their headers here (after core.h to avoid circular dependency).
+#include "cpp_module.h"
+#include "exporter.h"
+#include "spec.h"
+
 namespace tvm {
 namespace relax {
 namespace frontend {
@@ -486,6 +492,19 @@ void NNModuleNode::To(ffi::String dtype) const {
     auto params = GetNativeParameters(obj);
     for (const auto& [_, param] : params) param->To(dtype);
   }
+}
+
+// ===========================================================================
+// NNModuleNode::ExportTVM / Jit
+// ===========================================================================
+
+IRModule NNModuleNode::ExportTVM(ModuleSpec spec, bool debug) const {
+  return ExportToIRModule(std::move(spec), debug);
+}
+
+runtime::ObjectRef NNModuleNode::Jit(ModuleSpec spec, tvm::Device device, ffi::String pipeline,
+                                     bool debug) const {
+  return nn::Jit(std::move(spec), device, std::move(pipeline), debug);
 }
 
 TVM_FFI_STATIC_INIT_BLOCK() {

@@ -64,6 +64,7 @@
 
 // nn frontend headers
 #include "../../../../../src/relax/frontend/nn/core.h"
+#include "../../../../../src/relax/frontend/nn/cpp_module.h"
 #include "../../../../../src/relax/frontend/nn/exporter.h"
 #include "../../../../../src/relax/frontend/nn/spec.h"
 #include "../../../../../src/relax/ir/emit_te.h"
@@ -99,15 +100,49 @@ static SpecTensor MakeSpecTensor(std::initializer_list<int64_t> dims, const std:
   return SpecTensor(shape, dtype);
 }
 
-// Build and export a single-method module (debug=true by default).
+// ---------------------------------------------------------------------------
+// TestModuleNode: concrete NNModuleNode used by all op tests.
+// Holds a forward function + arg spec; ExportDebug() calls ExportTVM(debug=true).
+// ---------------------------------------------------------------------------
+class TestModuleNode : public NNModuleNode {
+ public:
+  ffi::Function forward_fn;
+  ffi::Array<ffi::String> arg_names;
+  ffi::Array<ffi::Any> arg_specs;
+
+  TestModuleNode(ffi::Function fn, ffi::Array<ffi::String> names, ffi::Array<ffi::Any> specs)
+      : forward_fn(std::move(fn)),
+        arg_names(std::move(names)),
+        arg_specs(std::move(specs)) {}
+
+  ModuleSpec MakeSpec(const std::string& method_name,
+                      ffi::Map<ffi::String, NNParameter> named_params = {},
+                      ffi::Map<ffi::String, runtime::ObjectRef> named_effects = {}) const {
+    MethodSpec ms(forward_fn, arg_names, arg_specs, "plain", "plain");
+    return ModuleSpec(ffi::Array<ffi::String>{ffi::String(method_name)},
+                      ffi::Array<ffi::Any>{ffi::Any(ms)}, named_params, named_effects);
+  }
+
+  IRModule ExportDebug(const std::string& method_name = "test") const {
+    return ExportTVM(MakeSpec(method_name), /*debug=*/true);
+  }
+
+  static constexpr bool _type_mutable = true;
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("testing.nn.TestModule", TestModuleNode, NNModuleNode);
+};
+
+// Build and export a single-method module via NNModuleNode::ExportTVM.
+// debug=true by default (matches existing test expectations).
 static IRModule ExportSingle(const std::string& method_name, ffi::Function forward_fn,
                              ffi::Array<ffi::String> arg_names, ffi::Array<ffi::Any> arg_specs,
                              ffi::Map<ffi::String, NNParameter> named_params = {},
                              bool debug = true) {
   MethodSpec ms(forward_fn, arg_names, arg_specs, "plain", "plain");
   ModuleSpec mod_spec(ffi::Array<ffi::String>{ffi::String(method_name)},
-                      ffi::Array<ffi::Any>{ffi::Any(ms)}, named_params, {});  // named_effects
-  return ExportToIRModule(mod_spec, debug);
+                      ffi::Array<ffi::Any>{ffi::Any(ms)}, named_params, {});
+  // Delegate through NNModuleNode::ExportTVM so the module-centric path is exercised.
+  TestModuleNode mod(forward_fn, arg_names, arg_specs);
+  return mod.ExportTVM(mod.MakeSpec(method_name, named_params), debug);
 }
 
 // ---------------------------------------------------------------------------

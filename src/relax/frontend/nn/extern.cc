@@ -67,8 +67,6 @@
 #include <thread>
 #include <vector>
 
-#include "core.h"
-
 namespace tvm {
 namespace relax {
 namespace frontend {

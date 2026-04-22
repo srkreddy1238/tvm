@@ -45,6 +45,7 @@
 
 // nn frontend headers
 #include "../../../../../src/relax/frontend/nn/core.h"
+#include "../../../../../src/relax/frontend/nn/cpp_module.h"
 #include "../../../../../src/relax/frontend/nn/exporter.h"
 #include "../../../../../src/relax/frontend/nn/spec.h"
 
@@ -55,7 +56,7 @@ namespace nn {
 namespace testing {
 
 // ===========================================================================
-// Shared helpers (mirrors test_nn_ops.cc)
+// Shared helpers
 // ===========================================================================
 
 static ffi::Function NNOp(const std::string& name) {
@@ -77,13 +78,63 @@ static SpecTensor MakeSpecTensor(std::initializer_list<int64_t> dims, const std:
   return SpecTensor(shape, dtype);
 }
 
-// Export a single-method module with debug=true.
+// ---------------------------------------------------------------------------
+// TestModule: a concrete NNModuleNode subclass used by all tests.
+//
+// Holds a forward ffi::Function and a MethodSpec so that ExportTVM / Jit
+// can be called directly on the module, mirroring Python's Module.jit().
+//
+// Usage:
+//   TestModule mod(forward_fn, arg_names, arg_specs);
+//   IRModule ir  = mod.ExportTVM(mod.MakeSpec("forward"), /*debug=*/true);
+//   CppModule vm = mod.JitCpp("forward", {kDLCPU,0}, "cpu_generic", true);
+// ---------------------------------------------------------------------------
+class TestModuleNode : public NNModuleNode {
+ public:
+  ffi::Function forward_fn;
+  ffi::Array<ffi::String> arg_names;
+  ffi::Array<ffi::Any> arg_specs;
+
+  TestModuleNode(ffi::Function forward_fn, ffi::Array<ffi::String> arg_names,
+                 ffi::Array<ffi::Any> arg_specs)
+      : forward_fn(std::move(forward_fn)),
+        arg_names(std::move(arg_names)),
+        arg_specs(std::move(arg_specs)) {}
+
+  // Build a ModuleSpec for the given method name.
+  ModuleSpec MakeSpec(const std::string& method_name,
+                      ffi::Map<ffi::String, NNParameter> named_params = {},
+                      ffi::Map<ffi::String, runtime::ObjectRef> named_effects = {}) const {
+    MethodSpec ms(forward_fn, arg_names, arg_specs, "plain", "plain");
+    return ModuleSpec(ffi::Array<ffi::String>{ffi::String(method_name)},
+                      ffi::Array<ffi::Any>{ffi::Any(ms)}, named_params, named_effects);
+  }
+
+  // Convenience: ExportTVM with debug=true.
+  IRModule ExportDebug(const std::string& method_name = "forward") const {
+    return ExportTVM(MakeSpec(method_name), /*debug=*/true);
+  }
+
+  // Convenience: Jit to CppModule.
+  CppModule JitCpp(const std::string& method_name = "forward", tvm::Device device = {kDLCPU, 0},
+                   ffi::String pipeline = "cpu_generic", bool debug = false) const {
+    auto result = NNModuleNode::Jit(MakeSpec(method_name), device, pipeline, debug);
+    return Downcast<CppModule>(result);
+  }
+
+  static constexpr bool _type_mutable = true;
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("testing.nn.TestModule", TestModuleNode, NNModuleNode);
+};
+
+// ---------------------------------------------------------------------------
+// ExportSingle: thin wrapper kept for the IR-structure tests that build
+// expected IR manually and compare with AssertStructEqual.
+// Now delegates to TestModuleNode::ExportDebug.
+// ---------------------------------------------------------------------------
 static IRModule ExportSingle(const std::string& method_name, ffi::Function forward_fn,
                              ffi::Array<ffi::String> arg_names, ffi::Array<ffi::Any> arg_specs) {
-  MethodSpec ms(forward_fn, arg_names, arg_specs, "plain", "plain");
-  ModuleSpec mod_spec(ffi::Array<ffi::String>{ffi::String(method_name)},
-                      ffi::Array<ffi::Any>{ffi::Any(ms)}, {}, {});  // named_params, named_effects
-  return ExportToIRModule(mod_spec, /*debug=*/true);
+  TestModuleNode mod(forward_fn, arg_names, arg_specs);
+  return mod.ExportTVM(mod.MakeSpec(method_name), /*debug=*/true);
 }
 
 // Build the _initialize_effect function and add it to bb (public, is_pure=true).
@@ -351,6 +402,13 @@ TEST(NNDebug, TestDebugFunc) {
 
 // ===========================================================================
 // Runtime helpers shared by the JIT tests
+//
+// The low-level CompileToVM / GetOutputRec / InitEffect / RunForward helpers
+// are kept for the IR-structure tests (TestDebugPrintJIT / TestDebugFuncJIT)
+// that build their IRModule manually and need fine-grained control.
+//
+// The new Jit-based tests (TestDebugPrintJIT_Jit / TestDebugFuncJIT_Jit) use
+// the high-level CppModule / Jit() API instead.
 // ===========================================================================
 
 // Compile an IRModule to a VM using tvm::driver::Compile (llvm/cpu_generic).
@@ -382,33 +440,7 @@ static ffi::Module CompileToVM(const IRModule& mod) {
 // ffi::Array<ffi::Any> (tuple node).
 static ffi::Any GetOutputRec(const ffi::Module& vm, const std::string& func_name,
                              const std::vector<int>& indices) {
-  ffi::Function get_arity = vm->GetFunction("get_output_arity").value();
-  ffi::Function get_output = vm->GetFunction("get_output").value();
-
-  // Build the packed-args vector: (func_name, idx0, idx1, ...)
-  std::vector<ffi::AnyView> arity_args;
-  arity_args.push_back(ffi::String(func_name));
-  for (int idx : indices) arity_args.push_back(idx);
-
-  ffi::Any arity_rv;
-  get_arity.CallPacked(ffi::PackedArgs(arity_args.data(), arity_args.size()), &arity_rv);
-  int64_t arity = arity_rv.cast<int64_t>();
-
-  if (arity == -1) {
-    // Leaf: call get_output(func_name, idx0, idx1, ...)
-    ffi::Any out_rv;
-    get_output.CallPacked(ffi::PackedArgs(arity_args.data(), arity_args.size()), &out_rv);
-    return out_rv;
-  }
-
-  // Tuple node: recurse for each child.
-  ffi::Array<ffi::Any> result;
-  for (int64_t i = 0; i < arity; ++i) {
-    std::vector<int> child_indices = indices;
-    child_indices.push_back(static_cast<int>(i));
-    result.push_back(GetOutputRec(vm, func_name, child_indices));
-  }
-  return ffi::Any(result);
+  return CppModuleNode::GetOutputRec(vm, func_name, indices);
 }
 
 // Call _initialize_effect() and return the effect state as Array<Any>.
@@ -458,18 +490,11 @@ static runtime::Tensor RunForward(const ffi::Module& vm, const std::string& func
 }
 
 // ===========================================================================
-// TestDebugPrintJIT
-//
-// Mirrors test_debug_print() in test_frontend_nn_debug.py:
-//   - Exports a module with op.print_(x) in debug mode
-//   - Compiles with tvm::driver::Compile (llvm)
-//   - Runs forward(x, _io) and verifies the output tensor shape matches input
+// TestDebugPrintJIT  (low-level: manual ExportSingle + CompileToVM)
 // ===========================================================================
 TEST(NNDebug, TestDebugPrintJIT) {
   static const ffi::Function op_debug_func = NNOp("debug_func");
 
-  // forward: print_(x); return x
-  // print_(x) calls debug_func("vm.builtin.debug_print", x, _line_info=...)
   const ffi::String kLineInfo = "test_nn_debug.cc:0";
   ffi::TypedFunction<ffi::Any(ffi::Map<ffi::String, ffi::Any>)> forward =
       [kLineInfo](ffi::Map<ffi::String, ffi::Any> args) -> ffi::Any {
@@ -482,45 +507,31 @@ TEST(NNDebug, TestDebugPrintJIT) {
     return ffi::Any(x->expr);
   };
 
-  IRModule mod =
-      ExportSingle("forward", forward, {"x"}, {ffi::Any(MakeSpecTensor({10, 5}, "float32"))});
+  // Use TestModuleNode::ExportDebug — the module-centric API.
+  TestModuleNode mod(forward, {"x"}, {ffi::Any(MakeSpecTensor({10, 5}, "float32"))});
+  IRModule ir_mod = mod.ExportDebug("forward");
 
-  // Compile and run.
-  ffi::Module vm = CompileToVM(mod);
+  ffi::Module vm = CompileToVM(ir_mod);
   ffi::Array<ffi::Any> effects = InitEffect(vm);
 
-  // Create a float32 [10,5] input tensor filled with 1.0.
   tvm::Device cpu{kDLCPU, 0};
   runtime::Tensor x_tensor =
       runtime::Tensor::Empty(ffi::Shape({10, 5}), DLDataType{kDLFloat, 32, 1}, cpu, std::nullopt);
   std::vector<float> x_data(10 * 5, 1.0f);
   x_tensor.CopyFromBytes(x_data.data(), x_data.size() * sizeof(float));
 
-  // Run forward(x, _io) -> (y, (_io_new,))
   runtime::Tensor y = RunForward(vm, "forward", {x_tensor}, effects);
-
-  // Verify output shape matches input: [10, 5]
   ASSERT_EQ(y.Shape().size(), 2);
   EXPECT_EQ(y.Shape()[0], 10);
   EXPECT_EQ(y.Shape()[1], 5);
 }
 
 // ===========================================================================
-// TestDebugFuncJIT
-//
-// Mirrors test_debug_func() in test_frontend_nn_debug.py:
-//   - Registers a global debug callback that asserts its arguments
-//   - Exports a module with debug_func(..., x, 1, 2.0, "test", v) in debug mode
-//   - Compiles with tvm::driver::Compile (llvm)
-//   - Runs forward(x, v=8, _io) and verifies:
-//       * The debug callback was invoked with the correct arguments
-//       * The output tensor shape matches input
+// TestDebugFuncJIT  (low-level: manual ExportSingle + CompileToVM)
 // ===========================================================================
 TEST(NNDebug, TestDebugFuncJIT) {
   static const ffi::Function op_debug_func = NNOp("debug_func");
 
-  // Register the debug callback — mirrors @tvm.register_global_func in Python.
-  // It asserts all arguments match the expected values.
   static std::atomic<bool> g_debug_called{false};
   g_debug_called = false;
 
@@ -528,17 +539,14 @@ TEST(NNDebug, TestDebugFuncJIT) {
   refl::GlobalDef().def(
       "testing.relax.frontend.nn.test_debug_func_jit",
       [](ffi::String lineno, runtime::Tensor tensor, int64_t const_int, double const_float,
-         ffi::String const_str, int64_t var_int) {  // SpecInt arrives as int64_t at runtime
-        // lineno contains the source location string
+         ffi::String const_str, int64_t var_int) {
         EXPECT_FALSE(std::string(lineno).empty());
-        // tensor shape must be [10, 5]
         ASSERT_EQ(tensor.Shape().size(), 2);
         EXPECT_EQ(tensor.Shape()[0], 10);
         EXPECT_EQ(tensor.Shape()[1], 5);
         EXPECT_EQ(const_int, 1);
         EXPECT_DOUBLE_EQ(const_float, 2.0);
         EXPECT_EQ(std::string(const_str), "test");
-        // SpecInt args arrive as int64_t at runtime (tir::Var wrapped in PrimValue)
         EXPECT_EQ(var_int, 8);
         g_debug_called = true;
       });
@@ -546,11 +554,10 @@ TEST(NNDebug, TestDebugFuncJIT) {
   const ffi::String kFuncName = "testing.relax.frontend.nn.test_debug_func_jit";
   const ffi::String kLineInfo = "test_nn_debug.cc:0";
 
-  // forward(x, v): debug_func(kFuncName, x, 1, 2.0, "test", v); return x
   ffi::TypedFunction<ffi::Any(ffi::Map<ffi::String, ffi::Any>)> forward =
       [kFuncName, kLineInfo](ffi::Map<ffi::String, ffi::Any> args) -> ffi::Any {
     NNTensor x = args.at("x").cast<NNTensor>();
-    tir::Var v_var = args.at("v").cast<tir::Var>();  // SpecInt passed as tir::Var
+    tir::Var v_var = args.at("v").cast<tir::Var>();
     auto get_io = ffi::Function::GetGlobal("relax.frontend.nn.GetCurrentIOVar");
     TVM_FFI_ICHECK(get_io.has_value());
     Var io_var = (*get_io)().cast<Var>();
@@ -562,33 +569,158 @@ TEST(NNDebug, TestDebugFuncJIT) {
     return ffi::Any(x->expr);
   };
 
-  IRModule mod = ExportSingle("forward", forward, {"x", "v"},
-                              {ffi::Any(MakeSpecTensor({10, 5}, "float32")), ffi::Any(SpecInt())});
+  // Use TestModuleNode::ExportDebug.
+  TestModuleNode mod(forward, {"x", "v"},
+                     {ffi::Any(MakeSpecTensor({10, 5}, "float32")), ffi::Any(SpecInt())});
+  IRModule ir_mod = mod.ExportDebug("forward");
 
-  // Compile and run.
-  ffi::Module vm = CompileToVM(mod);
+  ffi::Module vm = CompileToVM(ir_mod);
   ffi::Array<ffi::Any> effects = InitEffect(vm);
 
-  // Create a float32 [10,5] input tensor filled with 1.0.
   tvm::Device cpu{kDLCPU, 0};
   runtime::Tensor x_tensor =
       runtime::Tensor::Empty(ffi::Shape({10, 5}), DLDataType{kDLFloat, 32, 1}, cpu, std::nullopt);
   std::vector<float> x_data(10 * 5, 1.0f);
   x_tensor.CopyFromBytes(x_data.data(), x_data.size() * sizeof(float));
 
-  // v=8 is passed as a ffi::Shape([8]) — mirrors Python's ShapeTuple([v]).
   ffi::Shape v_shape({8});
-
-  // Run forward(x, v, _io) -> (y, (_io_new,))
   runtime::Tensor y = RunForward(vm, "forward", {x_tensor, v_shape}, effects);
 
-  // Verify the debug callback was actually invoked.
   EXPECT_TRUE(g_debug_called.load()) << "Debug callback was not called during VM execution";
-
-  // Verify output shape matches input: [10, 5]
   ASSERT_EQ(y.Shape().size(), 2);
   EXPECT_EQ(y.Shape()[0], 10);
   EXPECT_EQ(y.Shape()[1], 5);
+}
+
+// ===========================================================================
+// TestDebugPrintJIT_Jit  (high-level: NNModuleNode::Jit → CppModule)
+//
+// Mirrors Python:
+//   model = Layer().jit(spec={"forward": {"x": spec.Tensor([10,5],"float32")}},
+//                       debug=True)
+//   y = model["forward"](x)
+// ===========================================================================
+TEST(NNDebug, TestDebugPrintJIT_Jit) {
+  static const ffi::Function op_debug_func = NNOp("debug_func");
+
+  const ffi::String kLineInfo = "test_nn_debug.cc:0";
+  ffi::TypedFunction<ffi::Any(ffi::Map<ffi::String, ffi::Any>)> forward =
+      [kLineInfo](ffi::Map<ffi::String, ffi::Any> args) -> ffi::Any {
+    NNTensor x = args.at("x").cast<NNTensor>();
+    auto get_io = ffi::Function::GetGlobal("relax.frontend.nn.GetCurrentIOVar");
+    TVM_FFI_ICHECK(get_io.has_value());
+    Var io_var = (*get_io)().cast<Var>();
+    op_debug_func(ffi::String("vm.builtin.debug_print"), ffi::Array<ffi::Any>{ffi::Any(x->expr)},
+                  io_var, kLineInfo);
+    return ffi::Any(x->expr);
+  };
+
+  // Create the module and call Jit() — mirrors Python's Layer().jit(...).
+  TestModuleNode mod(forward, {"x"}, {ffi::Any(MakeSpecTensor({10, 5}, "float32"))});
+  CppModule model = mod.JitCpp("forward", {kDLCPU, 0}, "cpu_generic", /*debug=*/true);
+
+  tvm::Device cpu{kDLCPU, 0};
+  runtime::Tensor x_tensor =
+      runtime::Tensor::Empty(ffi::Shape({10, 5}), DLDataType{kDLFloat, 32, 1}, cpu, std::nullopt);
+  std::vector<float> x_data(10 * 5, 1.0f);
+  x_tensor.CopyFromBytes(x_data.data(), x_data.size() * sizeof(float));
+
+  // model["forward"](x) — CppMethodCaller handles effect threading.
+  ffi::Any result = model["forward"]({ffi::Any(x_tensor)});
+  runtime::Tensor y = result.cast<runtime::Tensor>();
+  ASSERT_EQ(y.Shape().size(), 2);
+  EXPECT_EQ(y.Shape()[0], 10);
+  EXPECT_EQ(y.Shape()[1], 5);
+}
+
+// ===========================================================================
+// TestDebugFuncJIT_Jit  (high-level: NNModuleNode::Jit → CppModule)
+//
+// Verifies:
+//   - Debug callback invoked with correct arguments on each call.
+//   - Effect state correctly threaded between successive calls.
+//
+// Python equivalent:
+//   model = Layer().jit(spec={"forward": {"x": ..., "v": "int"}}, debug=True)
+//   y = model["forward"](x, 8)
+//   y = model["forward"](x, 42)
+// ===========================================================================
+TEST(NNDebug, TestDebugFuncJIT_Jit) {
+  static const ffi::Function op_debug_func = NNOp("debug_func");
+
+  static std::atomic<int> g_call_count{0};
+  g_call_count = 0;
+  static std::atomic<int64_t> g_last_var_int{-1};
+
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def(
+      "testing.relax.frontend.nn.test_debug_func_jit2",
+      [](ffi::String lineno, runtime::Tensor tensor, int64_t const_int, double const_float,
+         ffi::String const_str, int64_t var_int) {
+        EXPECT_FALSE(std::string(lineno).empty());
+        ASSERT_EQ(tensor.Shape().size(), 2);
+        EXPECT_EQ(tensor.Shape()[0], 10);
+        EXPECT_EQ(tensor.Shape()[1], 5);
+        EXPECT_EQ(const_int, 1);
+        EXPECT_DOUBLE_EQ(const_float, 2.0);
+        EXPECT_EQ(std::string(const_str), "test");
+        g_last_var_int = var_int;
+        g_call_count++;
+      });
+
+  const ffi::String kFuncName = "testing.relax.frontend.nn.test_debug_func_jit2";
+  const ffi::String kLineInfo = "test_nn_debug.cc:0";
+
+  ffi::TypedFunction<ffi::Any(ffi::Map<ffi::String, ffi::Any>)> forward =
+      [kFuncName, kLineInfo](ffi::Map<ffi::String, ffi::Any> args) -> ffi::Any {
+    NNTensor x = args.at("x").cast<NNTensor>();
+    tir::Var v_var = args.at("v").cast<tir::Var>();
+    auto get_io = ffi::Function::GetGlobal("relax.frontend.nn.GetCurrentIOVar");
+    TVM_FFI_ICHECK(get_io.has_value());
+    Var io_var = (*get_io)().cast<Var>();
+    op_debug_func(
+        kFuncName,
+        ffi::Array<ffi::Any>{ffi::Any(x->expr), ffi::Any(int64_t(1)), ffi::Any(double(2.0)),
+                             ffi::Any(ffi::String("test")), ffi::Any(v_var)},
+        io_var, kLineInfo);
+    return ffi::Any(x->expr);
+  };
+
+  TestModuleNode mod(forward, {"x", "v"},
+                     {ffi::Any(MakeSpecTensor({10, 5}, "float32")), ffi::Any(SpecInt())});
+  CppModule model = mod.JitCpp("forward", {kDLCPU, 0}, "cpu_generic", /*debug=*/true);
+
+  tvm::Device cpu{kDLCPU, 0};
+  runtime::Tensor x_tensor =
+      runtime::Tensor::Empty(ffi::Shape({10, 5}), DLDataType{kDLFloat, 32, 1}, cpu, std::nullopt);
+  std::vector<float> x_data(10 * 5, 1.0f);
+  x_tensor.CopyFromBytes(x_data.data(), x_data.size() * sizeof(float));
+
+  CppMethodCaller caller = model["forward"];
+
+  // First call: v=8
+  {
+    ffi::Shape v_shape({8});
+    ffi::Any result = caller({ffi::Any(x_tensor), ffi::Any(v_shape)});
+    runtime::Tensor y = result.cast<runtime::Tensor>();
+    ASSERT_EQ(y.Shape().size(), 2);
+    EXPECT_EQ(y.Shape()[0], 10);
+    EXPECT_EQ(y.Shape()[1], 5);
+    EXPECT_EQ(g_call_count.load(), 1) << "Debug callback not called on first invocation";
+    EXPECT_EQ(g_last_var_int.load(), 8);
+  }
+
+  // Second call: v=42 — verifies effect state is correctly threaded.
+  {
+    ffi::Shape v_shape({42});
+    ffi::Any result = caller({ffi::Any(x_tensor), ffi::Any(v_shape)});
+    runtime::Tensor y = result.cast<runtime::Tensor>();
+    ASSERT_EQ(y.Shape().size(), 2);
+    EXPECT_EQ(y.Shape()[0], 10);
+    EXPECT_EQ(y.Shape()[1], 5);
+    EXPECT_EQ(g_call_count.load(), 2) << "Debug callback not called on second invocation";
+    EXPECT_EQ(g_last_var_int.load(), 42);
+  }
 }
 
 }  // namespace testing
