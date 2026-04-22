@@ -118,6 +118,18 @@ class Exporter : public runtime::ObjectRef {
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(Exporter, runtime::ObjectRef, ExporterNode);
 };
 
+/*!
+ * \brief Get the current Exporter from thread-local storage.
+ * Returns nullopt if no Exporter is active.
+ */
+ffi::Optional<Exporter> Exporter_Current();
+
+/*!
+ * \brief Install/restore the thread-local current Exporter.
+ * Pass nullptr to clear.
+ */
+void Exporter_SetCurrent(ExporterNode* exporter);
+
 }  // namespace nn
 }  // namespace frontend
 }  // namespace relax

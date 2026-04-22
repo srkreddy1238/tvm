@@ -729,6 +729,23 @@ TVM_DLL Pass ComputePrimValue();
  */
 TVM_DLL Pass VMShapeLower(bool emit_err_ctx = true);
 
+/*!
+ * \brief Compile and attach a list of nn.ExternModules to the IRModule.
+ *
+ * For each ExternModule in \p extern_modules, calls ExternModule.load() to
+ * obtain a runtime::Module and appends it to the IRModule's
+ * \c "external_mods" attribute.  The attribute is created if it does not
+ * already exist.
+ *
+ * This is the C++ equivalent of the Python
+ * \c relax.transform.AttachExternModules pass.
+ *
+ * \param extern_modules  List of nn.ExternModule objects
+ *                        (ObjectModule or SourceModule instances).
+ * \return The Pass.
+ */
+TVM_DLL Pass AttachExternModules(ffi::Array<runtime::ObjectRef> extern_modules);
+
 /* \brief Fold Batchnorm op into Conv2D weights
  */
 TVM_DLL Pass FoldBatchnormToConv2D();

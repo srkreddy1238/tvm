@@ -18,7 +18,6 @@
 
 import functools
 import operator
-import threading
 import typing
 
 import tvm_ffi
@@ -51,14 +50,13 @@ def _get_ffi_helpers():
 
 
 def add_extern(mod: extern.ExternModule) -> None:
-    """Add an external module to the exporter."""
+    """Add an external module to the current exporter."""
     try:
-        exporter = Exporter.current()
+        tvm_ffi.get_global_func("relax.frontend.nn.AddExtern")(mod)
     except Exception as exception:
         raise RuntimeError(
             "`nn.add_extern` should only be invoked when exporting a module."
         ) from exception
-    exporter.add_external_module(mod)
 
 
 @tvm_ffi.register_object("relax.frontend.nn.Exporter")
@@ -70,35 +68,16 @@ class Exporter(tvm_ffi.Object):
     Python is only needed for spec.Object support (Python-side object instantiation).
     """
 
-    _tls = threading.local()
-
     def __init__(self, debug: bool) -> None:
         self.__ffi_init__(debug)
-
-    @staticmethod
-    def current() -> "Exporter":
-        """Get the current Exporter under the with scope."""
-        assert hasattr(Exporter._tls, "current")
-        return Exporter._tls.current
-
-    def __enter__(self) -> "Exporter":
-        assert not hasattr(Exporter._tls, "current")
-        Exporter._tls.current = self
-        return self
-
-    def __exit__(self, exc_type, exc, traceback) -> None:
-        assert hasattr(Exporter._tls, "current")
-        delattr(Exporter._tls, "current")
 
     def add_external_module(self, mod: extern.ExternModule) -> None:
         """Add an external module to the exporter."""
         # Check for duplicate symbols
-        # pylint: disable=protected-access
         all_symbols: list[str] = []
         for extern_mod in self.extern_mods:
             all_symbols.extend(list(extern_mod.symbols.keys()))
         duplicated_symbols = list(set(mod.symbols.keys()) & set(all_symbols))
-        # pylint: enable=protected-access
         if duplicated_symbols:
             raise ValueError(f"Duplicate symbols: {duplicated_symbols}")
         self._add_external_module(mod)
@@ -126,7 +105,9 @@ class Exporter(tvm_ffi.Object):
             # Use Python implementation for spec.Object support
             return self._build_python(spec)
         else:
-            # Delegate to C++ implementation (fast path)
+            # Delegate to C++ implementation (fast path).
+            # ExporterScope in C++ Build() installs the thread-local current
+            # Exporter so nn.add_extern() called from forward() works.
             result = self._build_cpp(spec)  # Returns Array[IRModule, named_params, extern_mods]
             mod = result[0]
             named_params = result[1]  # Map<String, NNParameter>
@@ -168,7 +149,9 @@ class Exporter(tvm_ffi.Object):
         effects = _effects()
         ext_mods = list(self.extern_mods)
 
-        with self:
+        _set_exporter = tvm_ffi.get_global_func("relax.frontend.nn.SetCurrentExporter")
+        _set_exporter(self)
+        try:
             if effects:
                 with self.builder.function("_initialize_effect"):
                     with self.builder.dataflow():
@@ -189,6 +172,8 @@ class Exporter(tvm_ffi.Object):
                     with self.builder.dataflow():
                         outputs, inputs = _emit_method(self.builder, method_spec, params, effects)
                     self.builder.emit_func_output(outputs, inputs)
+        finally:
+            _set_exporter(None)
         mod = self.builder.finalize()
         assert rx.analysis.well_formed(mod)
 

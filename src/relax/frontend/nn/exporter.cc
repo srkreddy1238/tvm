@@ -48,6 +48,30 @@ namespace frontend {
 namespace nn {
 
 // ===========================================================================
+// Thread-local Exporter tracker  (mirrors BlockBuilder_Current / _SetCurrent)
+// ExporterScope installs the current Exporter before calling forward() so
+// that nn.add_extern() called from Python forward() can find it via
+// Exporter_Current().
+// ===========================================================================
+
+static thread_local ExporterNode* g_current_exporter = nullptr;  // NOLINT(*)
+
+ffi::Optional<Exporter> Exporter_Current() {
+  if (!g_current_exporter) return std::nullopt;
+  return ffi::details::ObjectUnsafe::ObjectRefFromObjectPtr<Exporter>(
+      ffi::details::ObjectUnsafe::ObjectPtrFromUnowned<Object>(g_current_exporter));
+}
+
+void Exporter_SetCurrent(ExporterNode* exporter) { g_current_exporter = exporter; }
+
+// RAII scope that installs/restores the current Exporter
+struct ExporterScope {
+  ExporterNode* prev;
+  explicit ExporterScope(ExporterNode* e) : prev(g_current_exporter) { g_current_exporter = e; }
+  ~ExporterScope() { g_current_exporter = prev; }
+};
+
+// ===========================================================================
 // BBScope: RAII helper that installs/restores the thread-local BlockBuilder
 // so that WrapNested / Emit helpers in core.cc and op.cc can find it.
 // ===========================================================================
@@ -657,6 +681,10 @@ void ExporterNode::AddExternalModule(runtime::ObjectRef extern_mod) {
 }
 
 ffi::Array<ffi::Any> ExporterNode::Build(ModuleSpec spec) {
+  // Install this Exporter as the thread-local current so that
+  // nn.add_extern() called from Python forward() can find it.
+  ExporterScope exporter_scope(this);
+
   // Delegate to ExportToIRModule
   IRModule mod = ExportToIRModule(spec, debug);
 
@@ -726,7 +754,28 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def("relax.frontend.nn.GetCurrentIOVar", GetCurrentIOVar)
 
       .def("relax.frontend.nn.SetCurrentIOVar", SetCurrentIOVar)
-      .def("relax.frontend.nn.Exporter", [](bool debug) { return Exporter(debug); });
+      .def("relax.frontend.nn.Exporter", [](bool debug) { return Exporter(debug); })
+
+      // Thread-local Exporter accessor (mirrors BlockBuilder_Current/_SetCurrent)
+      .def("relax.frontend.nn.GetCurrentExporter",
+           []() -> ffi::Optional<Exporter> { return Exporter_Current(); })
+      .def("relax.frontend.nn.SetCurrentExporter",
+           [](ffi::Optional<Exporter> e) {
+             static thread_local ExporterNode* t_exporter = nullptr;
+             if (e.has_value() && e.value().defined()) {
+               t_exporter = e.value().get();
+               Exporter_SetCurrent(t_exporter);
+             } else {
+               Exporter_SetCurrent(nullptr);
+             }
+           })
+      // nn.add_extern: register an ExternModule with the current Exporter
+      .def("relax.frontend.nn.AddExtern", [](runtime::ObjectRef extern_mod) {
+        auto e = Exporter_Current();
+        TVM_FFI_ICHECK(e.has_value())
+            << "`nn.add_extern` must be called during export_tvm (no active Exporter).";
+        e.value()->AddExternalModule(extern_mod);
+      });
 }
 
 }  // namespace nn

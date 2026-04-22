@@ -640,6 +640,31 @@ def AttachGlobalSymbol() -> tvm.ir.transform.Pass:
     return _ffi_api.AttachGlobalSymbol()  # type: ignore
 
 
+def AttachExternModules(
+    extern_modules: list,
+) -> tvm.ir.transform.Pass:
+    """Compile and attach a list of nn.ExternModules to the IRModule.
+
+    For each ExternModule in ``extern_modules``, calls
+    ``ExternModule.load()`` to obtain a ``runtime.Module`` and appends it
+    to the IRModule's ``"external_mods"`` attribute.  The attribute is
+    created if it does not already exist.
+
+    Parameters
+    ----------
+    extern_modules : List[tvm.relax.frontend.nn.ExternModule]
+        The list of external modules to compile and attach.
+        Each element must be an ``ObjectModule`` or ``SourceModule``
+        instance.
+
+    Returns
+    -------
+    ret : tvm.ir.transform.Pass
+        The pass.
+    """
+    return _ffi_api.AttachExternModules(extern_modules)  # type: ignore
+
+
 def BindParams(
     func_name: str,
     params: dict[str | Var, tvm.runtime.Tensor | np.ndarray],

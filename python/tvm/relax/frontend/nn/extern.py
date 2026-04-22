@@ -126,7 +126,7 @@ class ExternModule(tvm_ffi.Object):
     def __init__(self, symbols: dict[str, Callable]) -> None:
         self.__init_handle_by_constructor__(
             _ffi_api.ExternModule,
-            _symbols_to_ffi(symbols),
+            symbols,
         )
 
     def __getitem__(self, func_name: str) -> Callable:
@@ -181,7 +181,7 @@ class ObjectModule(ExternModule):
             raise ValueError(f"Not a file: {filepath!s}")
         self.__init_handle_by_constructor__(
             _ffi_api.MakeObjectModule,
-            _symbols_to_ffi(symbols),
+            symbols,
             str(filepath.resolve()),
         )
 
@@ -289,7 +289,7 @@ class SourceModule(ExternModule):
             source_code = str(source_code)
         self.__init_handle_by_constructor__(
             _ffi_api.MakeSourceModule,
-            _symbols_to_ffi(symbols),
+            symbols,
             str(source_code),
             str(source_format),
             list(compile_options) if compile_options is not None else None,
@@ -367,24 +367,3 @@ class SourceModule(ExternModule):
             source_format, list(tvm_pkg) if tvm_pkg else None
         )
         return [str(s) for s in raw]
-
-
-# ---------------------------------------------------------------------------
-# Internal helper: convert a Python dict[str, Callable] to the
-# ffi::Map<ffi::String, ffi::Function> that C++ ExternModuleNode expects.
-# ---------------------------------------------------------------------------
-
-
-def _symbols_to_ffi(symbols: dict[str, Callable]) -> dict:
-    """Convert a Python {str: Callable} symbols dict to a plain dict that
-    tvm_ffi can marshal as ffi::Map<ffi::String, ffi::Function>.
-
-    Each callable is wrapped in a tvm_ffi.Function so the C++ side receives
-    a proper ffi::Function object.
-    """
-    result = {}
-    for name, fn in symbols.items():
-        if not callable(fn):
-            raise TypeError(f"symbols['{name}'] must be callable, got {type(fn)}")
-        result[name] = tvm_ffi.Function(fn) if not isinstance(fn, tvm_ffi.Function) else fn
-    return result

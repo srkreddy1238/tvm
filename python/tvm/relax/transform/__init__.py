@@ -23,6 +23,7 @@ from .transform import (
     AlterOpImpl,
     AnnotateTIROpPattern,
     AttachAttrLayoutFreeBuffers,
+    AttachExternModules,
     AttachGlobalSymbol,
     BindParams,
     BindSymbolicVars,
@@ -91,7 +92,6 @@ from .transform import (
     function_pass,
 )
 
-from .attach_external_modules import AttachExternModules
 from .fast_math import FastMathTransform
 from .fuse_transpose_matmul import FuseTransposeMatmul
 from .ipc_allreduce_rewrite import IPCAllReduceRewrite

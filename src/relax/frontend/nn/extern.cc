@@ -221,8 +221,7 @@ ffi::Function ExternModuleNode::GetItem(ffi::String func_name) const {
     //    convention: the output tensor is pre-allocated and passed as the
     //    last argument.
     static const Op& call_dps_op = Op::Get("relax.call_dps_packed");
-    Expr call_expr =
-        Call(call_dps_op, {ExternFunc(fname), rx_inputs}, tvm::Attrs(), {out_sinfo});
+    Expr call_expr = Call(call_dps_op, {ExternFunc(fname), rx_inputs}, tvm::Attrs(), {out_sinfo});
 
     // 4. Wrap via WrapNested (emits into current BlockBuilder).
     *rv = WrapNested(call_expr, fname);
@@ -230,9 +229,8 @@ ffi::Function ExternModuleNode::GetItem(ffi::String func_name) const {
 }
 
 ffi::Module ExternModuleNode::Load() const {
-  TVM_FFI_THROW(NotImplementedError)
-      << "ExternModule.load() is not implemented in the base class. "
-      << "Use ObjectModule or SourceModule instead.";
+  TVM_FFI_THROW(NotImplementedError) << "ExternModule.load() is not implemented in the base class. "
+                                     << "Use ObjectModule or SourceModule instead.";
   TVM_FFI_UNREACHABLE();
 }
 
@@ -242,8 +240,8 @@ ffi::Module ExternModuleNode::LoadFromPath(ffi::String path) const {
   for (const auto& kv : symbols) {
     func_names.push_back(kv.first);
   }
-  // Call runtime.load_static_library via FFI
-  auto load_fn = ffi::Function::GetGlobal("runtime.load_static_library");
+  // Call runtime.ModuleLoadStaticLibrary via FFI (registered in src/runtime/static_library.cc)
+  auto load_fn = ffi::Function::GetGlobal("runtime.ModuleLoadStaticLibrary");
   TVM_FFI_ICHECK(load_fn.has_value()) << "runtime.load_static_library not found";
   ffi::Any result = load_fn.value()(path, func_names);
   return result.cast<ffi::Module>();
@@ -277,8 +275,7 @@ ffi::Module ObjectModuleNode::Load() const { return LoadFromPath(filepath); }
     // 2. Ask Python for the tvm package location via FFI.
     //    We call the Python-registered global "relax.frontend.nn.GetTvmPackagePath"
     //    which returns the directory of the tvm Python package.
-    auto get_pkg_path_fn =
-        ffi::Function::GetGlobal("relax.frontend.nn.GetTvmPackagePath");
+    auto get_pkg_path_fn = ffi::Function::GetGlobal("relax.frontend.nn.GetTvmPackagePath");
     TVM_FFI_ICHECK(get_pkg_path_fn.has_value())
         << "relax.frontend.nn.GetTvmPackagePath not registered";
     ffi::Any pkg_path_any = get_pkg_path_fn.value()();
@@ -353,8 +350,8 @@ ffi::Module ObjectModuleNode::Load() const { return LoadFromPath(filepath); }
     result.push_back(ffi::String("-std=c++17"));
     result.push_back(ffi::String("-Xcompiler=-fPIC"));
   } else {
-    TVM_FFI_THROW(ValueError) << "SourceModule.get_compile_options: invalid source_format '"
-                              << fmt << "'. Expected 'cpp' or 'cu'.";
+    TVM_FFI_THROW(ValueError) << "SourceModule.get_compile_options: invalid source_format '" << fmt
+                              << "'. Expected 'cpp' or 'cu'.";
     TVM_FFI_UNREACHABLE();
   }
   return result;
@@ -378,9 +375,8 @@ void SourceModuleNode::Compile(ffi::String output_path) const {
 
   // Build a temporary directory path using std::filesystem.
   std::filesystem::path tmp_dir =
-      std::filesystem::temp_directory_path() / ("tvm_nn_extern_" + std::to_string(
-                                                                        std::hash<std::thread::id>{}(
-                                                                            std::this_thread::get_id())));
+      std::filesystem::temp_directory_path() /
+      ("tvm_nn_extern_" + std::to_string(std::hash<std::thread::id>{}(std::this_thread::get_id())));
   std::error_code ec;
   std::filesystem::create_directories(tmp_dir, ec);
   TVM_FFI_ICHECK(!ec) << "Failed to create temporary directory: " << tmp_dir.string()
@@ -430,8 +426,8 @@ void SourceModuleNode::Compile(ffi::String output_path) const {
     // rename may fail across filesystems; fall back to copy + remove
     std::filesystem::copy_file(object_path, std::filesystem::path(std::string(output_path)),
                                std::filesystem::copy_options::overwrite_existing, ec);
-    TVM_FFI_ICHECK(!ec) << "Failed to move compiled object to " << std::string(output_path)
-                        << ": " << ec.message();
+    TVM_FFI_ICHECK(!ec) << "Failed to move compiled object to " << std::string(output_path) << ": "
+                        << ec.message();
     std::filesystem::remove(object_path, ec);
   }
 
@@ -441,9 +437,10 @@ void SourceModuleNode::Compile(ffi::String output_path) const {
 
 ffi::Module SourceModuleNode::Load() const {
   // Create a unique temporary output path
-  std::filesystem::path tmp_dir = std::filesystem::temp_directory_path() /
-                                  ("tvm_nn_extern_load_" + std::to_string(std::hash<std::thread::id>{}(
-                                                                               std::this_thread::get_id())));
+  std::filesystem::path tmp_dir =
+      std::filesystem::temp_directory_path() /
+      ("tvm_nn_extern_load_" +
+       std::to_string(std::hash<std::thread::id>{}(std::this_thread::get_id())));
   std::error_code ec;
   std::filesystem::create_directories(tmp_dir, ec);
   TVM_FFI_ICHECK(!ec) << "Failed to create temporary directory: " << tmp_dir.string();
@@ -477,7 +474,7 @@ static ffi::String DetectInputSuffix(const std::string& source_format) {
   if (source_format == "cpp") return ffi::String(".cpp");
   if (source_format == "cu") return ffi::String(".cu");
   TVM_FFI_THROW(ValueError) << "MakeSourceModule: invalid source_format '" << source_format
-                             << "'. Expected 'cpp' or 'cu'.";
+                            << "'. Expected 'cpp' or 'cu'.";
   TVM_FFI_UNREACHABLE();
 }
 
@@ -500,7 +497,7 @@ static ffi::String DetectOutputSuffix(const std::string& output_format) {
     return result.cast<ffi::String>();
   }
   TVM_FFI_THROW(ValueError) << "MakeSourceModule: invalid output_format '" << output_format
-                             << "'. Expected 'obj' or 'wasm'.";
+                            << "'. Expected 'obj' or 'wasm'.";
   TVM_FFI_UNREACHABLE();
 }
 
@@ -518,8 +515,7 @@ static ffi::String DetectSourceCode(const std::string& source_code) {
   if (!ec && is_file) {
     std::ifstream ifs(p.string());
     if (ifs.is_open()) {
-      std::string contents((std::istreambuf_iterator<char>(ifs)),
-                           std::istreambuf_iterator<char>());
+      std::string contents((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
       return ffi::String(contents);
     }
   }
@@ -527,8 +523,8 @@ static ffi::String DetectSourceCode(const std::string& source_code) {
   return ffi::String(source_code);
 }
 
-SourceModule MakeSourceModule(ffi::Map<ffi::String, ffi::Function> symbols,
-                              ffi::String source_code, ffi::String source_format,
+SourceModule MakeSourceModule(ffi::Map<ffi::String, ffi::Function> symbols, ffi::String source_code,
+                              ffi::String source_format,
                               ffi::Optional<ffi::Array<ffi::String>> compile_options,
                               ffi::Optional<ffi::String> compiler, ffi::String output_format) {
   std::string fmt = std::string(source_format);
@@ -545,8 +541,8 @@ SourceModule MakeSourceModule(ffi::Map<ffi::String, ffi::Function> symbols,
     opts = SourceModuleNode::GetCompileOptions(source_format, std::nullopt);
   }
 
-  return SourceModule(std::move(symbols), std::move(src_code), std::move(opts),
-                      std::move(compiler), std::move(src_suffix), std::move(out_suffix));
+  return SourceModule(std::move(symbols), std::move(src_code), std::move(opts), std::move(compiler),
+                      std::move(src_suffix), std::move(out_suffix));
 }
 
 // ===========================================================================
@@ -583,8 +579,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
            })
 
       // ---- SourceModule static helpers (also callable from Python) -------
-      .def("relax.frontend.nn.SourceModule_TvmHome",
-           []() { return SourceModuleNode::TvmHome(); })
+      .def("relax.frontend.nn.SourceModule_TvmHome", []() { return SourceModuleNode::TvmHome(); })
 
       .def("relax.frontend.nn.SourceModule_GetIncludes",
            [](ffi::Optional<ffi::Array<ffi::String>> tvm_pkg) {

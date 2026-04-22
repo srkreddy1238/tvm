@@ -586,34 +586,24 @@ class Module(SubroutineMixin):
     ):
         """Export this module to a TVM IRModule.
 
-        Uses the C++ ExportToIRModule path when the spec contains only
-        SpecInt/SpecTensor arg specs (no spec.Object).  Falls back to the
-        Python Exporter for specs that use spec.Object (KVCache etc.).
+        Delegates to the C++ Exporter, which uses the fast ExportToIRModule
+        path when the spec contains only SpecInt/SpecTensor arg specs, and
+        falls back to the Python path for specs that use spec.Object.
+
+        External modules (nn.ExternModule) registered via nn.add_extern during
+        forward() are compiled and attached via the C++ AttachExternModules
+        pass when allow_extern=True.
         """
         from . import spec as _spec  # pylint: disable=import-outside-toplevel
+        from .exporter import Exporter  # pylint: disable=import-outside-toplevel
 
         module_spec = _spec.ModuleSpec.from_raw(spec, self)
+        mod, params, ext_mods = Exporter(debug=debug).build(module_spec)
 
-        # Check whether any method uses spec.Object (Python-only path)
-        has_object_spec = any(
-            isinstance(s, _spec.Object) for ms in module_spec.method_specs for s in ms.arg_specs
-        )
-
-        if has_object_spec or allow_extern:
-            # Fall back to Python Exporter (handles spec.Object, ExternModules)
-            from .exporter import Exporter  # pylint: disable=import-outside-toplevel
-
-            mod, params, ext_mods = Exporter(debug=debug).build(module_spec)
-            if allow_extern:
-                return mod, params, ext_mods
-            if ext_mods:
-                raise ValueError("ExternModules present; set allow_extern=True.")
-            return mod, params
-
-        # Native C++ path: ExportToIRModule
-        mod = _ffi_api.ExportToIRModule(module_spec, debug)
-        # Collect params in the same order as named_params
-        params = list(module_spec.named_params.items())
+        if allow_extern:
+            return mod, params, ext_mods
+        if ext_mods:
+            raise ValueError("ExternModules present; set allow_extern=True.")
         return mod, params
 
     def jit(

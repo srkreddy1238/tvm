@@ -285,15 +285,14 @@ class SourceModuleNode : public ExternModuleNode {
    * \param tvm_pkg        Optional extra 3rdparty packages to include.
    * \return               List of compilation flags.
    */
-  static ffi::Array<ffi::String> GetCompileOptions(
-      ffi::String source_format, ffi::Optional<ffi::Array<ffi::String>> tvm_pkg);
+  static ffi::Array<ffi::String> GetCompileOptions(ffi::String source_format,
+                                                   ffi::Optional<ffi::Array<ffi::String>> tvm_pkg);
 
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
     refl::ObjectDef<SourceModuleNode>()
-        .def(refl::init<ffi::Map<ffi::String, ffi::Function>, ffi::String,
-                        ffi::Array<ffi::String>, ffi::Optional<ffi::String>, ffi::String,
-                        ffi::String>())
+        .def(refl::init<ffi::Map<ffi::String, ffi::Function>, ffi::String, ffi::Array<ffi::String>,
+                        ffi::Optional<ffi::String>, ffi::String, ffi::String>())
         .def_ro("symbols", &ExternModuleNode::symbols)
         .def_ro("source_code", &SourceModuleNode::source_code)
         .def_ro("compile_options", &SourceModuleNode::compile_options)
@@ -338,8 +337,8 @@ class SourceModule : public runtime::ObjectRef {
  * \param output_format   "obj" (default) or "wasm".
  * \return                Fully constructed SourceModule.
  */
-SourceModule MakeSourceModule(ffi::Map<ffi::String, ffi::Function> symbols,
-                              ffi::String source_code, ffi::String source_format,
+SourceModule MakeSourceModule(ffi::Map<ffi::String, ffi::Function> symbols, ffi::String source_code,
+                              ffi::String source_format,
                               ffi::Optional<ffi::Array<ffi::String>> compile_options,
                               ffi::Optional<ffi::String> compiler, ffi::String output_format);
 
