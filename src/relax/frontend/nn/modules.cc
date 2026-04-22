@@ -532,13 +532,13 @@ ffi::Array<Var> KVCacheModuleNode::Finalize() {
 
 void KVCacheModuleNode::To(ffi::String new_dtype) { dtype = std::move(new_dtype); }
 
-NNTensor KVCacheModuleNode::View(int64_t seq_len) const {
+NNTensor KVCacheModuleNode::View(PrimExpr seq_len) const {
   TVM_FFI_ICHECK(cache.has_value()) << "KVCache::View called with no active cache";
   BlockBuilder bb = BlockBuilder_Current();
   TVM_FFI_ICHECK(bb.defined()) << "KVCache::View called outside BlockBuilder scope";
 
   ffi::Array<PrimExpr> shape_dims;
-  shape_dims.push_back(IntImm(DataType::Int(64), seq_len));
+  shape_dims.push_back(seq_len);  // symbolic or concrete
   for (const Integer& d : unit_shape) shape_dims.push_back(d);
   ShapeExpr shape(shape_dims);
 

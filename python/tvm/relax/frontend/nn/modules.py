@@ -498,7 +498,7 @@ class KVCache(tvm_ffi.Object, Effect):
             self._cpp_to(dtype)
 
     def view(self, seq_len) -> Tensor:
-        return Tensor(_expr=self._view(int(seq_len))._expr)
+        return Tensor(_expr=self._view(seq_len)._expr)
 
     def append(self, new_element: Tensor) -> None:
         self._append(new_element)

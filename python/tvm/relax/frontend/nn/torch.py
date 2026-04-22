@@ -112,7 +112,7 @@ def _torch_to_tvm(arg_name, arg_spec, arg_torch):
     if isinstance(arg_spec, _spec.Tuple):
         return [
             _torch_to_tvm(f"{arg_name}[{i}]", x, arg_torch[i])
-            for i, x in enumerate(arg_spec.elements)
+            for i, x in enumerate(arg_spec.get_elements())
         ]
     raise TypeError(f"Unsupported spec item type: {type(arg_spec)}")
 

@@ -115,10 +115,11 @@ class Tuple(tvm_ffi.Object):
         is_tuple = isinstance(elements, tuple)
         self.__ffi_init__(name, list(elements), is_tuple)
 
-    @property
-    def elements(self) -> "list[SpecAny] | tuple[SpecAny, ...]":
-        # name, elements, is_tuple are C++ fields exposed directly by register_object
-        raw = list(self.elements)
+    def get_elements(self) -> "list[SpecAny] | tuple[SpecAny, ...]":
+        """Return elements as list or tuple, matching the original is_tuple flag."""
+        # The C++ 'elements' field is accessed via the FFI __getattr__ fallback.
+        # We use getattr() here (no @property named 'elements' exists to shadow it).
+        raw = list(getattr(self, "elements"))
         return tuple(raw) if self.is_tuple else raw
 
 
@@ -181,8 +182,22 @@ class MethodSpec(tvm_ffi.Object):
         n_spec = len(arg_specs)
         spec_names = arg_names[:n_spec]
 
+        def _coerce_arg(value, arg_spec):
+            """Recursively convert a C++ FFI value to the Python type expected by forward().
+
+            When C++ calls _forward, Tuple args arrive as ffi::Array (a TVM Array
+            object), not as Python list/tuple.  We must convert them so that
+            forward() receives the container type it was written against.
+            """
+            if not isinstance(arg_spec, Tuple):
+                return value  # Int / Tensor: pass through as-is
+            # Recursively coerce each element, then wrap in list or tuple.
+            elems = arg_spec.get_elements()
+            coerced = [_coerce_arg(value[i], elems[i]) for i in range(len(elems))]
+            return tuple(coerced) if arg_spec.is_tuple else coerced
+
         def _forward(named_args):
-            args = [named_args[name] for name in spec_names]
+            args = [_coerce_arg(named_args[name], s) for name, s in zip(spec_names, arg_specs)]
             return method(*args)
 
         self.__ffi_init__(_forward, spec_names, arg_specs, param_mode, effect_mode)
@@ -225,7 +240,9 @@ class MethodSpec(tvm_ffi.Object):
                 return arg_spec
             if isinstance(arg_spec, list | tuple | Tuple):
                 elems = (
-                    list(arg_spec) if not isinstance(arg_spec, Tuple) else list(arg_spec.elements)
+                    list(arg_spec)
+                    if not isinstance(arg_spec, Tuple)
+                    else list(arg_spec.get_elements())
                 )
                 converted = (
                     tuple(_convert(e, f"{arg_name}_{i}") for i, e in enumerate(elems))

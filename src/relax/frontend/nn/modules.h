@@ -650,7 +650,7 @@ class KVCacheModuleNode : public NNModuleNode {
   void SetState(ffi::Array<Var> state_vars);
   ffi::Array<Var> Finalize();
   void To(ffi::String new_dtype);
-  NNTensor View(int64_t seq_len) const;
+  NNTensor View(PrimExpr seq_len) const;
   void Append(NNTensor new_element);
 
   static void RegisterReflection() {

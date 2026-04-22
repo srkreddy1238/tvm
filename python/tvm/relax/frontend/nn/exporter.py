@@ -221,7 +221,7 @@ def _emit_method(  # pylint: disable=too-many-locals,too-many-branches,too-many-
             return rx.Var(
                 arg.name,
                 struct_info=TupleStructInfo(
-                    [_convert_input(arg_i).struct_info for arg_i in arg.elements]
+                    [_convert_input(arg_i).struct_info for arg_i in arg.get_elements()]
                 ),
             )
         raise TypeError(f"Unsupported input type: {type(arg)}")
@@ -295,10 +295,10 @@ def _emit_method(  # pylint: disable=too-many-locals,too-many-branches,too-many-
     def _detuple(arg, var: rx.Var, builder: BlockBuilder):
         if isinstance(arg, _spec.Tuple):
             ret = []
-            for i, elem in enumerate(arg.elements):
+            for i, elem in enumerate(arg.get_elements()):
                 field = builder.emit(rx.TupleGetItem(var, i), name_hint=f"{arg.name}_{i}")
                 ret.append(_detuple(elem, field, builder))
-            return type(arg.elements)(ret)
+            return type(arg.get_elements())(ret)
         if isinstance(arg, core.Tensor):
             return core.Tensor(_expr=var)
         if isinstance(arg, tir.Var):
@@ -369,10 +369,10 @@ def _method_spec_to_inputs(
         elif isinstance(arg_spec, _spec.Object):
             arg = arg_spec.object_type(_expr=rx.Var(arg_name, ObjectStructInfo()), _name=arg_name)
         elif isinstance(arg_spec, _spec.Tuple):
-            elements = type(arg_spec.elements)(
+            elements = type(arg_spec.get_elements())(
                 [
-                    _convert_input(arg_name=arg_name + f"_{i}", arg_spec=arg_spec.elements[i])
-                    for i in range(len(arg_spec.elements))
+                    _convert_input(arg_name=arg_name + f"_{i}", arg_spec=arg_spec.get_elements()[i])
+                    for i in range(len(arg_spec.get_elements()))
                 ]
             )
             arg = _spec.Tuple(

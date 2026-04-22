@@ -45,8 +45,7 @@ Pass AttachExternModules(ffi::Array<runtime::ObjectRef> extern_modules) {
   auto pass_func = [extern_modules](IRModule mod, PassContext /* pc */) {
     // Retrieve the existing "external_mods" attribute, defaulting to empty.
     ffi::Array<ffi::Module> external_mods =
-        mod->GetAttr<ffi::Array<ffi::Module>>("external_mods")
-            .value_or(ffi::Array<ffi::Module>());
+        mod->GetAttr<ffi::Array<ffi::Module>>("external_mods").value_or(ffi::Array<ffi::Module>());
 
     // Compile / load each ExternModule and append the result.
     for (const runtime::ObjectRef& obj : extern_modules) {

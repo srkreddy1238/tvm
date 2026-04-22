@@ -164,7 +164,7 @@ static Expr UnwrapReturn(const ffi::Any& val) {
 }
 
 // ===========================================================================
-// EmitInitializeEffect  (debug=true only)
+// EmitInitializeEffect
 //
 // Builds and adds to bb the function:
 //   @R.function
@@ -273,6 +273,16 @@ static StructInfo BuildSpecTupleStructInfo(const SpecTupleNode* st,
       const auto* s = e.as<SpecTensorNode>();
       ShapeExpr shape = BuildSpecShape(s->shape, str2var);
       fields.push_back(TensorStructInfo(shape, DataType(ffi::StringToDLDataType(s->dtype))));
+    } else if (e->IsInstance<SpecIntNode>()) {
+      // A scalar integer element: represented as a ShapeStructInfo with one symbolic var.
+      // The var name is derived from the tuple name + index to keep it unique.
+      std::string var_name = std::string(st->name) + "_" + std::to_string(fields.size());
+      auto it = str2var.find(var_name);
+      if (it == str2var.end()) {
+        tir::Var v(var_name, DataType::Int(64));
+        str2var[var_name] = v;
+      }
+      fields.push_back(ShapeStructInfo(ffi::Array<PrimExpr>{str2var[var_name]}));
     } else if (e->IsInstance<SpecTupleNode>()) {
       fields.push_back(BuildSpecTupleStructInfo(e.as<SpecTupleNode>(), str2var));
     } else {
@@ -301,6 +311,13 @@ static ffi::Any BuildSpecTupleInput(const SpecTupleNode* st, Var tuple_var, Bloc
                             std::string(st->name) + "_" + std::to_string(i));
     if (e->IsInstance<SpecTensorNode>()) {
       result.push_back(ffi::Any(NNTensor(elem_var)));
+    } else if (e->IsInstance<SpecIntNode>()) {
+      // Extract the scalar integer from the shape-var wrapper:
+      // elem_var has ShapeStructInfo({tir_var}); pass the tir::Var to forward().
+      const auto* sinfo = elem_var->struct_info_.as<ShapeStructInfoNode>();
+      TVM_FFI_ICHECK(sinfo && sinfo->values.defined() && sinfo->values.value().size() == 1)
+          << "BuildSpecTupleInput: SpecInt element var must have ShapeStructInfo with one value";
+      result.push_back(ffi::Any(sinfo->values.value()[0]));
     } else if (e->IsInstance<SpecTupleNode>()) {
       result.push_back(BuildSpecTupleInput(e.as<SpecTupleNode>(), elem_var, bb));
     } else {
@@ -717,7 +734,11 @@ IRModule ExportToIRModule(ModuleSpec spec, bool debug) {
   const ModuleSpecNode* ms_node = spec.get();
   BlockBuilder bb = BlockBuilder::Create(std::nullopt);
 
-  if (debug) {
+  // Emit _initialize_effect whenever there are effects OR debug=true.
+  // When debug=true, _io (null_value) is prepended to the effect tuple.
+  // When debug=false but effects exist, only the real effects are initialised.
+  bool has_effects = !ms_node->named_effects.empty();
+  if (debug || has_effects) {
     EmitInitializeEffect(bb, ms_node->named_effects, debug);
   }
 
