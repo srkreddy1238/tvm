@@ -176,8 +176,7 @@ class CppModuleNode : public runtime::Object {
   }
 
   static constexpr bool _type_mutable = true;
-  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.frontend.nn.CppModule", CppModuleNode,
-                                    runtime::Object);
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.frontend.nn.CppModule", CppModuleNode, runtime::Object);
 };
 
 class CppModule : public runtime::ObjectRef {

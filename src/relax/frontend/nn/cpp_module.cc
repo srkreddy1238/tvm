@@ -120,7 +120,8 @@ static ffi::Array<ffi::Any> InitEffects(const ffi::Module& vm) {
     effects.push_back(out);
   } else {
     for (int64_t i = 0; i < arity; ++i) {
-      effects.push_back(CppModuleNode::GetOutputRec(vm, "_initialize_effect", {static_cast<int>(i)}));
+      effects.push_back(
+          CppModuleNode::GetOutputRec(vm, "_initialize_effect", {static_cast<int>(i)}));
     }
   }
   return effects;
@@ -132,10 +133,7 @@ static ffi::Array<ffi::Any> InitEffects(const ffi::Module& vm) {
 
 CppModuleNode::CppModuleNode(ffi::Module vm_, ModuleSpec spec_, ffi::Array<runtime::Tensor> params_,
                              tvm::Device device_)
-    : vm(std::move(vm_)),
-      spec(std::move(spec_)),
-      params(std::move(params_)),
-      device(device_) {
+    : vm(std::move(vm_)), spec(std::move(spec_)), params(std::move(params_)), device(device_) {
   effects = InitEffects(vm);
 }
 
@@ -319,8 +317,7 @@ CppModule Jit(ModuleSpec spec, tvm::Device device, ffi::String pipeline, bool de
 
   ffi::Map<ffi::Any, ffi::ObjectRef> empty_params;
   ffi::Module vm_mod =
-      tvm::driver::Compile(mod, target, empty_params,
-                           ffi::Optional<ffi::String>(pipeline),
+      tvm::driver::Compile(mod, target, empty_params, ffi::Optional<ffi::String>(pipeline),
                            ffi::Optional<ffi::String>(ffi::String("generic")));
 
   // 4. Load and initialise the VM.
@@ -343,8 +340,8 @@ CppModule Jit(ModuleSpec spec, tvm::Device device, ffi::String pipeline, bool de
 
 CppModule::CppModule(ffi::Module vm, ModuleSpec spec, ffi::Array<runtime::Tensor> params,
                      tvm::Device device) {
-  data_ = ffi::make_object<CppModuleNode>(std::move(vm), std::move(spec), std::move(params),
-                                          device);
+  data_ =
+      ffi::make_object<CppModuleNode>(std::move(vm), std::move(spec), std::move(params), device);
 }
 
 // ===========================================================================
@@ -355,14 +352,13 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   CppModuleNode::RegisterReflection();
 
   namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef()
-      .def("relax.frontend.nn.Jit",
-           [](ModuleSpec spec, int device_type, int device_id, ffi::String pipeline, bool debug,
-              ffi::Array<runtime::ObjectRef> extern_mods) -> CppModule {
-             tvm::Device dev{static_cast<DLDeviceType>(device_type), device_id};
-             return Jit(std::move(spec), dev, std::move(pipeline), debug,
-                        std::move(extern_mods));
-           });
+  refl::GlobalDef().def("relax.frontend.nn.Jit",
+                        [](ModuleSpec spec, int device_type, int device_id, ffi::String pipeline,
+                           bool debug, ffi::Array<runtime::ObjectRef> extern_mods) -> CppModule {
+                          tvm::Device dev{static_cast<DLDeviceType>(device_type), device_id};
+                          return Jit(std::move(spec), dev, std::move(pipeline), debug,
+                                     std::move(extern_mods));
+                        });
 }
 
 }  // namespace nn

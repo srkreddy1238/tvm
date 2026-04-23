@@ -536,20 +536,19 @@ TEST(NNDebug, TestDebugFuncJIT) {
   g_debug_called = false;
 
   namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def(
-      "testing.relax.frontend.nn.test_debug_func_jit",
-      [](ffi::String lineno, runtime::Tensor tensor, int64_t const_int, double const_float,
-         ffi::String const_str, int64_t var_int) {
-        EXPECT_FALSE(std::string(lineno).empty());
-        ASSERT_EQ(tensor.Shape().size(), 2);
-        EXPECT_EQ(tensor.Shape()[0], 10);
-        EXPECT_EQ(tensor.Shape()[1], 5);
-        EXPECT_EQ(const_int, 1);
-        EXPECT_DOUBLE_EQ(const_float, 2.0);
-        EXPECT_EQ(std::string(const_str), "test");
-        EXPECT_EQ(var_int, 8);
-        g_debug_called = true;
-      });
+  refl::GlobalDef().def("testing.relax.frontend.nn.test_debug_func_jit",
+                        [](ffi::String lineno, runtime::Tensor tensor, int64_t const_int,
+                           double const_float, ffi::String const_str, int64_t var_int) {
+                          EXPECT_FALSE(std::string(lineno).empty());
+                          ASSERT_EQ(tensor.Shape().size(), 2);
+                          EXPECT_EQ(tensor.Shape()[0], 10);
+                          EXPECT_EQ(tensor.Shape()[1], 5);
+                          EXPECT_EQ(const_int, 1);
+                          EXPECT_DOUBLE_EQ(const_float, 2.0);
+                          EXPECT_EQ(std::string(const_str), "test");
+                          EXPECT_EQ(var_int, 8);
+                          g_debug_called = true;
+                        });
 
   const ffi::String kFuncName = "testing.relax.frontend.nn.test_debug_func_jit";
   const ffi::String kLineInfo = "test_nn_debug.cc:0";
@@ -653,20 +652,19 @@ TEST(NNDebug, TestDebugFuncJIT_Jit) {
   static std::atomic<int64_t> g_last_var_int{-1};
 
   namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def(
-      "testing.relax.frontend.nn.test_debug_func_jit2",
-      [](ffi::String lineno, runtime::Tensor tensor, int64_t const_int, double const_float,
-         ffi::String const_str, int64_t var_int) {
-        EXPECT_FALSE(std::string(lineno).empty());
-        ASSERT_EQ(tensor.Shape().size(), 2);
-        EXPECT_EQ(tensor.Shape()[0], 10);
-        EXPECT_EQ(tensor.Shape()[1], 5);
-        EXPECT_EQ(const_int, 1);
-        EXPECT_DOUBLE_EQ(const_float, 2.0);
-        EXPECT_EQ(std::string(const_str), "test");
-        g_last_var_int = var_int;
-        g_call_count++;
-      });
+  refl::GlobalDef().def("testing.relax.frontend.nn.test_debug_func_jit2",
+                        [](ffi::String lineno, runtime::Tensor tensor, int64_t const_int,
+                           double const_float, ffi::String const_str, int64_t var_int) {
+                          EXPECT_FALSE(std::string(lineno).empty());
+                          ASSERT_EQ(tensor.Shape().size(), 2);
+                          EXPECT_EQ(tensor.Shape()[0], 10);
+                          EXPECT_EQ(tensor.Shape()[1], 5);
+                          EXPECT_EQ(const_int, 1);
+                          EXPECT_DOUBLE_EQ(const_float, 2.0);
+                          EXPECT_EQ(std::string(const_str), "test");
+                          g_last_var_int = var_int;
+                          g_call_count++;
+                        });
 
   const ffi::String kFuncName = "testing.relax.frontend.nn.test_debug_func_jit2";
   const ffi::String kLineInfo = "test_nn_debug.cc:0";

@@ -111,9 +111,7 @@ class TestModuleNode : public NNModuleNode {
   ffi::Array<ffi::Any> arg_specs;
 
   TestModuleNode(ffi::Function fn, ffi::Array<ffi::String> names, ffi::Array<ffi::Any> specs)
-      : forward_fn(std::move(fn)),
-        arg_names(std::move(names)),
-        arg_specs(std::move(specs)) {}
+      : forward_fn(std::move(fn)), arg_names(std::move(names)), arg_specs(std::move(specs)) {}
 
   ModuleSpec MakeSpec(const std::string& method_name,
                       ffi::Map<ffi::String, NNParameter> named_params = {},
