@@ -248,13 +248,13 @@ def broadcast_to(x: Tensor, shape: Sequence[IntExpr], name: str = "broadcast_to"
 
 
 def permute_dims(x: Tensor, axes: list[int] | None = None, name: str | None = None) -> Tensor:
-    """Permutes the dimensions of an array."""
-    if name is None:
-        x_name = getattr(getattr(x, "_expr", None), "name_hint", None)
-        if x_name is not None and "linear" in x_name:
-            name = x_name.replace("linear", "matmul")
-        else:
-            name = "permute_dims"
+    """Permutes the dimensions of an array.
+
+    When *name* is ``None`` the binding name is derived from the input
+    tensor's name_hint by the C++ implementation (``NNPermuteDims`` in
+    ``op.cc``), mirroring the rule: if ``"linear"`` appears in the name,
+    replace it with ``"matmul"``; otherwise use ``"permute_dims"``.
+    """
     return _t(_ffi_op.permute_dims(_v(x), axes, name))
 
 

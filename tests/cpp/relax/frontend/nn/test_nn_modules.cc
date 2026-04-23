@@ -65,11 +65,11 @@
 #include <tvm/ffi/function.h>
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/ir/module.h>
+#include <tvm/relax/attrs/op.h>
 #include <tvm/relax/block_builder.h>
 #include <tvm/relax/expr.h>
 #include <tvm/relax/struct_info.h>
 #include <tvm/tir/op.h>
-#include <tvm/relax/attrs/op.h>
 
 // Internal op headers
 #include "../../../../../src/relax/op/nn/attention.h"
@@ -81,12 +81,12 @@
 #include "../../../../../src/relax/op/tensor/manipulate.h"
 
 // nn frontend headers
+#include <cmath>
+
 #include "../../../../../src/relax/frontend/nn/core.h"
 #include "../../../../../src/relax/frontend/nn/exporter.h"
 #include "../../../../../src/relax/frontend/nn/modules.h"
 #include "../../../../../src/relax/frontend/nn/spec.h"
-
-#include <cmath>
 
 namespace tvm {
 namespace relax {
@@ -155,8 +155,7 @@ static void EmitInitEffect(BlockBuilder& bb) {
 //
 // Emits the debug-mode output tuple: (result, (_io,)) and returns the Var.
 // ---------------------------------------------------------------------------
-static Var EmitDebugOutput(BlockBuilder& bb, Expr result, Var io,
-                           const std::string& hint = "gv1") {
+static Var EmitDebugOutput(BlockBuilder& bb, Expr result, Var io, const std::string& hint = "gv1") {
   return bb->EmitOutput(relax::Tuple({result, relax::Tuple({io})}), hint);
 }
 
@@ -427,9 +426,8 @@ TEST(NNModules, TestLinear) {
   // Collect named parameters: weight [8,4] and bias [8].
   ffi::Map<ffi::String, NNParameter> named_params = mod.get()->NamedParameters("");
 
-  IRModule actual =
-      ExportDebug(mod, "forward", {"x"}, {ffi::Any(MakeSpecTensor({1, 4}, "float32"))},
-                        named_params);
+  IRModule actual = ExportDebug(mod, "forward", {"x"},
+                                {ffi::Any(MakeSpecTensor({1, 4}, "float32"))}, named_params);
 
   // Build expected IR
   BlockBuilder bb = BlockBuilder::Create(std::nullopt);
@@ -491,16 +489,14 @@ TEST(NNModules, TestLinear) {
 // ===========================================================================
 TEST(NNModules, TestConv1D) {
   // Conv1D(in_channels=3, out_channels=32, kernel_size=3, bias=True)
-  Conv1DModule mod =
-      MakeConv1D(ffi::Any(int64_t(3)), ffi::Any(int64_t(32)), ffi::Any(int64_t(3)),
-                 /*stride=*/1, /*padding=*/0, /*dilation=*/1, /*groups=*/1,
-                 /*has_bias=*/true, /*dtype=*/std::nullopt);
+  Conv1DModule mod = MakeConv1D(ffi::Any(int64_t(3)), ffi::Any(int64_t(32)), ffi::Any(int64_t(3)),
+                                /*stride=*/1, /*padding=*/0, /*dilation=*/1, /*groups=*/1,
+                                /*has_bias=*/true, /*dtype=*/std::nullopt);
 
   ffi::Map<ffi::String, NNParameter> named_params = mod.get()->NamedParameters("");
 
-  IRModule actual =
-      ExportDebug(mod, "forward", {"x"},
-                        {ffi::Any(MakeSpecTensor({1, 3, 32}, "float32"))}, named_params);
+  IRModule actual = ExportDebug(mod, "forward", {"x"},
+                                {ffi::Any(MakeSpecTensor({1, 3, 32}, "float32"))}, named_params);
 
   // Build expected IR
   BlockBuilder bb = BlockBuilder::Create(std::nullopt);
@@ -529,9 +525,8 @@ TEST(NNModules, TestConv1D) {
                        "lv1");
 
     // reshape(bias, [1, 32, 1])
-    ShapeExpr bias_shape(ffi::Array<PrimExpr>{IntImm(DataType::Int(64), 1),
-                                              IntImm(DataType::Int(64), 32),
-                                              IntImm(DataType::Int(64), 1)});
+    ShapeExpr bias_shape(ffi::Array<PrimExpr>{
+        IntImm(DataType::Int(64), 1), IntImm(DataType::Int(64), 32), IntImm(DataType::Int(64), 1)});
     Var lv2 = bb->Emit(relax::reshape(bias, bias_shape), "lv2");
 
     // add(lv1, lv2)
@@ -585,9 +580,8 @@ TEST(NNModules, TestConv1DTranspose) {
 
   ffi::Map<ffi::String, NNParameter> named_params = mod.get()->NamedParameters("");
 
-  IRModule actual =
-      ExportDebug(mod, "forward", {"x"},
-                        {ffi::Any(MakeSpecTensor({1, 3, 30}, "float32"))}, named_params);
+  IRModule actual = ExportDebug(mod, "forward", {"x"},
+                                {ffi::Any(MakeSpecTensor({1, 3, 30}, "float32"))}, named_params);
 
   // Build expected IR
   BlockBuilder bb = BlockBuilder::Create(std::nullopt);
@@ -619,9 +613,8 @@ TEST(NNModules, TestConv1DTranspose) {
                        "lv1");
 
     // reshape(bias, [1, 32, 1])
-    ShapeExpr bias_shape(ffi::Array<PrimExpr>{IntImm(DataType::Int(64), 1),
-                                              IntImm(DataType::Int(64), 32),
-                                              IntImm(DataType::Int(64), 1)});
+    ShapeExpr bias_shape(ffi::Array<PrimExpr>{
+        IntImm(DataType::Int(64), 1), IntImm(DataType::Int(64), 32), IntImm(DataType::Int(64), 1)});
     Var lv2 = bb->Emit(relax::reshape(bias, bias_shape), "lv2");
 
     // add(lv1, lv2)
@@ -669,9 +662,8 @@ TEST(NNModules, TestLayerNorm) {
 
   ffi::Map<ffi::String, NNParameter> named_params = mod.get()->NamedParameters("");
 
-  IRModule actual =
-      ExportDebug(mod, "forward", {"x"},
-                        {ffi::Any(MakeSpecTensor({2, 4, 8}, "float32"))}, named_params);
+  IRModule actual = ExportDebug(mod, "forward", {"x"},
+                                {ffi::Any(MakeSpecTensor({2, 4, 8}, "float32"))}, named_params);
 
   // Build expected IR
   BlockBuilder bb = BlockBuilder::Create(std::nullopt);
@@ -730,18 +722,16 @@ TEST(NNModules, TestConv2D) {
   // Conv2D(in_channels=3, out_channels=32, kernel_size=3, bias=True)
   // kernel_size=3 is broadcast to [3, 3] by the Python wrapper; in C++ we
   // pass the already-expanded Array<Integer> directly to MakeConv2D.
-  Conv2DModule mod =
-      MakeConv2D(ffi::Any(int64_t(3)), ffi::Any(int64_t(32)),
-                 /*kernel_size=*/ffi::Array<Integer>{Integer(3), Integer(3)},
-                 /*stride=*/1, /*padding=*/0, /*dilation=*/1, /*groups=*/1,
-                 /*has_bias=*/true, /*dtype=*/std::nullopt,
-                 /*data_layout=*/"NCHW");
+  Conv2DModule mod = MakeConv2D(ffi::Any(int64_t(3)), ffi::Any(int64_t(32)),
+                                /*kernel_size=*/ffi::Array<Integer>{Integer(3), Integer(3)},
+                                /*stride=*/1, /*padding=*/0, /*dilation=*/1, /*groups=*/1,
+                                /*has_bias=*/true, /*dtype=*/std::nullopt,
+                                /*data_layout=*/"NCHW");
 
   ffi::Map<ffi::String, NNParameter> named_params = mod.get()->NamedParameters("");
 
-  IRModule actual =
-      ExportDebug(mod, "forward", {"x"},
-                        {ffi::Any(MakeSpecTensor({1, 3, 32, 32}, "float32"))}, named_params);
+  IRModule actual = ExportDebug(
+      mod, "forward", {"x"}, {ffi::Any(MakeSpecTensor({1, 3, 32, 32}, "float32"))}, named_params);
 
   // Build expected IR
   BlockBuilder bb = BlockBuilder::Create(std::nullopt);
@@ -771,10 +761,9 @@ TEST(NNModules, TestConv2D) {
                        "lv1");
 
     // reshape(bias, [1, 32, 1, 1])
-    ShapeExpr bias_shape(ffi::Array<PrimExpr>{IntImm(DataType::Int(64), 1),
-                                              IntImm(DataType::Int(64), 32),
-                                              IntImm(DataType::Int(64), 1),
-                                              IntImm(DataType::Int(64), 1)});
+    ShapeExpr bias_shape(
+        ffi::Array<PrimExpr>{IntImm(DataType::Int(64), 1), IntImm(DataType::Int(64), 32),
+                             IntImm(DataType::Int(64), 1), IntImm(DataType::Int(64), 1)});
     Var lv2 = bb->Emit(relax::reshape(bias, bias_shape), "lv2");
 
     // add(lv1, lv2)
@@ -829,8 +818,8 @@ TEST(NNModules, TestConv3D) {
   ffi::Map<ffi::String, NNParameter> named_params = mod.get()->NamedParameters("");
 
   IRModule actual =
-      ExportDebug(mod, "forward", {"x"},
-                        {ffi::Any(MakeSpecTensor({1, 3, 32, 32, 32}, "float32"))}, named_params);
+      ExportDebug(mod, "forward", {"x"}, {ffi::Any(MakeSpecTensor({1, 3, 32, 32, 32}, "float32"))},
+                  named_params);
 
   // Build expected IR
   BlockBuilder bb = BlockBuilder::Create(std::nullopt);
@@ -860,11 +849,9 @@ TEST(NNModules, TestConv3D) {
                        "lv1");
 
     // reshape(bias, [1, 32, 1, 1, 1])
-    ShapeExpr bias_shape(ffi::Array<PrimExpr>{IntImm(DataType::Int(64), 1),
-                                              IntImm(DataType::Int(64), 32),
-                                              IntImm(DataType::Int(64), 1),
-                                              IntImm(DataType::Int(64), 1),
-                                              IntImm(DataType::Int(64), 1)});
+    ShapeExpr bias_shape(ffi::Array<PrimExpr>{
+        IntImm(DataType::Int(64), 1), IntImm(DataType::Int(64), 32), IntImm(DataType::Int(64), 1),
+        IntImm(DataType::Int(64), 1), IntImm(DataType::Int(64), 1)});
     Var lv2 = bb->Emit(relax::reshape(bias, bias_shape), "lv2");
 
     // add(lv1, lv2)
@@ -916,12 +903,11 @@ TEST(NNModules, TestConv2DDynamic) {
   //        kernel_size=3, bias=True)
   // The Python wrapper expands kernel_size=3 to [3,3]; we do the same here.
   tir::Var in_channels_var("in_channels", DataType::Int(64));
-  Conv2DModule mod =
-      MakeConv2D(ffi::Any(PrimExpr(in_channels_var)), ffi::Any(int64_t(32)),
-                 /*kernel_size=*/ffi::Array<Integer>{Integer(3), Integer(3)},
-                 /*stride=*/1, /*padding=*/0, /*dilation=*/1, /*groups=*/1,
-                 /*has_bias=*/true, /*dtype=*/std::nullopt,
-                 /*data_layout=*/"NCHW");
+  Conv2DModule mod = MakeConv2D(ffi::Any(PrimExpr(in_channels_var)), ffi::Any(int64_t(32)),
+                                /*kernel_size=*/ffi::Array<Integer>{Integer(3), Integer(3)},
+                                /*stride=*/1, /*padding=*/0, /*dilation=*/1, /*groups=*/1,
+                                /*has_bias=*/true, /*dtype=*/std::nullopt,
+                                /*data_layout=*/"NCHW");
 
   ffi::Map<ffi::String, NNParameter> named_params = mod.get()->NamedParameters("");
 
@@ -933,8 +919,7 @@ TEST(NNModules, TestConv2DDynamic) {
   spec_dims.push_back(ffi::Any(ffi::String("w")));
   SpecTensor x_spec = MakeSpecTensorMixed(spec_dims, "float32");
 
-  IRModule actual =
-      ExportDebug(mod, "forward", {"x"}, {ffi::Any(x_spec)}, named_params);
+  IRModule actual = ExportDebug(mod, "forward", {"x"}, {ffi::Any(x_spec)}, named_params);
 
   // Build expected IR with symbolic shapes.
   // The exporter creates fresh tir::Vars for each unique string dim name;
@@ -950,14 +935,13 @@ TEST(NNModules, TestConv2DDynamic) {
     tir::Var in_ch("in_channels", DataType::Int(64));
 
     // x: (n, c, h, w)
-    Var x("x", TensorStructInfo(
-                   ShapeExpr(ffi::Array<PrimExpr>{n, c, h, w}), DataType::Float(32)));
+    Var x("x", TensorStructInfo(ShapeExpr(ffi::Array<PrimExpr>{n, c, h, w}), DataType::Float(32)));
     Var io("_io", ObjectStructInfo());
     // weight: (32, in_channels, 3, 3)
     Var weight("weight",
-               TensorStructInfo(ShapeExpr(ffi::Array<PrimExpr>{
-                                    IntImm(DataType::Int(64), 32), in_ch,
-                                    IntImm(DataType::Int(64), 3), IntImm(DataType::Int(64), 3)}),
+               TensorStructInfo(ShapeExpr(ffi::Array<PrimExpr>{IntImm(DataType::Int(64), 32), in_ch,
+                                                               IntImm(DataType::Int(64), 3),
+                                                               IntImm(DataType::Int(64), 3)}),
                                 DataType::Float(32)));
     Var bias("bias", TSInfo({32}, DataType::Float(32)));
     ffi::Array<Var> params{x, io, weight, bias};
@@ -979,10 +963,9 @@ TEST(NNModules, TestConv2DDynamic) {
                        "lv1");
 
     // reshape(bias, [1, 32, 1, 1])
-    ShapeExpr bias_shape(ffi::Array<PrimExpr>{IntImm(DataType::Int(64), 1),
-                                              IntImm(DataType::Int(64), 32),
-                                              IntImm(DataType::Int(64), 1),
-                                              IntImm(DataType::Int(64), 1)});
+    ShapeExpr bias_shape(
+        ffi::Array<PrimExpr>{IntImm(DataType::Int(64), 1), IntImm(DataType::Int(64), 32),
+                             IntImm(DataType::Int(64), 1), IntImm(DataType::Int(64), 1)});
     Var lv2 = bb->Emit(relax::reshape(bias, bias_shape), "lv2");
 
     // add(lv1, lv2)
@@ -1033,9 +1016,8 @@ TEST(NNModules, TestRMSNorm) {
 
   ffi::Map<ffi::String, NNParameter> named_params = mod.get()->NamedParameters("");
 
-  IRModule actual =
-      ExportDebug(mod, "forward", {"x"},
-                        {ffi::Any(MakeSpecTensor({2, 4, 8}, "float32"))}, named_params);
+  IRModule actual = ExportDebug(mod, "forward", {"x"},
+                                {ffi::Any(MakeSpecTensor({2, 4, 8}, "float32"))}, named_params);
 
   // Build expected IR
   BlockBuilder bb = BlockBuilder::Create(std::nullopt);
@@ -1106,13 +1088,12 @@ TEST(NNModules, TestGroupNorm) {
   // Python default: channel_axis=1, axes=list(range(2, ndim)).
   // For input (2,4,8) ndim=3 → axes=[2].
   ffi::Array<ffi::Any> extra_args;
-  extra_args.push_back(ffi::Any(int64_t(1)));                    // channel_axis
+  extra_args.push_back(ffi::Any(int64_t(1)));                       // channel_axis
   extra_args.push_back(ffi::Any(ffi::Array<Integer>{Integer(2)}));  // axes
 
   IRModule actual =
-      ExportDebug(mod, "forward", {"x"},
-                        {ffi::Any(MakeSpecTensor({2, 4, 8}, "float32"))},
-                        named_params, extra_args);
+      ExportDebug(mod, "forward", {"x"}, {ffi::Any(MakeSpecTensor({2, 4, 8}, "float32"))},
+                  named_params, extra_args);
 
   // Build expected IR
   BlockBuilder bb = BlockBuilder::Create(std::nullopt);
@@ -1129,10 +1110,9 @@ TEST(NNModules, TestGroupNorm) {
     // group_norm(x, weight, bias, num_groups=2, channel_axis=1, axes=[2],
     //            epsilon=1e-5, center=True, scale=True)
     ffi::Array<Integer> axes{Integer(2)};
-    Var gn = bb->Emit(
-        relax::group_norm(x, weight, bias, /*num_groups=*/2, /*channel_axis=*/1,
-                          axes, /*epsilon=*/1e-5, /*center=*/true, /*scale=*/true),
-        "group_norm");
+    Var gn = bb->Emit(relax::group_norm(x, weight, bias, /*num_groups=*/2, /*channel_axis=*/1, axes,
+                                        /*epsilon=*/1e-5, /*center=*/true, /*scale=*/true),
+                      "group_norm");
     Var gv1 = EmitDebugOutput(bb, gn, io);
 
     BindingBlock df = bb->EndBlock();
@@ -1183,10 +1163,8 @@ TEST(NNModules, TestEmbedding1D) {
   ffi::Array<ffi::Any> extra_args;
   extra_args.push_back(ffi::Any(ffi::Array<ffi::Any>{}));  // out_shape_if_nd = []
 
-  IRModule actual =
-      ExportDebug(mod, "forward", {"x"},
-                        {ffi::Any(MakeSpecTensor({4}, "int32"))},
-                        named_params, extra_args);
+  IRModule actual = ExportDebug(mod, "forward", {"x"}, {ffi::Any(MakeSpecTensor({4}, "int32"))},
+                                named_params, extra_args);
 
   // Build expected IR
   BlockBuilder bb = BlockBuilder::Create(std::nullopt);
@@ -1311,8 +1289,7 @@ TEST(NNModules, TestKVCache) {
 
   ModuleSpec mod_spec(ffi::Array<ffi::String>{ffi::String("forward")},
                       ffi::Array<ffi::Any>{ffi::Any(ms)},
-                      /*named_params=*/{},
-                      named_effects);
+                      /*named_params=*/{}, named_effects);
 
   IRModule actual = ExportToIRModule(mod_spec, /*debug=*/true);
 
@@ -1345,9 +1322,8 @@ TEST(NNModules, TestKVCache) {
     Var io = bb->Emit(Call(null_value_op, {}, {}, {}), "_io");
 
     // lv = R.zeros(R.shape([8, 2, 4]), dtype="float32")
-    ShapeExpr init_shape(ffi::Array<PrimExpr>{IntImm(DataType::Int(64), 8),
-                                              IntImm(DataType::Int(64), 2),
-                                              IntImm(DataType::Int(64), 4)});
+    ShapeExpr init_shape(ffi::Array<PrimExpr>{
+        IntImm(DataType::Int(64), 8), IntImm(DataType::Int(64), 2), IntImm(DataType::Int(64), 4)});
     Var lv = bb->Emit(relax::zeros(init_shape, DataType::Float(32)), "lv");
 
     // cache = R.call_pure_packed(
@@ -1355,11 +1331,10 @@ TEST(NNModules, TestKVCache) {
     //     lv, R.shape([8, 2, 4]), R.prim_value(0),
     //     sinfo_args=[R.Object()])
     static const Op& cpp_op = Op::Get("relax.call_pure_packed");
-    Expr cache_call =
-        Call(cpp_op,
-             {ExternFunc("vm.builtin.attention_kv_cache_create"), lv, init_shape,
-              PrimValue(IntImm(DataType::Int(64), 0))},
-             {}, {ObjectStructInfo()});
+    Expr cache_call = Call(cpp_op,
+                           {ExternFunc("vm.builtin.attention_kv_cache_create"), lv, init_shape,
+                            PrimValue(IntImm(DataType::Int(64), 0))},
+                           {}, {ObjectStructInfo()});
     Var cache = bb->Emit(cache_call, "cache");
 
     // lv1 = (_io, cache)
@@ -1406,8 +1381,7 @@ TEST(NNModules, TestKVCache) {
     inplace_attrs->inplace_indices = {Integer(0)};
     static const Op& inplace_op = Op::Get("relax.call_inplace_packed");
     Expr append_call =
-        Call(inplace_op,
-             {ExternFunc("vm.builtin.attention_kv_cache_append"), cache, x},
+        Call(inplace_op, {ExternFunc("vm.builtin.attention_kv_cache_append"), cache, x},
              Attrs(inplace_attrs), {ObjectStructInfo()});
     Var kv_cache_append = bb->Emit(append_call, "kv_cache_append");
 
@@ -1415,23 +1389,21 @@ TEST(NNModules, TestKVCache) {
     //     "vm.builtin.attention_kv_cache_view",
     //     kv_cache_append, R.shape([4, 2, 4]),
     //     sinfo_args=(R.Tensor((4,2,4),"float32"),))
-    ShapeExpr view_shape(ffi::Array<PrimExpr>{IntImm(DataType::Int(64), 4),
-                                              IntImm(DataType::Int(64), 2),
-                                              IntImm(DataType::Int(64), 4)});
+    ShapeExpr view_shape(ffi::Array<PrimExpr>{
+        IntImm(DataType::Int(64), 4), IntImm(DataType::Int(64), 2), IntImm(DataType::Int(64), 4)});
     TensorStructInfo view_sinfo = TSInfo({4, 2, 4}, DataType::Float(32));
     static const Op& pure_op = Op::Get("relax.call_pure_packed");
-    Expr view_call =
-        Call(pure_op,
-             {ExternFunc("vm.builtin.attention_kv_cache_view"), kv_cache_append, view_shape},
-             {}, {view_sinfo});
+    Expr view_call = Call(
+        pure_op, {ExternFunc("vm.builtin.attention_kv_cache_view"), kv_cache_append, view_shape},
+        {}, {view_sinfo});
     Var kv_cache_view = bb->Emit(view_call, "kv_cache_view");
 
     // gv1 = (kv_cache_view, (_io, kv_cache_append))
     // Effect output tuple: (_io, kv_cache_append)
     //   - _io:              legacy debug IO effect (unchanged)
     //   - kv_cache_append:  finalized KVCache state (updated cache var)
-    Var gv1 = bb->EmitOutput(
-        relax::Tuple({kv_cache_view, relax::Tuple({io, kv_cache_append})}), "gv1");
+    Var gv1 =
+        bb->EmitOutput(relax::Tuple({kv_cache_view, relax::Tuple({io, kv_cache_append})}), "gv1");
 
     BindingBlock df = bb->EndBlock();
     Expr body = bb->Normalize(SeqExpr({df}, gv1));
@@ -1539,14 +1511,13 @@ static ffi::Function MakeAttentionForwardFn(runtime::ObjectRef mod_ref) {
 TEST(NNModules, TestAttention) {
   // Attention(query_dim=640, cross_attention_dim=2048, heads=10, norm_num_groups=8)
   // Python defaults: dim_head=64, bias=False, out_bias=True
-  AttentionModule mod =
-      MakeAttention(/*query_dim=*/640,
-                    /*cross_attention_dim=*/ffi::Optional<int64_t>(int64_t(2048)),
-                    /*heads=*/10,
-                    /*dim_head=*/64,
-                    /*bias=*/false,
-                    /*norm_num_groups=*/ffi::Optional<int64_t>(int64_t(8)),
-                    /*out_bias=*/true);
+  AttentionModule mod = MakeAttention(/*query_dim=*/640,
+                                      /*cross_attention_dim=*/ffi::Optional<int64_t>(int64_t(2048)),
+                                      /*heads=*/10,
+                                      /*dim_head=*/64,
+                                      /*bias=*/false,
+                                      /*norm_num_groups=*/ffi::Optional<int64_t>(int64_t(8)),
+                                      /*out_bias=*/true);
 
   // Collect named parameters in traversal order.
   ffi::Map<ffi::String, NNParameter> named_params = mod.get()->NamedParameters("");
@@ -1556,8 +1527,7 @@ TEST(NNModules, TestAttention) {
   ffi::Array<ffi::String> attn_arg_names{"hidden_states", "encoder_hidden_states"};
   ffi::Array<ffi::Any> attn_arg_specs{ffi::Any(MakeSpecTensor({2, 4096, 640}, "float32")),
                                       ffi::Any(MakeSpecTensor({2, 77, 2048}, "float32"))};
-  MethodSpec attn_ms(MakeAttentionForwardFn(mod), attn_arg_names, attn_arg_specs,
-                     "plain", "plain");
+  MethodSpec attn_ms(MakeAttentionForwardFn(mod), attn_arg_names, attn_arg_specs, "plain", "plain");
   ModuleSpec attn_mod_spec(ffi::Array<ffi::String>{ffi::String("forward")},
                            ffi::Array<ffi::Any>{ffi::Any(attn_ms)}, named_params, {});
   ffi::Array<ffi::Any> attn_result =
@@ -1634,10 +1604,10 @@ TEST(NNModules, TestAttention) {
     Var to_out_0_weight("to_out_0_weight", TSInfo({640, 640}, f32));
     Var to_out_0_bias("to_out_0_bias", TSInfo({640}, f32));
 
-    ffi::Array<Var> params{hidden_states,    encoder_hidden_states, io,
-                           to_q_weight,      to_k_weight,           to_v_weight,
-                           group_norm_weight, group_norm_bias,
-                           to_out_0_weight,  to_out_0_bias};
+    ffi::Array<Var> params{hidden_states,     encoder_hidden_states, io,
+                           to_q_weight,       to_k_weight,           to_v_weight,
+                           group_norm_weight, group_norm_bias,       to_out_0_weight,
+                           to_out_0_bias};
     bb->BeginScope(params);
     bb->BeginDataflowBlock();
 
@@ -1646,11 +1616,10 @@ TEST(NNModules, TestAttention) {
     //   Emit(group_norm(hs, weight, bias, num_groups=8,
     //                   channel_axis=2, axes=[1], eps=1e-5), "group_norm")
     ffi::Array<Integer> gn_axes{Integer(1)};
-    Var gn_out = bb->Emit(
-        relax::group_norm(hidden_states, group_norm_weight, group_norm_bias,
-                          /*num_groups=*/8, /*channel_axis=*/2,
-                          gn_axes, /*epsilon=*/1e-5, /*center=*/true, /*scale=*/true),
-        "group_norm");
+    Var gn_out = bb->Emit(relax::group_norm(hidden_states, group_norm_weight, group_norm_bias,
+                                            /*num_groups=*/8, /*channel_axis=*/2, gn_axes,
+                                            /*epsilon=*/1e-5, /*center=*/true, /*scale=*/true),
+                          "group_norm");
 
     // ---- to_q.Forward(group_norm) — Linear, no bias -----------------------
     // Emit(matmul(gn_out, permute_dims(to_q_weight)), "linear")
@@ -1666,8 +1635,7 @@ TEST(NNModules, TestAttention) {
     // Emit(matmul(enc, permute_dims(to_k_weight)), "linear")
     // BlockBuilder normalises:
     //   "permute_dims1" ← permute_dims(to_k_weight)   [dedup suffix 1]
-    Var permute_dims1 =
-        bb->Emit(relax::permute_dims(to_k_weight, std::nullopt), "permute_dims1");
+    Var permute_dims1 = bb->Emit(relax::permute_dims(to_k_weight, std::nullopt), "permute_dims1");
     //   "linear1" ← matmul(enc, permute_dims1)        [hint "linear" → dedup "linear1"]
     Var linear_k =
         bb->Emit(relax::matmul(encoder_hidden_states, permute_dims1, std::nullopt), "linear1");
@@ -1676,8 +1644,7 @@ TEST(NNModules, TestAttention) {
     // Emit(matmul(enc, permute_dims(to_v_weight)), "linear")
     // BlockBuilder normalises:
     //   "permute_dims2" ← permute_dims(to_v_weight)   [dedup suffix 2]
-    Var permute_dims2 =
-        bb->Emit(relax::permute_dims(to_v_weight, std::nullopt), "permute_dims2");
+    Var permute_dims2 = bb->Emit(relax::permute_dims(to_v_weight, std::nullopt), "permute_dims2");
     //   "linear2" ← matmul(enc, permute_dims2)        [hint "linear" → dedup "linear2"]
     Var linear_v =
         bb->Emit(relax::matmul(encoder_hidden_states, permute_dims2, std::nullopt), "linear2");
@@ -1698,13 +1665,12 @@ TEST(NNModules, TestAttention) {
 
     // ---- attention(q, k, v, bias=None, scale=None,
     //                causal_mask=None, window_size=None) → "attn_out" -------
-    Var attn_out = bb->Emit(
-        relax::attention(q, k, v,
-                         /*bias=*/std::nullopt,
-                         /*scale=*/std::nullopt,
-                         /*causal_mask=*/std::nullopt,
-                         /*window_size=*/std::nullopt),
-        "attn_out");
+    Var attn_out = bb->Emit(relax::attention(q, k, v,
+                                             /*bias=*/std::nullopt,
+                                             /*scale=*/std::nullopt,
+                                             /*causal_mask=*/std::nullopt,
+                                             /*window_size=*/std::nullopt),
+                            "attn_out");
 
     // ---- reshape(attn_out, [2, 4096, 640]) → "attn_reshape" ---------------
     ShapeExpr flat_shape(ffi::Array<PrimExpr>{I64(2), I64(4096), I64(640)});
@@ -1717,8 +1683,7 @@ TEST(NNModules, TestAttention) {
     Var permute_dims3 =
         bb->Emit(relax::permute_dims(to_out_0_weight, std::nullopt), "permute_dims3");
     //   "matmul" ← matmul(attn_reshape, permute_dims3)
-    Var matmul_out =
-        bb->Emit(relax::matmul(attn_reshape, permute_dims3, std::nullopt), "matmul");
+    Var matmul_out = bb->Emit(relax::matmul(attn_reshape, permute_dims3, std::nullopt), "matmul");
     //   "linear3" ← add(matmul, to_out_0_bias)                [hint "linear" → dedup "linear3"]
     Var linear3_out = bb->Emit(relax::add(matmul_out, to_out_0_bias), "linear3");
 
@@ -1791,10 +1756,8 @@ TEST(NNModules, TestEmbedding2D) {
   ffi::Array<ffi::Any> extra_args;
   extra_args.push_back(ffi::Any(out_shape_if_nd));  // out_shape_if_nd = [1, 4, 8]
 
-  IRModule actual =
-      ExportDebug(mod, "forward", {"x"},
-                        {ffi::Any(MakeSpecTensor({1, 4}, "int32"))},
-                        named_params, extra_args);
+  IRModule actual = ExportDebug(mod, "forward", {"x"}, {ffi::Any(MakeSpecTensor({1, 4}, "int32"))},
+                                named_params, extra_args);
 
   // ---------------------------------------------------------------------------
   // Build expected IR
@@ -1832,9 +1795,8 @@ TEST(NNModules, TestEmbedding2D) {
     Var take_var = bb->Emit(relax::take(weight, reshape_var, ffi::Optional<int64_t>(0)), "take");
 
     // Step 3: reshape(take, [1, 4, 8])  — restore the batch dimension.
-    ShapeExpr out_shape(ffi::Array<PrimExpr>{IntImm(DataType::Int(64), 1),
-                                             IntImm(DataType::Int(64), 4),
-                                             IntImm(DataType::Int(64), 8)});
+    ShapeExpr out_shape(ffi::Array<PrimExpr>{
+        IntImm(DataType::Int(64), 1), IntImm(DataType::Int(64), 4), IntImm(DataType::Int(64), 8)});
     Var embedding_var = bb->Emit(relax::reshape(take_var, out_shape), "embedding");
 
     // Debug output: (embedding, (_io,))
@@ -1954,8 +1916,8 @@ TEST(NNModules, TestTimestepEmbedding) {
   ffi::Array<ffi::String> tse_arg_names{"sample", "condition"};
   ffi::Array<ffi::Any> tse_arg_specs{ffi::Any(MakeSpecTensor({32, 32}, "float32")),
                                      ffi::Any(MakeSpecTensor({32, 16}, "float32"))};
-  MethodSpec tse_ms(MakeTimestepEmbeddingForwardFn(mod), tse_arg_names, tse_arg_specs,
-                    "plain", "plain");
+  MethodSpec tse_ms(MakeTimestepEmbeddingForwardFn(mod), tse_arg_names, tse_arg_specs, "plain",
+                    "plain");
   ModuleSpec tse_mod_spec(ffi::Array<ffi::String>{ffi::String("forward")},
                           ffi::Array<ffi::Any>{ffi::Any(tse_ms)}, named_params, {});
   ffi::Array<ffi::Any> tse_result =
@@ -2013,8 +1975,8 @@ TEST(NNModules, TestTimestepEmbedding) {
     Var linear_2_weight("linear_2_weight", TSInfo({32, 32}, DataType::Float(32)));
     Var linear_2_bias("linear_2_bias", TSInfo({32}, DataType::Float(32)));
 
-    ffi::Array<Var> params{sample,          condition,       io,
-                           linear_1_weight, linear_1_bias,   cond_proj_weight,
+    ffi::Array<Var> params{sample,          condition,     io,
+                           linear_1_weight, linear_1_bias, cond_proj_weight,
                            linear_2_weight, linear_2_bias};
     bb->BeginScope(params);
     bb->BeginDataflowBlock();
@@ -2026,8 +1988,7 @@ TEST(NNModules, TestTimestepEmbedding) {
     Var permute_dims =
         bb->Emit(relax::permute_dims(cond_proj_weight, std::nullopt), "permute_dims");
     //   "linear" ← matmul(condition, permute_dims)   [hint "linear", no bias]
-    Var linear_out =
-        bb->Emit(relax::matmul(condition, permute_dims, std::nullopt), "linear");
+    Var linear_out = bb->Emit(relax::matmul(condition, permute_dims, std::nullopt), "linear");
 
     // ---- Step 2: Emit(add(sample, linear), "cond_add") --------------------
     Var cond_add = bb->Emit(relax::add(sample, linear_out), "cond_add");
@@ -2138,8 +2099,7 @@ TEST(NNModules, TestTimesteps) {
   ffi::Map<ffi::String, NNParameter> named_params = mod.get()->NamedParameters("");
   EXPECT_TRUE(named_params.empty());
 
-  IRModule actual =
-      ExportDebug(mod, "forward", {"x"}, {ffi::Any(MakeSpecTensor({3}, "float32"))});
+  IRModule actual = ExportDebug(mod, "forward", {"x"}, {ffi::Any(MakeSpecTensor({3}, "float32"))});
 
   // ---------------------------------------------------------------------------
   // Build expected IR
@@ -2167,9 +2127,9 @@ TEST(NNModules, TestTimesteps) {
     auto I64 = [](int64_t v) { return IntImm(DataType::Int(64), v); };
 
     // Numeric constants matching NNGetTimestepEmbedding exactly.
-    const int64_t half_dim = 5;                          // embedding_dim / 2
-    const double log_val = -std::log(10000.0);           // -log(max_period)
-    const double denom = half_dim - 1.0;                 // half_dim - downscale_freq_shift
+    const int64_t half_dim = 5;                 // embedding_dim / 2
+    const double log_val = -std::log(10000.0);  // -log(max_period)
+    const double denom = half_dim - 1.0;        // half_dim - downscale_freq_shift
 
     Var x("x", TSInfo({3}, f32));
     Var io("_io", ObjectStructInfo());
@@ -2186,9 +2146,9 @@ TEST(NNModules, TestTimesteps) {
     Var timesteps1 = bb->Emit(relax::expand_dims(timesteps, {1}), "timesteps1");
 
     // "arange" ← arange(0, half_dim, 1, float32)
-    Var arange_v = bb->Emit(
-        relax::arange(PrimValue(I64(0)), PrimValue(I64(half_dim)), PrimValue(I64(1)), f32),
-        "arange");
+    Var arange_v =
+        bb->Emit(relax::arange(PrimValue(I64(0)), PrimValue(I64(half_dim)), PrimValue(I64(1)), f32),
+                 "arange");
 
     // "exponent" ← multiply(const(log_val), arange)
     Var exponent =
@@ -2221,8 +2181,8 @@ TEST(NNModules, TestTimesteps) {
     // flip_sin_to_cos=false → concat([sin, cos], axis=-1)
     // "emb3" ← concat((sin, cos), axis=-1)
     // Dedup: "emb" already used three times → suffix 3.
-    Var emb3 = bb->Emit(
-        relax::concat(relax::Tuple({sin_emb, cos_emb}), ffi::Optional<int64_t>(-1)), "emb3");
+    Var emb3 = bb->Emit(relax::concat(relax::Tuple({sin_emb, cos_emb}), ffi::Optional<int64_t>(-1)),
+                        "emb3");
 
     // embedding_dim=10 is even → NNGetTimestepEmbedding skips the pad.
 
@@ -2298,8 +2258,7 @@ TEST(NNModules, TestNNModuleTupleInput) {
   BlockBuilder bb = BlockBuilder::Create(std::nullopt);
   EmitInitEffect(bb);
   {
-    TupleStructInfo x_sinfo(
-        ffi::Array<StructInfo>{TSInfo({10, 5}, f32), TSInfo({10, 5}, f32)});
+    TupleStructInfo x_sinfo(ffi::Array<StructInfo>{TSInfo({10, 5}, f32), TSInfo({10, 5}, f32)});
     Var x("x", x_sinfo);
     Var io("_io", ObjectStructInfo());
     ffi::Array<Var> params{x, io};
@@ -2310,8 +2269,8 @@ TEST(NNModules, TestNNModuleTupleInput) {
     Var x_1 = bb->Emit(TupleGetItem(x, 1), "x_1");
     Var add_out = bb->Emit(relax::add(x_0, x_1), "add");
     Var sub_out = bb->Emit(relax::subtract(x_0, x_1), "subtract");
-    Var gv1 = bb->EmitOutput(
-        relax::Tuple({relax::Tuple({add_out, sub_out}), relax::Tuple({io})}), "gv1");
+    Var gv1 =
+        bb->EmitOutput(relax::Tuple({relax::Tuple({add_out, sub_out}), relax::Tuple({io})}), "gv1");
 
     BindingBlock df = bb->EndBlock();
     Expr body = bb->Normalize(SeqExpr({df}, gv1));
@@ -2346,8 +2305,7 @@ TEST(NNModules, TestNNModuleListInput) {
   BlockBuilder bb = BlockBuilder::Create(std::nullopt);
   EmitInitEffect(bb);
   {
-    TupleStructInfo x_sinfo(
-        ffi::Array<StructInfo>{TSInfo({10, 5}, f32), TSInfo({10, 5}, f32)});
+    TupleStructInfo x_sinfo(ffi::Array<StructInfo>{TSInfo({10, 5}, f32), TSInfo({10, 5}, f32)});
     Var x("x", x_sinfo);
     Var io("_io", ObjectStructInfo());
     ffi::Array<Var> params{x, io};
@@ -2358,8 +2316,8 @@ TEST(NNModules, TestNNModuleListInput) {
     Var x_1 = bb->Emit(TupleGetItem(x, 1), "x_1");
     Var add_out = bb->Emit(relax::add(x_0, x_1), "add");
     Var sub_out = bb->Emit(relax::subtract(x_0, x_1), "subtract");
-    Var gv1 = bb->EmitOutput(
-        relax::Tuple({relax::Tuple({add_out, sub_out}), relax::Tuple({io})}), "gv1");
+    Var gv1 =
+        bb->EmitOutput(relax::Tuple({relax::Tuple({add_out, sub_out}), relax::Tuple({io})}), "gv1");
 
     BindingBlock df = bb->EndBlock();
     Expr body = bb->Normalize(SeqExpr({df}, gv1));
@@ -2432,4 +2390,3 @@ TEST(NNModules, TestModuleDict) {
 }  // namespace frontend
 }  // namespace relax
 }  // namespace tvm
-

@@ -23,6 +23,7 @@
 #include "modules.h"
 
 #include <tvm/arith/analyzer.h>
+#include <tvm/ffi/function.h>
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/relax/attrs/op.h>
 #include <tvm/relax/block_builder.h>
@@ -32,13 +33,7 @@
 
 #include <string>
 
-#include "../../op/nn/attention.h"
-#include "../../op/nn/convolution.h"
-#include "../../op/nn/nn.h"
-#include "../../op/tensor/binary.h"
 #include "../../op/tensor/create.h"
-#include "../../op/tensor/index.h"
-#include "../../op/tensor/linear_algebra.h"
 #include "../../op/tensor/manipulate.h"
 #include "core.h"
 
@@ -51,10 +46,99 @@ namespace nn {
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-static Var Emit(Expr expr, const std::string& name) {
-  BlockBuilder bb = BlockBuilder_Current();
-  TVM_FFI_ICHECK(bb.defined()) << "forward() called outside a BlockBuilder scope";
-  return bb->Emit(expr, name);
+// ---------------------------------------------------------------------------
+// NN op interface wrappers
+//
+// These call the registered C++ NN op functions (from op.cc) via their FFI
+// global names, exactly mirroring how Python op.py calls _ffi_op.*.
+// This ensures all specialisations (e.g. permute_dims naming) are applied
+// consistently whether the caller is Python or C++ modules.
+// ---------------------------------------------------------------------------
+
+static ffi::Function NNOp(const char* name) {
+  const auto fn = ffi::Function::GetGlobal(name);
+  TVM_FFI_ICHECK(fn) << "NN op not found: " << name;
+  return *fn;
+}
+
+static Var NNOpVar(ffi::Any result) { return result.cast<Var>(); }
+
+static Var NNRelu(Var x, const std::string& name = "relu") {
+  return NNOpVar(NNOp("relax.frontend.nn.op.relu")(x, ffi::String(name)));
+}
+static Var NNSilu(Var x, const std::string& name = "silu") {
+  return NNOpVar(NNOp("relax.frontend.nn.op.silu")(x, ffi::String(name)));
+}
+static Var NNGelu(Var x, ffi::Optional<ffi::String> approximate, const std::string& name = "gelu") {
+  return NNOpVar(NNOp("relax.frontend.nn.op.gelu")(x, approximate, ffi::String(name)));
+}
+static Var NNPermuteDims(Var x, ffi::Optional<ffi::Array<Integer>> axes,
+                         ffi::Optional<ffi::String> name = std::nullopt) {
+  return NNOpVar(NNOp("relax.frontend.nn.op.permute_dims")(x, axes, name));
+}
+static Var NNMatmul(Var a, Var b, ffi::Optional<ffi::String> out_dtype = std::nullopt,
+                    const std::string& name = "matmul") {
+  return NNOpVar(NNOp("relax.frontend.nn.op.matmul")(a, b, out_dtype, ffi::String(name)));
+}
+static Var NNAdd(Var a, Var b, const std::string& name = "add") {
+  return NNOpVar(NNOp("relax.frontend.nn.op.add")(a, b, ffi::String(name)));
+}
+static Var NNReshape(Var x, ffi::Array<ffi::Any> shape, const std::string& name = "reshape") {
+  return NNOpVar(NNOp("relax.frontend.nn.op.reshape")(x, shape, ffi::String(name)));
+}
+static Var NNTake(Var x, Var indices, ffi::Optional<Integer> axis,
+                  const std::string& name = "take") {
+  return NNOpVar(NNOp("relax.frontend.nn.op.take")(x, indices, axis, ffi::String(name)));
+}
+static Var NNLayerNorm(Var x, ffi::Array<Integer> axes, Expr weight, Expr bias, double eps,
+                       const std::string& name = "layer_norm") {
+  return NNOpVar(
+      NNOp("relax.frontend.nn.op.layer_norm")(x, axes, weight, bias, eps, ffi::String(name)));
+}
+static Var NNRmsNorm(Var x, Var weight, ffi::Array<Integer> axes, double epsilon,
+                     const std::string& name = "rms_norm") {
+  return NNOpVar(
+      NNOp("relax.frontend.nn.op.rms_norm")(x, weight, axes, epsilon, ffi::String(name)));
+}
+static Var NNGroupNorm(Var x, ffi::Optional<Var> weight, ffi::Optional<Var> bias, int num_groups,
+                       int channel_axis, ffi::Array<Integer> axes, double eps,
+                       const std::string& name = "group_norm") {
+  return NNOpVar(NNOp("relax.frontend.nn.op.group_norm")(x, weight, bias, num_groups, channel_axis,
+                                                         axes, eps, ffi::String(name)));
+}
+static Var NNConv1d(Var x, Var weight, ffi::Optional<Var> bias, int64_t stride, int64_t padding,
+                    int64_t dilation, int64_t groups, const std::string& name = "conv1d") {
+  return NNOpVar(NNOp("relax.frontend.nn.op.conv1d")(x, weight, bias, ffi::Any(stride),
+                                                     ffi::Any(padding), ffi::Any(dilation),
+                                                     static_cast<int>(groups), ffi::String(name)));
+}
+static Var NNConv2d(Var x, Var weight, ffi::Optional<Var> bias, int64_t stride, int64_t padding,
+                    int64_t dilation, int64_t groups, const std::string& data_layout,
+                    const std::string& name = "conv2d") {
+  return NNOpVar(NNOp("relax.frontend.nn.op.conv2d")(
+      x, weight, bias, ffi::Any(stride), ffi::Any(padding), ffi::Any(dilation),
+      static_cast<int>(groups), ffi::String(data_layout), ffi::String(name)));
+}
+static Var NNConv3d(Var x, Var weight, ffi::Optional<Var> bias, int64_t stride, int64_t padding,
+                    int64_t dilation, int64_t groups, const std::string& data_layout,
+                    const std::string& name = "conv3d") {
+  return NNOpVar(NNOp("relax.frontend.nn.op.conv3d")(
+      x, weight, bias, ffi::Any(stride), ffi::Any(padding), ffi::Any(dilation),
+      static_cast<int>(groups), ffi::String(data_layout), ffi::String(name)));
+}
+static Var NNConv1dTranspose(Var x, Var weight, ffi::Optional<Var> bias, int64_t stride,
+                             int64_t padding, int64_t output_padding, int64_t dilation,
+                             int64_t groups, const std::string& name = "conv1d_transpose") {
+  return NNOpVar(NNOp("relax.frontend.nn.op.conv1d_transpose")(
+      x, weight, bias, ffi::Any(stride), ffi::Any(padding), ffi::Any(output_padding),
+      ffi::Any(dilation), static_cast<int>(groups), ffi::String(name)));
+}
+static Var NNScaledDotProductAttention(Var q, Var k, Var v,
+                                       ffi::Optional<ffi::String> causal_mask = std::nullopt,
+                                       ffi::Optional<double> scale = std::nullopt,
+                                       const std::string& name = "scaled_dot_product_attention") {
+  return NNOpVar(NNOp("relax.frontend.nn.op.scaled_dot_product_attention")(
+      q, k, v, causal_mask, scale, ffi::String(name)));
 }
 
 // Build a PrimExpr dimension from a mixed ffi::Any element.
@@ -105,13 +189,13 @@ NNParameter MakeParam(ffi::Array<ffi::Any> shape, ffi::String dtype) {
 // ReLU
 // ---------------------------------------------------------------------------
 ReLUModule::ReLUModule() { data_ = ffi::make_object<ReLUModuleNode>(); }
-Var ReLUModuleNode::Forward(Var x) const { return Emit(relax::relu(x), "relu"); }
+Var ReLUModuleNode::Forward(Var x) const { return NNRelu(x); }
 
 // ---------------------------------------------------------------------------
 // SiLU
 // ---------------------------------------------------------------------------
 SiLUModule::SiLUModule() { data_ = ffi::make_object<SiLUModuleNode>(); }
-Var SiLUModuleNode::Forward(Var x) const { return Emit(relax::silu(x), "silu"); }
+Var SiLUModuleNode::Forward(Var x) const { return NNSilu(x); }
 
 // ---------------------------------------------------------------------------
 // GELU
@@ -120,7 +204,9 @@ GELUModule::GELUModule(ffi::String approximate) {
   data_ = ffi::make_object<GELUModuleNode>(std::move(approximate));
 }
 Var GELUModuleNode::Forward(Var x) const {
-  return Emit((approximate == "tanh") ? relax::gelu_tanh(x) : relax::gelu(x), "gelu");
+  ffi::Optional<ffi::String> approx =
+      approximate.empty() ? std::nullopt : ffi::Optional<ffi::String>(approximate);
+  return NNGelu(x, approx);
 }
 
 // ---------------------------------------------------------------------------
@@ -133,29 +219,15 @@ LinearModule::LinearModule(NNParameter weight, ffi::Optional<NNParameter> bias,
 }
 
 Var LinearModuleNode::Forward(Var x) const {
-  // Derive the permute_dims name from the weight var's name_hint,
-  // mirroring the Python nn.op.permute_dims naming logic:
-  //   if "linear" is in the weight name, replace it with "matmul"
-  //   otherwise fall back to "permute_dims"
-  std::string w_name = std::string(weight->expr->name_hint());
-  std::string pd_name;
-  size_t pos = w_name.find("linear");
-  if (pos != std::string::npos) {
-    pd_name = w_name.substr(0, pos) + "matmul" + w_name.substr(pos + 6);
-  } else {
-    pd_name = "permute_dims";
-  }
-  Var w = Emit(relax::permute_dims(weight->expr, std::nullopt), pd_name);
-  ffi::Optional<DataType> dt =
-      out_dtype.has_value()
-          ? ffi::Optional<DataType>(DataType(ffi::StringToDLDataType(out_dtype.value())))
-          : std::nullopt;
-  Expr out = relax::matmul(x, w, dt);
+  // Delegate permute_dims naming to NNPermuteDims (op.cc), which mirrors
+  // the Python nn.op.permute_dims logic: when no name is given it derives
+  // the name from the weight var's name_hint ("linear" -> "matmul").
+  Var w = NNPermuteDims(weight->expr, std::nullopt);
+  Var mm = NNMatmul(x, w, out_dtype);
   if (bias.has_value()) {
-    Var matmul_out = Emit(out, "matmul");
-    return Emit(relax::add(matmul_out, bias.value()->expr), "add");
+    return NNAdd(mm, bias.value()->expr);
   }
-  return Emit(out, "matmul");
+  return mm;
 }
 
 LinearModule MakeLinear(ffi::Any in_features, ffi::Any out_features, bool has_bias,
@@ -180,13 +252,12 @@ EmbeddingModule::EmbeddingModule(NNParameter weight) {
 
 Var EmbeddingModuleNode::Forward(Var x, ffi::Array<ffi::Any> out_shape_if_nd) const {
   if (out_shape_if_nd.empty()) {
-    return Emit(relax::take(weight->expr, x, ffi::Optional<int64_t>(0)), "embedding");
+    return NNTake(weight->expr, x, ffi::Optional<Integer>(Integer(0)), "embedding");
   }
-  Expr flat = relax::reshape(x, ShapeExpr(ffi::Array<PrimExpr>{IntImm(DataType::Int(64), -1)}));
-  Expr taken = relax::take(weight->expr, flat, ffi::Optional<int64_t>(0));
-  ffi::Array<PrimExpr> new_shape;
-  for (const auto& s : out_shape_if_nd) new_shape.push_back(AnyToDim(s));
-  return Emit(relax::reshape(taken, ShapeExpr(new_shape)), "embedding");
+  // ND path: flatten → take → reshape to out_shape
+  Var flat = NNReshape(x, {ffi::Any(int64_t(-1))}, "reshape");
+  Var taken = NNTake(weight->expr, flat, ffi::Optional<Integer>(Integer(0)), "take");
+  return NNReshape(taken, out_shape_if_nd, "embedding");
 }
 
 EmbeddingModule MakeEmbedding(ffi::Any num, ffi::Any dim, ffi::Optional<ffi::String> dtype) {
@@ -208,12 +279,8 @@ LayerNormModule::LayerNormModule(ffi::Optional<NNParameter> weight, ffi::Optiona
 }
 
 Var LayerNormModuleNode::Forward(Var x) const {
-  // When elementwise_affine=false we still need weight/bias exprs for the op.
-  // The factory stores constant ones/zeros as ParameterNode with no data.
   TVM_FFI_ICHECK(weight.defined() && bias.defined());
-  return Emit(
-      relax::layer_norm(x, weight.value()->expr, bias.value()->expr, axes, epsilon, true, true),
-      "layer_norm");
+  return NNLayerNorm(x, axes, weight.value()->expr, bias.value()->expr, epsilon);
 }
 
 LayerNormModule MakeLayerNorm(ffi::Any normalized_shape, double eps, bool elementwise_affine,
@@ -251,9 +318,9 @@ RMSNormModule::RMSNormModule(NNParameter weight, ffi::Optional<NNParameter> bias
 }
 
 Var RMSNormModuleNode::Forward(Var x) const {
-  Expr out = relax::rms_norm(x, weight->expr, axes, epsilon);
-  if (bias.has_value()) out = relax::add(out, bias.value()->expr);
-  return Emit(out, "rms_norm");
+  Var out = NNRmsNorm(x, weight->expr, axes, epsilon);
+  if (bias.has_value()) return NNAdd(out, bias.value()->expr, "rms_norm");
+  return out;
 }
 
 RMSNormModule MakeRMSNorm(ffi::Any hidden_size, ffi::Array<Integer> axes, double epsilon,
@@ -279,9 +346,9 @@ GroupNormModule::GroupNormModule(int64_t num_groups, ffi::Optional<NNParameter> 
 
 Var GroupNormModuleNode::Forward(Var x, int64_t channel_axis, ffi::Array<Integer> axes) const {
   TVM_FFI_ICHECK(weight.defined() && bias.defined()) << "GroupNorm requires both weight and bias";
-  return Emit(relax::group_norm(x, weight.value()->expr, bias.value()->expr, num_groups,
-                                static_cast<int>(channel_axis), axes, epsilon, true, true),
-              "group_norm");
+  return NNGroupNorm(x, ffi::Optional<Var>(weight.value()->expr),
+                     ffi::Optional<Var>(bias.value()->expr), static_cast<int>(num_groups),
+                     static_cast<int>(channel_axis), axes, epsilon);
 }
 
 GroupNormModule MakeGroupNorm(int64_t num_groups, ffi::Any num_channels, double eps, bool affine,
@@ -308,16 +375,9 @@ Conv1DModule::Conv1DModule(NNParameter weight, ffi::Optional<NNParameter> bias, 
 }
 
 Var Conv1DModuleNode::Forward(Var x) const {
-  Expr out = relax::conv1d(x, weight->expr, {stride}, {padding}, {dilation},
-                           static_cast<int>(groups), "NCW", "OIW", std::nullopt, std::nullopt);
-  if (bias.has_value()) {
-    Expr b = relax::reshape(
-        bias.value()->expr,
-        ShapeExpr(ffi::Array<PrimExpr>{IntImm(DataType::Int(64), 1), IntImm(DataType::Int(64), -1),
-                                       IntImm(DataType::Int(64), 1)}));
-    out = relax::add(out, b);
-  }
-  return Emit(out, "conv1d");
+  return NNConv1d(x, weight->expr,
+                  bias.has_value() ? ffi::Optional<Var>(bias.value()->expr) : std::nullopt, stride,
+                  padding, dilation, groups);
 }
 
 Conv1DModule MakeConv1D(ffi::Any in_channels, ffi::Any out_channels, ffi::Any kernel_size,
@@ -347,24 +407,9 @@ Conv2DModule::Conv2DModule(NNParameter weight, ffi::Optional<NNParameter> bias, 
 }
 
 Var Conv2DModuleNode::Forward(Var x) const {
-  std::string dl = std::string(data_layout);
-  std::string kl = (dl == "NCHW") ? "OIHW" : "HWIO";
-  Expr out = relax::conv2d(x, weight->expr, {stride}, {padding}, {dilation},
-                           static_cast<int>(groups), dl, kl, std::nullopt, std::nullopt);
-  if (bias.has_value()) {
-    Expr b =
-        (dl == "NCHW")
-            ? relax::reshape(bias.value()->expr,
-                             ShapeExpr(ffi::Array<PrimExpr>{
-                                 IntImm(DataType::Int(64), 1), IntImm(DataType::Int(64), -1),
-                                 IntImm(DataType::Int(64), 1), IntImm(DataType::Int(64), 1)}))
-            : relax::reshape(bias.value()->expr,
-                             ShapeExpr(ffi::Array<PrimExpr>{
-                                 IntImm(DataType::Int(64), 1), IntImm(DataType::Int(64), 1),
-                                 IntImm(DataType::Int(64), 1), IntImm(DataType::Int(64), -1)}));
-    out = relax::add(out, b);
-  }
-  return Emit(out, "conv2d");
+  return NNConv2d(x, weight->expr,
+                  bias.has_value() ? ffi::Optional<Var>(bias.value()->expr) : std::nullopt, stride,
+                  padding, dilation, groups, std::string(data_layout));
 }
 
 Conv2DModule MakeConv2D(ffi::Any in_channels, ffi::Any out_channels,
@@ -395,24 +440,9 @@ Conv3DModule::Conv3DModule(NNParameter weight, ffi::Optional<NNParameter> bias, 
 }
 
 Var Conv3DModuleNode::Forward(Var x) const {
-  std::string dl = std::string(data_layout);
-  Expr out = relax::conv3d(x, weight->expr, {stride}, {padding}, {dilation},
-                           static_cast<int>(groups), dl, "OIDHW", std::nullopt, std::nullopt);
-  if (bias.has_value()) {
-    bool nchw = (dl == "NCDHW");
-    Expr b = nchw ? relax::reshape(bias.value()->expr,
-                                   ShapeExpr(ffi::Array<PrimExpr>{
-                                       IntImm(DataType::Int(64), 1), IntImm(DataType::Int(64), -1),
-                                       IntImm(DataType::Int(64), 1), IntImm(DataType::Int(64), 1),
-                                       IntImm(DataType::Int(64), 1)}))
-                  : relax::reshape(bias.value()->expr,
-                                   ShapeExpr(ffi::Array<PrimExpr>{
-                                       IntImm(DataType::Int(64), 1), IntImm(DataType::Int(64), 1),
-                                       IntImm(DataType::Int(64), 1), IntImm(DataType::Int(64), 1),
-                                       IntImm(DataType::Int(64), -1)}));
-    out = relax::add(out, b);
-  }
-  return Emit(out, "conv3d");
+  return NNConv3d(x, weight->expr,
+                  bias.has_value() ? ffi::Optional<Var>(bias.value()->expr) : std::nullopt, stride,
+                  padding, dilation, groups, std::string(data_layout));
 }
 
 Conv3DModule MakeConv3D(ffi::Any in_channels, ffi::Any out_channels,
@@ -443,17 +473,9 @@ ConvTranspose1DModule::ConvTranspose1DModule(NNParameter weight, ffi::Optional<N
 }
 
 Var ConvTranspose1DModuleNode::Forward(Var x) const {
-  Expr out =
-      relax::conv1d_transpose(x, weight->expr, {stride}, {padding}, {output_padding}, {dilation},
-                              static_cast<int>(groups), "NCW", "IOW", std::nullopt, std::nullopt);
-  if (bias.has_value()) {
-    Expr b = relax::reshape(
-        bias.value()->expr,
-        ShapeExpr(ffi::Array<PrimExpr>{IntImm(DataType::Int(64), 1), IntImm(DataType::Int(64), -1),
-                                       IntImm(DataType::Int(64), 1)}));
-    out = relax::add(out, b);
-  }
-  return Emit(out, "conv1d_transpose");
+  return NNConv1dTranspose(x, weight->expr,
+                           bias.has_value() ? ffi::Optional<Var>(bias.value()->expr) : std::nullopt,
+                           stride, padding, output_padding, dilation, groups);
 }
 
 ConvTranspose1DModule MakeConvTranspose1D(ffi::Any in_channels, ffi::Any out_channels,
@@ -635,7 +657,7 @@ Var TimestepEmbeddingModuleNode::Forward(Var sample, ffi::Optional<Var> conditio
     // sample = sample + cond_proj(condition)
     TVM_FFI_ICHECK(cond_proj.has_value()) << "TimestepEmbedding: condition given but no cond_proj";
     Var proj = cond_proj.value().get()->Forward(condition.value());
-    s = Emit(relax::add(s, proj), "cond_add");
+    s = NNAdd(s, proj, "cond_add");
   }
   // act(linear_1(sample))
   Var l1 = linear_1.get()->Forward(s);
@@ -703,23 +725,20 @@ Var AttentionModuleNode::Forward(Var hidden_states,
   int64_t head_dim = inner_dim / heads;
   // reshape to [batch, seq, heads, head_dim]
   auto reshape_4d = [&](Var t, const std::string& name) -> Var {
-    ffi::Array<PrimExpr> new_shape = {IntImm(DataType::Int(64), 0), IntImm(DataType::Int(64), -1),
-                                      IntImm(DataType::Int(64), heads),
-                                      IntImm(DataType::Int(64), head_dim)};
-    return Emit(relax::reshape(t, ShapeExpr(new_shape)), name);
+    return NNReshape(
+        t, {ffi::Any(int64_t(0)), ffi::Any(int64_t(-1)), ffi::Any(heads), ffi::Any(head_dim)},
+        name);
   };
   q = reshape_4d(q, "q");
   k = reshape_4d(k, "k");
   v = reshape_4d(v, "v");
 
   // scaled_dot_product_attention (no causal mask)
-  Expr attn_out = relax::attention(q, k, v, std::nullopt, std::nullopt, std::nullopt, std::nullopt);
-  Var out = Emit(attn_out, "attn_out");
+  Var out = NNScaledDotProductAttention(q, k, v, std::nullopt, std::nullopt, "attn_out");
 
   // reshape back to [batch, seq, heads*head_dim]
-  ffi::Array<PrimExpr> flat_shape = {IntImm(DataType::Int(64), 0), IntImm(DataType::Int(64), -1),
-                                     IntImm(DataType::Int(64), heads * head_dim)};
-  out = Emit(relax::reshape(out, ShapeExpr(flat_shape)), "attn_reshape");
+  out = NNReshape(out, {ffi::Any(int64_t(0)), ffi::Any(int64_t(-1)), ffi::Any(heads * head_dim)},
+                  "attn_reshape");
 
   // to_out[0](out)
   const auto* list_node = to_out.get();

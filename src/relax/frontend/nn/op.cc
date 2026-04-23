@@ -213,8 +213,25 @@ static ffi::Any NNReshape(Var x, ffi::Array<ffi::Any> shape, ffi::String name) {
   return WrapNested(relax::reshape(x, ShapeExpr(new_shape)), std::string(name));
 }
 
-static ffi::Any NNPermuteDims(Var x, ffi::Optional<ffi::Array<Integer>> axes, ffi::String name) {
-  return WrapNested(relax::permute_dims(x, axes), std::string(name));
+// Derive the permute_dims binding name from the input var's name_hint,
+// mirroring the Python nn.op.permute_dims naming logic:
+//   if "linear" appears in the name, replace it with "matmul"
+//   (e.g. "linear_1_weight" -> "matmul_1_weight");
+//   otherwise fall back to "permute_dims".
+// This is applied when the caller passes name=None (nullopt).
+static std::string DerivePdName(const Var& x) {
+  std::string x_name = std::string(x->name_hint());
+  size_t pos = x_name.find("linear");
+  if (pos != std::string::npos) {
+    return x_name.substr(0, pos) + "matmul" + x_name.substr(pos + 6);
+  }
+  return "permute_dims";
+}
+
+static ffi::Any NNPermuteDims(Var x, ffi::Optional<ffi::Array<Integer>> axes,
+                              ffi::Optional<ffi::String> name) {
+  std::string resolved_name = name.has_value() ? std::string(name.value()) : DerivePdName(x);
+  return WrapNested(relax::permute_dims(x, axes), resolved_name);
 }
 
 static ffi::Any NNBroadcastTo(Var x, ffi::Array<ffi::Any> shape, ffi::String name) {
