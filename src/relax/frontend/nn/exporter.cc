@@ -115,8 +115,10 @@ struct IOVarScope {
  * \brief Build a ShapeExpr from a SpecTensor shape array.
  *
  * Each element is either:
- *   int64   -> IntImm(int64, v)
- *   String  -> tir::Var(name, int64)  [symbolic, deduplicated via str2var]
+ *   int64     -> IntImm(int64, v)
+ *   String    -> tir::Var(name, int64)  [symbolic, deduplicated via str2var]
+ *   tir::Var  -> used directly (registered in str2var by name)
+ *   PrimExpr  -> used directly (must have dtype int64)
  */
 static ShapeExpr BuildSpecShape(const ffi::Array<ffi::Any>& shape,
                                 std::unordered_map<std::string, tir::Var>& str2var) {
@@ -134,6 +136,18 @@ static ShapeExpr BuildSpecShape(const ffi::Array<ffi::Any>& shape,
       } else {
         dims.push_back(it->second);
       }
+    } else if (auto opt = elem.try_cast<tir::Var>()) {
+      tir::Var v = opt.value();
+      TVM_FFI_ICHECK(v->dtype == DataType::Int(64))
+          << "BuildSpecShape: tir::Var shape dim must have dtype int64, got " << v->dtype;
+      // Register in str2var so later dims with the same name share the same Var.
+      str2var.emplace(v->name_hint, v);
+      dims.push_back(v);
+    } else if (auto opt = elem.try_cast<PrimExpr>()) {
+      PrimExpr e = opt.value();
+      TVM_FFI_ICHECK(e->dtype == DataType::Int(64))
+          << "BuildSpecShape: PrimExpr shape dim must have dtype int64, got " << e->dtype;
+      dims.push_back(e);
     } else {
       TVM_FFI_THROW(TypeError) << "BuildSpecShape: invalid shape element: " << elem.GetTypeKey();
       TVM_FFI_UNREACHABLE();

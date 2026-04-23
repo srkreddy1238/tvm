@@ -256,6 +256,27 @@ class Parameter(Tensor):
 
 
 # ---------------------------------------------------------------------------
+# Fix Parameter.__c_ffi_init__
+#
+# register_object calls _add_class_attrs which sets __c_ffi_init__ only when
+# `not hasattr(cls, name)`.  Since Parameter inherits __c_ffi_init__ from
+# Tensor, the check passes and the 3-arg Parameter constructor is never
+# installed.  Force-set it here directly from Parameter's own TypeInfo.
+# ---------------------------------------------------------------------------
+def _fix_parameter_c_ffi_init() -> None:
+    ti = tvm_ffi.core._type_cls_to_type_info(Parameter)
+    if ti is None:
+        return
+    for method in ti.methods:
+        if method.name == "__ffi_init__":
+            Parameter.__c_ffi_init__ = method.as_callable(Parameter)  # type: ignore[attr-defined]
+            return
+
+
+_fix_parameter_c_ffi_init()
+
+
+# ---------------------------------------------------------------------------
 # Lazy C++ field/method accessors for Parameter.
 # These are populated on first use after register_object has run, so the
 # C++ descriptors are available.  We cannot use self.field_name inside the
@@ -371,39 +392,95 @@ class Effect:
 class ModuleList(tvm_ffi.Object, SubroutineMixin):
     """Ordered list of sub-modules backed by a native C++ ffi::Array<Any>.
 
-    All elements are stored in C++.  Python provides the standard list
-    interface (__iter__, __getitem__, __setitem__, __len__, append).
+    Native C++ module objects (tvm_ffi.Object subclasses) are stored in the
+    C++ ``modules`` field.  Pure-Python objects (nn.Module, nn.Effect, etc.)
+    cannot survive the FFI round-trip and are kept in a Python-side
+    ``_py_items`` list instead, using sentinel ``None`` values in the C++
+    array to mark their positions.  All public list methods merge both stores
+    transparently by logical index.
+
+    ``_py_items`` is lazily initialised on first access so that objects
+    reconstructed directly from a C++ FFI handle (bypassing ``__init__``)
+    still work correctly.
     """
 
     def __init__(self, modules: list) -> None:
-        self.__ffi_init__(list(modules))
+        ffi_slots = []
+        py_items = []
+        for item in modules:
+            if isinstance(item, tvm_ffi.Object):
+                ffi_slots.append(item)
+                py_items.append(None)
+            else:
+                ffi_slots.append(None)
+                py_items.append(item)
+        self.__ffi_init__(ffi_slots)
+        object.__setattr__(self, "_py_items_data", py_items)
 
-    # ---- list interface (delegates to C++ ffi::Array field) ----------------
+    @property
+    def _py_items(self) -> list:
+        try:
+            return object.__getattribute__(self, "_py_items_data")
+        except AttributeError:
+            py = [None] * len(self.modules)
+            object.__setattr__(self, "_py_items_data", py)
+            return py
 
-    def __iter__(self):
-        return iter(self.modules)
+    @_py_items.setter
+    def _py_items(self, value: list) -> None:
+        object.__setattr__(self, "_py_items_data", value)
 
-    def __getitem__(self, idx: int):
+    def _get(self, idx: int):
+        py = self._py_items
+        if py[idx] is not None:
+            return py[idx]
         return self.modules[idx]
 
+    def _set(self, idx: int, module) -> None:
+        py = self._py_items
+        if isinstance(module, tvm_ffi.Object):
+            mods = list(self.modules)
+            mods[idx] = module
+            self.modules = mods
+            py[idx] = None
+        else:
+            mods = list(self.modules)
+            mods[idx] = None
+            self.modules = mods
+            py[idx] = module
+
+    def __iter__(self):
+        return (self._get(i) for i in range(len(self._py_items)))
+
+    def __getitem__(self, idx: int):
+        return self._get(idx)
+
     def __setitem__(self, idx: int, module) -> None:
-        mods = list(self.modules)
-        mods[idx] = module
-        self.modules = mods
+        self._set(idx, module)
 
     def __len__(self) -> int:
-        return len(self.modules)
+        return len(self._py_items)
 
     def append(self, module) -> None:
-        mods = list(self.modules)
-        mods.append(module)
-        self.modules = mods
-
-    # ---- parameter / dtype helpers -----------------------------------------
+        py = self._py_items
+        if isinstance(module, tvm_ffi.Object):
+            mods = list(self.modules)
+            mods.append(module)
+            self.modules = mods
+            py.append(None)
+        else:
+            mods = list(self.modules)
+            mods.append(None)
+            self.modules = mods
+            py.append(module)
 
     def named_parameters(self, prefix: str = "") -> Iterator[tuple[str, Parameter]]:
         params = _ffi_api.GetContainerParameters(self, prefix)
         yield from params.items()
+        for i, item in enumerate(self._py_items):
+            if item is not None:
+                child_prefix = f"{prefix}{i}." if prefix else f"{i}."
+                yield from _attribute_finder(item, child_prefix, lambda x: isinstance(x, Parameter))
 
     def parameters(self) -> Iterator[Parameter]:
         for _, p in self.named_parameters():
@@ -412,6 +489,9 @@ class ModuleList(tvm_ffi.Object, SubroutineMixin):
     def to(self, dtype: str | None = None) -> None:
         if dtype is not None:
             _ffi_api.ContainerApplyTo(self, dtype)
+            for item in self._py_items:
+                if item is not None and hasattr(item, "to"):
+                    item.to(dtype=dtype)
 
     def forward(self, x):
         for m in self:
@@ -431,61 +511,113 @@ class ModuleList(tvm_ffi.Object, SubroutineMixin):
 class ModuleDict(tvm_ffi.Object, SubroutineMixin):
     """Ordered string-keyed map of sub-modules backed by a native C++ ffi::Map<String,Any>.
 
-    All elements are stored in C++.  Python provides the standard dict
-    interface (__iter__, __getitem__, __setitem__, __len__, keys, values, items).
+    Native C++ module objects (tvm_ffi.Object subclasses) are stored in the
+    C++ ``modules`` field.  Pure-Python objects (nn.Module, nn.Effect, etc.)
+    cannot survive the FFI round-trip and are kept in a Python-side
+    ``_py_modules`` OrderedDict instead.  All public dict methods merge both
+    stores transparently, preserving insertion order.
+
+    ``_py_modules`` is lazily initialised on first access so that objects
+    reconstructed directly from a C++ FFI handle (bypassing ``__init__``)
+    still work correctly.
     """
 
     def __init__(self, modules: OrderedDict | None = None) -> None:
-        self.__ffi_init__(dict(modules) if modules else {})
+        ffi_mods = {}
+        py_mods = OrderedDict()
+        if modules:
+            for k, v in modules.items():
+                if isinstance(v, tvm_ffi.Object):
+                    ffi_mods[k] = v
+                else:
+                    py_mods[k] = v
+        self.__ffi_init__(ffi_mods)
+        object.__setattr__(self, "_py_modules_data", py_mods)
 
-    # ---- dict interface (delegates to C++ ffi::Map field) ------------------
+    @property
+    def _py_modules(self) -> OrderedDict:
+        try:
+            return object.__getattribute__(self, "_py_modules_data")
+        except AttributeError:
+            py = OrderedDict()
+            object.__setattr__(self, "_py_modules_data", py)
+            return py
+
+    @_py_modules.setter
+    def _py_modules(self, value: OrderedDict) -> None:
+        object.__setattr__(self, "_py_modules_data", value)
+
+    def _all_items(self):
+        for k, v in self.modules.items():
+            yield k, v
+        for k, v in self._py_modules.items():
+            yield k, v
 
     def __iter__(self):
-        return iter(self.modules)
+        return (k for k, _ in self._all_items())
 
     def __getitem__(self, key: str):
+        py = self._py_modules
+        if key in py:
+            return py[key]
         return self.modules[key]
 
     def __setitem__(self, key: str, module) -> None:
-        self.modules[key] = module
+        if isinstance(module, tvm_ffi.Object):
+            self._py_modules.pop(key, None)
+            mods = dict(self.modules)
+            mods[key] = module
+            self.modules = mods
+        else:
+            mods = dict(self.modules)
+            if key in mods:
+                del mods[key]
+                self.modules = mods
+            self._py_modules[key] = module
 
     def __len__(self) -> int:
-        return len(self.modules)
+        return len(self.modules) + len(self._py_modules)
 
     def __contains__(self, key: str) -> bool:
-        return key in self.modules
+        return key in self._py_modules or key in self.modules
 
     def keys(self):
-        return self.modules.keys()
+        return list(k for k, _ in self._all_items())
 
     def values(self):
-        return self.modules.values()
+        return list(v for _, v in self._all_items())
 
     def items(self):
-        return self.modules.items()
+        return list(self._all_items())
 
     def get(self, key: str, default=None):
+        if key in self._py_modules:
+            return self._py_modules[key]
         m = self.modules
         return m[key] if key in m else default
 
     def update(self, modules: dict) -> None:
         for k, v in modules.items():
-            self.modules[k] = v
+            self[k] = v
 
     def clear(self) -> None:
         self.modules = {}
+        self._py_modules.clear()
 
     def pop(self, key: str):
+        if key in self._py_modules:
+            return self._py_modules.pop(key)
         m = dict(self.modules)
         val = m.pop(key)
         self.modules = m
         return val
 
-    # ---- parameter / dtype helpers -----------------------------------------
-
     def named_parameters(self, prefix: str = "") -> Iterator[tuple[str, Parameter]]:
         params = _ffi_api.GetContainerParameters(self, prefix)
         yield from params.items()
+        for key, mod in self._py_modules.items():
+            child_prefix = f"{prefix}{key}." if prefix else f"{key}."
+            yield from _attribute_finder(mod, child_prefix, lambda x: isinstance(x, Parameter))
 
     def parameters(self) -> Iterator[Parameter]:
         for _, p in self.named_parameters():
@@ -494,6 +626,9 @@ class ModuleDict(tvm_ffi.Object, SubroutineMixin):
     def to(self, dtype: str | None = None) -> None:
         if dtype is not None:
             _ffi_api.ContainerApplyTo(self, dtype)
+            for mod in self._py_modules.values():
+                if hasattr(mod, "to"):
+                    mod.to(dtype=dtype)
 
 
 # ===========================================================================
@@ -650,9 +785,10 @@ def _attribute_finder(root, prefix: str, condition_yield: Callable[[Any], bool])
     """Recursively yield (dotted_name, value) pairs satisfying condition_yield."""
 
     # --- Case 1: native container types ------------------------------------
+    # Delegate to the container's own named_parameters(), which covers both
+    # the C++ store and the Python overlay (_py_items / _py_modules).
     if isinstance(root, ModuleList | ModuleDict):
-        params = _ffi_api.GetContainerParameters(root, prefix)
-        for name, param in params.items():
+        for name, param in root.named_parameters(prefix=prefix):
             if condition_yield(param):
                 yield name, param
         return

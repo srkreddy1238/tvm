@@ -57,11 +57,24 @@ static Var Emit(Expr expr, const std::string& name) {
   return bb->Emit(expr, name);
 }
 
-// Build a ShapeExpr from a mixed ffi::Any element (int64 or PrimExpr).
+// Build a PrimExpr dimension from a mixed ffi::Any element.
+// Accepts: int64, ffi::String (symbolic var name), tir::Var, or PrimExpr.
+// Mirrors BuildShapeExpr in core.cc so that symbolic dims like "n" work.
 static PrimExpr AnyToDim(const ffi::Any& v) {
   if (auto opt = v.try_cast<int64_t>()) return IntImm(DataType::Int(64), opt.value());
-  if (auto opt = v.try_cast<PrimExpr>()) return opt.value();
-  TVM_FFI_THROW(TypeError) << "Expected int64 or PrimExpr, got " << v.GetTypeKey();
+  if (auto opt = v.try_cast<ffi::String>()) return tir::Var(opt.value(), DataType::Int(64));
+  if (auto opt = v.try_cast<tir::Var>()) {
+    TVM_FFI_ICHECK(opt.value()->dtype == DataType::Int(64))
+        << "Symbolic shape var must have dtype int64";
+    return opt.value();
+  }
+  if (auto opt = v.try_cast<PrimExpr>()) {
+    TVM_FFI_ICHECK(opt.value()->dtype == DataType::Int(64))
+        << "PrimExpr shape must have dtype int64";
+    return opt.value();
+  }
+  TVM_FFI_THROW(TypeError) << "Expected int64, string, tir::Var, or PrimExpr, got "
+                           << v.GetTypeKey();
   TVM_FFI_UNREACHABLE();
 }
 
