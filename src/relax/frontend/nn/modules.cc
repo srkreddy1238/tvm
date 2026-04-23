@@ -133,14 +133,29 @@ LinearModule::LinearModule(NNParameter weight, ffi::Optional<NNParameter> bias,
 }
 
 Var LinearModuleNode::Forward(Var x) const {
-  Expr w = relax::permute_dims(weight->expr, std::nullopt);
+  // Derive the permute_dims name from the weight var's name_hint,
+  // mirroring the Python nn.op.permute_dims naming logic:
+  //   if "linear" is in the weight name, replace it with "matmul"
+  //   otherwise fall back to "permute_dims"
+  std::string w_name = std::string(weight->expr->name_hint());
+  std::string pd_name;
+  size_t pos = w_name.find("linear");
+  if (pos != std::string::npos) {
+    pd_name = w_name.substr(0, pos) + "matmul" + w_name.substr(pos + 6);
+  } else {
+    pd_name = "permute_dims";
+  }
+  Var w = Emit(relax::permute_dims(weight->expr, std::nullopt), pd_name);
   ffi::Optional<DataType> dt =
       out_dtype.has_value()
           ? ffi::Optional<DataType>(DataType(ffi::StringToDLDataType(out_dtype.value())))
           : std::nullopt;
   Expr out = relax::matmul(x, w, dt);
-  if (bias.has_value()) out = relax::add(out, bias.value()->expr);
-  return Emit(out, "linear");
+  if (bias.has_value()) {
+    Var matmul_out = Emit(out, "matmul");
+    return Emit(relax::add(matmul_out, bias.value()->expr), "add");
+  }
+  return Emit(out, "matmul");
 }
 
 LinearModule MakeLinear(ffi::Any in_features, ffi::Any out_features, bool has_bias,
