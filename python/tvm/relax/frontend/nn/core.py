@@ -131,7 +131,7 @@ class _ConstTensor(_TensorOp):
         return str(sinfo.dtype)
 
     def __repr__(self) -> str:
-        return f'ConstTensor({self.shape}, "{self.dtype}")'
+        return f'Tensor({self.shape}, "{self.dtype}")'
 
 
 # ===========================================================================

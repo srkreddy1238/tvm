@@ -156,9 +156,9 @@ static ffi::Any NNPrelu(Var x, Var alpha, ffi::String name) {
 // Binary element-wise ops
 // ---------------------------------------------------------------------------
 
-#define NN_BINARY_OP(func_name, relax_op)                     \
-  static ffi::Any func_name(Var a, Var b, ffi::String name) { \
-    return WrapNested(relax_op(a, b), std::string(name));     \
+#define NN_BINARY_OP(func_name, relax_op)                       \
+  static ffi::Any func_name(Expr a, Expr b, ffi::String name) { \
+    return WrapNested(relax_op(a, b), std::string(name));       \
   }
 
 NN_BINARY_OP(NNAdd, relax::add)

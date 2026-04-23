@@ -32,6 +32,40 @@ from . import core, extern
 from . import spec as _spec
 from .modules import IOEffect
 
+# ---------------------------------------------------------------------------
+# Python-side BlockBuilder stack helpers
+#
+# The C++ exporter calls these via FFI before/after invoking forward() so
+# that relax.BlockBuilder.current() (used by SubroutineMixin and other
+# Python code) returns the correct builder during the forward pass.
+# ---------------------------------------------------------------------------
+
+
+def _py_push_current_block_builder(bb: BlockBuilder) -> None:
+    """Push *bb* onto the Python-side BlockBuilder._stack.
+
+    The BlockBuilder arrives via FFI as a registered object, so its
+    __init__ was never called and Python-only attributes like _func_stack
+    may be absent.  Initialise them here if needed.
+    """
+    if not hasattr(bb, "_func_stack"):
+        bb._func_stack = []
+    BlockBuilder._stack.append(bb)
+
+
+def _py_pop_current_block_builder() -> None:
+    """Pop the top entry from the Python-side BlockBuilder._stack."""
+    if BlockBuilder._stack:
+        BlockBuilder._stack.pop()
+
+
+tvm_ffi.register_global_func(
+    "relax.frontend.nn.PushCurrentBlockBuilder", _py_push_current_block_builder
+)
+tvm_ffi.register_global_func(
+    "relax.frontend.nn.PopCurrentBlockBuilder", _py_pop_current_block_builder
+)
+
 # C++ thread-local BlockBuilder install/restore helpers
 _ffi_set_current_bb = None
 _ffi_get_current_io_var = None

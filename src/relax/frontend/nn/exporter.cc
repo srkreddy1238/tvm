@@ -549,6 +549,17 @@ static void EmitMethod(BlockBuilder& bb, const ffi::String& method_name, const M
 
   // Install current BB so WrapNested / Emit helpers work
   BBScope bb_scope(bb);
+  // Also push the BlockBuilder onto the Python-side BlockBuilder._stack so
+  // that relax.BlockBuilder.current() (used by SubroutineMixin and other
+  // Python code) returns the correct builder during forward().
+  // These symbols are only registered when Python is loaded; in a pure C++
+  // context they will be absent, so we look them up lazily and skip the call
+  // when they are not available.
+  static const ffi::Optional<ffi::Function> py_bb_push =
+      ffi::Function::GetGlobal("relax.frontend.nn.PushCurrentBlockBuilder");
+  static const ffi::Optional<ffi::Function> py_bb_pop =
+      ffi::Function::GetGlobal("relax.frontend.nn.PopCurrentBlockBuilder");
+  if (py_bb_push.has_value()) py_bb_push.value()(bb);
   // Install current _io var (first effect var if any) so debug_func can retrieve it
   ffi::Optional<Var> io_var_for_debug;
   if (!all_effect_vars.empty()) io_var_for_debug = all_effect_vars[0];
@@ -630,8 +641,10 @@ static void EmitMethod(BlockBuilder& bb, const ffi::String& method_name, const M
       bb->EndScope();
     } catch (...) {
     }
+    if (py_bb_pop.has_value()) py_bb_pop.value()();
     throw;
   }
+  if (py_bb_pop.has_value()) py_bb_pop.value()();
   Expr out_expr = UnwrapReturn(raw_out);
 
   // Build effect output vars:
