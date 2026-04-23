@@ -112,6 +112,56 @@ MethodSpec::MethodSpec(ffi::Function forward, ffi::Array<ffi::String> arg_names,
                                            std::move(effect_mode));
 }
 
+MethodSpec::MethodSpec(runtime::ObjectRef mod_ref, ffi::Array<ffi::String> arg_names,
+                       ffi::Array<ffi::Any> arg_specs, ffi::String param_mode,
+                       ffi::String effect_mode, ffi::Array<ffi::Any> extra_args) {
+  // Validate that mod_ref is an NNModuleNode.
+  TVM_FFI_ICHECK(mod_ref.defined() && mod_ref->IsInstance<NNModuleNode>())
+      << "MethodSpec(mod_ref, ...): mod_ref must be an NNModuleNode, got "
+      << (mod_ref.defined() ? mod_ref->GetTypeKey() : "null");
+
+  // Build the forward ffi::Function by capturing mod_ref, arg_names, and
+  // extra_args.  The lambda is called by the exporter with:
+  //   named_args: Map<String, Any>  where each value is an NNTensor.
+  //
+  // For each arg_name the lambda:
+  //   1. Extracts the NNTensor from named_args.
+  //   2. Unwraps its underlying relax::Var.
+  //   3. Passes it as a positional argument to _forward.
+  // Then appends extra_args verbatim.
+  ffi::TypedFunction<ffi::Any(ffi::Map<ffi::String, ffi::Any>)> forward_fn =
+      [mod_ref, arg_names, extra_args](ffi::Map<ffi::String, ffi::Any> named_args) -> ffi::Any {
+    namespace refl = tvm::ffi::reflection;
+    std::string type_key = mod_ref->GetTypeKey();
+    ffi::Function fwd = refl::GetMethod(type_key, "_forward");
+    TVM_FFI_ICHECK(fwd.defined()) << "MethodSpec: module '" << type_key
+                                  << "' has no '_forward' method";
+
+    // Build positional call args: [self, var0, var1, ..., extra0, extra1, ...]
+    std::vector<ffi::AnyView> call_args;
+    call_args.push_back(ffi::AnyView(mod_ref));
+    for (const ffi::String& name : arg_names) {
+      ffi::Any val = named_args.at(name);
+      // Each value is an NNTensor; extract its underlying relax::Var.
+      NNTensor t = val.cast<NNTensor>();
+      call_args.push_back(ffi::AnyView(t->expr));
+    }
+    for (const ffi::Any& ea : extra_args) call_args.push_back(ffi::AnyView(ea));
+
+    ffi::Any rv;
+    fwd.CallPacked(ffi::PackedArgs(call_args.data(), call_args.size()), &rv);
+    return rv;
+  };
+
+  // TypedFunction has an implicit operator Function() via packed().
+  // Use forward_fn.packed() to obtain the type-erased ffi::Function rather
+  // than calling ffi::Function(forward_fn), which would hit the packed-format
+  // callable constructor and fail the static_assert.
+  data_ = ffi::make_object<MethodSpecNode>(forward_fn.packed(), std::move(arg_names),
+                                           std::move(arg_specs), std::move(param_mode),
+                                           std::move(effect_mode));
+}
+
 // ---------------------------------------------------------------------------
 // ModuleSpec
 // ---------------------------------------------------------------------------

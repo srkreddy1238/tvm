@@ -277,9 +277,10 @@ class NNModuleNode : public runtime::Object {
    *
    * \param spec    ModuleSpec describing methods and parameters.
    * \param debug   If true, add IOEffect (_io) to every method signature.
-   * \return        The compiled IRModule.
+   * \param allow_extern If true, collect external modules via nn.add_extern.
+   * \return        Array[IRModule, named_params as Map, extern_mods as Array]
    */
-  IRModule ExportTVM(ModuleSpec spec, bool debug) const;
+  ffi::Array<ffi::Any> ExportTVM(ModuleSpec spec, bool debug, bool allow_extern = true) const;
 
   /*!
    * \brief JIT-compile this module to a CppModule ready for inference.

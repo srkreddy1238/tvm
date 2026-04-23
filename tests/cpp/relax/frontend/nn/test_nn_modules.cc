@@ -54,7 +54,7 @@
  *   4. Asserts structural equality between actual and expected.
  *
  * The pattern mirrors test_nn_ops.cc / test_nn_debug.cc exactly:
- *   - ExportModuleDebug() wraps the module's Forward() in a MethodSpec and
+ *   - ExportDebug() wraps the module's Forward() in a MethodSpec and
  *     calls NNModuleNode::ExportTVM(spec, debug=true).
  *   - EmitInitEffect() / EmitDebugOutput() / AssertStructEqual() are the
  *     same shared helpers used in the other test files.
@@ -170,70 +170,36 @@ static void AssertStructEqual(const IRModule& actual, const IRModule& expected) 
 }
 
 // ---------------------------------------------------------------------------
-// ExportModuleDebug
+// ExportDebug
 //
-// Wraps an NNModuleNode's Forward() in a MethodSpec and calls
-// NNModuleNode::ExportTVM(spec, debug=true), mirroring:
-//
-//   mod.export_tvm(spec={"forward": {"x": spec.Tensor(...)}}, debug=True)
+// Thin helper used by every test: builds MethodSpec (using the module-aware
+// constructor that synthesises forward_fn via reflection), wraps it in a
+// ModuleSpec, calls ExportTVM, and returns just the IRModule.
 //
 // Parameters:
-//   mod_ref       – the ObjectRef wrapper (e.g. ReLUModule, LinearModule)
-//   method_name   – name of the exported function (default "forward")
-//   arg_names     – ordered input argument names
-//   arg_specs     – SpecTensor / SpecInt for each argument
-//   named_params  – pre-collected named parameters (weight, bias, …)
-//   extra_args    – additional trailing arguments appended after the spec-
-//                   driven inputs when calling _forward (e.g. channel_axis
-//                   and axes for GroupNorm, or out_shape for Embedding).
-//
-// Taking ObjectRef (not NNModuleNode&) avoids the const-qualifier mismatch:
-// XxxModule::get() returns `const XxxModuleNode*` when _type_mutable=false,
-// so dereferencing it yields a const node that cannot bind to NNModuleNode&.
+//   mod_ref      – any NNModuleNode-derived ObjectRef
+//   method_name  – exported function name (usually "forward")
+//   arg_names    – ordered argument names
+//   arg_specs    – SpecTensor / SpecInt / SpecTuple per argument
+//   named_params – pre-collected named parameters (weight, bias, …)
+//   extra_args   – trailing args appended to _forward after the spec-driven
+//                  inputs (e.g. channel_axis+axes for GroupNorm, out_shape
+//                  for Embedding).
 // ---------------------------------------------------------------------------
-static IRModule ExportModuleDebug(runtime::ObjectRef mod_ref, const std::string& method_name,
-                                  ffi::Array<ffi::String> arg_names, ffi::Array<ffi::Any> arg_specs,
-                                  ffi::Map<ffi::String, NNParameter> named_params = {},
-                                  ffi::Array<ffi::Any> extra_args = {}) {
-  // Retrieve the type key from the underlying object for reflection lookup.
+static IRModule ExportDebug(runtime::ObjectRef mod_ref, const std::string& method_name,
+                            ffi::Array<ffi::String> arg_names, ffi::Array<ffi::Any> arg_specs,
+                            ffi::Map<ffi::String, NNParameter> named_params = {},
+                            ffi::Array<ffi::Any> extra_args = {}) {
   const NNModuleNode* mod_node = mod_ref.as<NNModuleNode>();
-  TVM_FFI_ICHECK(mod_node != nullptr) << "ExportModuleDebug: object is not an NNModuleNode";
+  TVM_FFI_ICHECK(mod_node != nullptr) << "ExportDebug: object is not an NNModuleNode";
 
-  // Build a forward ffi::Function that calls the module's _forward method.
-  // The exporter calls forward(named_args) where named_args maps arg_name ->
-  // NNTensor.  We capture mod_ref by value (keeps the object alive) and
-  // retrieve the "_forward" method via reflection::GetMethod.
-  ffi::TypedFunction<ffi::Any(ffi::Map<ffi::String, ffi::Any>)> forward_fn =
-      [mod_ref, arg_names, extra_args](ffi::Map<ffi::String, ffi::Any> named_args) -> ffi::Any {
-    // reflection::GetMethod(type_key, method_name) returns an unbound
-    // ffi::Function whose first argument is the object instance.
-    namespace refl = tvm::ffi::reflection;
-    std::string type_key = mod_ref->GetTypeKey();
-    ffi::Function fwd = refl::GetMethod(type_key, "_forward");
-    TVM_FFI_ICHECK(fwd.defined()) << "Module '" << type_key
-                                  << "' does not have a '_forward' method";
-
-    // Build call args: [object_instance, var_for_arg0, var_for_arg1, ...,
-    //                   extra_arg0, extra_arg1, ...]
-    std::vector<ffi::AnyView> call_args;
-    call_args.push_back(ffi::AnyView(mod_ref));
-    for (const auto& name : arg_names) {
-      ffi::Any val = named_args.at(name);
-      // Each value is an NNTensor; extract its underlying Var.
-      NNTensor t = val.cast<NNTensor>();
-      call_args.push_back(ffi::AnyView(t->expr));
-    }
-    // Append any extra trailing arguments (e.g. channel_axis, axes, out_shape).
-    for (const auto& ea : extra_args) call_args.push_back(ffi::AnyView(ea));
-    ffi::Any rv;
-    fwd.CallPacked(ffi::PackedArgs(call_args.data(), call_args.size()), &rv);
-    return rv;
-  };
-
-  MethodSpec ms(forward_fn, arg_names, arg_specs, "plain", "plain");
+  // MethodSpec(mod_ref, ...) builds the forward_fn internally via reflection.
+  MethodSpec ms(mod_ref, arg_names, arg_specs, "plain", "plain", extra_args);
   ModuleSpec mod_spec(ffi::Array<ffi::String>{ffi::String(method_name)},
                       ffi::Array<ffi::Any>{ffi::Any(ms)}, named_params, {});
-  return mod_node->ExportTVM(mod_spec, /*debug=*/true);
+  ffi::Array<ffi::Any> result =
+      mod_node->ExportTVM(mod_spec, /*debug=*/true, /*allow_extern=*/false);
+  return result[0].cast<IRModule>();
 }
 
 // ===========================================================================
@@ -257,7 +223,7 @@ TEST(NNModules, TestReLU) {
   ReLUModule mod;
 
   IRModule actual =
-      ExportModuleDebug(mod, "forward", {"x"}, {ffi::Any(MakeSpecTensor({3, 3}, "float32"))});
+      ExportDebug(mod, "forward", {"x"}, {ffi::Any(MakeSpecTensor({3, 3}, "float32"))});
 
   // Build expected IR
   BlockBuilder bb = BlockBuilder::Create(std::nullopt);
@@ -306,7 +272,7 @@ TEST(NNModules, TestSiLU) {
   SiLUModule mod;
 
   IRModule actual =
-      ExportModuleDebug(mod, "forward", {"x"}, {ffi::Any(MakeSpecTensor({3, 3}, "float32"))});
+      ExportDebug(mod, "forward", {"x"}, {ffi::Any(MakeSpecTensor({3, 3}, "float32"))});
 
   BlockBuilder bb = BlockBuilder::Create(std::nullopt);
   EmitInitEffect(bb);
@@ -355,7 +321,7 @@ TEST(NNModules, TestGELU) {
   GELUModule mod;
 
   IRModule actual =
-      ExportModuleDebug(mod, "forward", {"x"}, {ffi::Any(MakeSpecTensor({3, 3}, "float32"))});
+      ExportDebug(mod, "forward", {"x"}, {ffi::Any(MakeSpecTensor({3, 3}, "float32"))});
 
   BlockBuilder bb = BlockBuilder::Create(std::nullopt);
   EmitInitEffect(bb);
@@ -405,7 +371,7 @@ TEST(NNModules, TestIdentity) {
   IdentityModule mod;
 
   IRModule actual =
-      ExportModuleDebug(mod, "forward", {"x"}, {ffi::Any(MakeSpecTensor({3, 3}, "float32"))});
+      ExportDebug(mod, "forward", {"x"}, {ffi::Any(MakeSpecTensor({3, 3}, "float32"))});
 
   BlockBuilder bb = BlockBuilder::Create(std::nullopt);
   EmitInitEffect(bb);
@@ -462,7 +428,7 @@ TEST(NNModules, TestLinear) {
   ffi::Map<ffi::String, NNParameter> named_params = mod.get()->NamedParameters("");
 
   IRModule actual =
-      ExportModuleDebug(mod, "forward", {"x"}, {ffi::Any(MakeSpecTensor({1, 4}, "float32"))},
+      ExportDebug(mod, "forward", {"x"}, {ffi::Any(MakeSpecTensor({1, 4}, "float32"))},
                         named_params);
 
   // Build expected IR
@@ -533,7 +499,7 @@ TEST(NNModules, TestConv1D) {
   ffi::Map<ffi::String, NNParameter> named_params = mod.get()->NamedParameters("");
 
   IRModule actual =
-      ExportModuleDebug(mod, "forward", {"x"},
+      ExportDebug(mod, "forward", {"x"},
                         {ffi::Any(MakeSpecTensor({1, 3, 32}, "float32"))}, named_params);
 
   // Build expected IR
@@ -620,7 +586,7 @@ TEST(NNModules, TestConv1DTranspose) {
   ffi::Map<ffi::String, NNParameter> named_params = mod.get()->NamedParameters("");
 
   IRModule actual =
-      ExportModuleDebug(mod, "forward", {"x"},
+      ExportDebug(mod, "forward", {"x"},
                         {ffi::Any(MakeSpecTensor({1, 3, 30}, "float32"))}, named_params);
 
   // Build expected IR
@@ -704,7 +670,7 @@ TEST(NNModules, TestLayerNorm) {
   ffi::Map<ffi::String, NNParameter> named_params = mod.get()->NamedParameters("");
 
   IRModule actual =
-      ExportModuleDebug(mod, "forward", {"x"},
+      ExportDebug(mod, "forward", {"x"},
                         {ffi::Any(MakeSpecTensor({2, 4, 8}, "float32"))}, named_params);
 
   // Build expected IR
@@ -774,7 +740,7 @@ TEST(NNModules, TestConv2D) {
   ffi::Map<ffi::String, NNParameter> named_params = mod.get()->NamedParameters("");
 
   IRModule actual =
-      ExportModuleDebug(mod, "forward", {"x"},
+      ExportDebug(mod, "forward", {"x"},
                         {ffi::Any(MakeSpecTensor({1, 3, 32, 32}, "float32"))}, named_params);
 
   // Build expected IR
@@ -863,7 +829,7 @@ TEST(NNModules, TestConv3D) {
   ffi::Map<ffi::String, NNParameter> named_params = mod.get()->NamedParameters("");
 
   IRModule actual =
-      ExportModuleDebug(mod, "forward", {"x"},
+      ExportDebug(mod, "forward", {"x"},
                         {ffi::Any(MakeSpecTensor({1, 3, 32, 32, 32}, "float32"))}, named_params);
 
   // Build expected IR
@@ -968,7 +934,7 @@ TEST(NNModules, TestConv2DDynamic) {
   SpecTensor x_spec = MakeSpecTensorMixed(spec_dims, "float32");
 
   IRModule actual =
-      ExportModuleDebug(mod, "forward", {"x"}, {ffi::Any(x_spec)}, named_params);
+      ExportDebug(mod, "forward", {"x"}, {ffi::Any(x_spec)}, named_params);
 
   // Build expected IR with symbolic shapes.
   // The exporter creates fresh tir::Vars for each unique string dim name;
@@ -1068,7 +1034,7 @@ TEST(NNModules, TestRMSNorm) {
   ffi::Map<ffi::String, NNParameter> named_params = mod.get()->NamedParameters("");
 
   IRModule actual =
-      ExportModuleDebug(mod, "forward", {"x"},
+      ExportDebug(mod, "forward", {"x"},
                         {ffi::Any(MakeSpecTensor({2, 4, 8}, "float32"))}, named_params);
 
   // Build expected IR
@@ -1125,7 +1091,7 @@ TEST(NNModules, TestRMSNorm) {
 // Array<Integer> axes).  The Python GroupNorm.forward() defaults are
 // channel_axis=1 and axes=list(range(2, ndim)).  For input (2,4,8) with
 // ndim=3 that gives channel_axis=1, axes=[2].  These extra args are passed
-// via the extra_args parameter of ExportModuleDebug.
+// via the extra_args parameter of ExportDebug.
 // ===========================================================================
 TEST(NNModules, TestGroupNorm) {
   // GroupNorm(num_groups=2, num_channels=4, eps=1e-5, affine=True)
@@ -1144,7 +1110,7 @@ TEST(NNModules, TestGroupNorm) {
   extra_args.push_back(ffi::Any(ffi::Array<Integer>{Integer(2)}));  // axes
 
   IRModule actual =
-      ExportModuleDebug(mod, "forward", {"x"},
+      ExportDebug(mod, "forward", {"x"},
                         {ffi::Any(MakeSpecTensor({2, 4, 8}, "float32"))},
                         named_params, extra_args);
 
@@ -1218,7 +1184,7 @@ TEST(NNModules, TestEmbedding1D) {
   extra_args.push_back(ffi::Any(ffi::Array<ffi::Any>{}));  // out_shape_if_nd = []
 
   IRModule actual =
-      ExportModuleDebug(mod, "forward", {"x"},
+      ExportDebug(mod, "forward", {"x"},
                         {ffi::Any(MakeSpecTensor({4}, "int32"))},
                         named_params, extra_args);
 
@@ -1483,66 +1449,34 @@ TEST(NNModules, TestKVCache) {
 }
 
 // ---------------------------------------------------------------------------
-// ExportAttentionDebug
+// MakeAttentionForwardFn
 //
-// Specialised export helper for AttentionModule.
+// AttentionModuleNode::_forward has the signature:
+//   _forward(self, hidden_states: Var,
+//            encoder_hidden_states: ffi::Optional<Var>)
 //
-// AttentionModuleNode::Forward has the signature:
-//   Forward(Var hidden_states, ffi::Optional<Var> encoder_hidden_states)
+// The generic MethodSpec(mod_ref, ...) constructor always unwraps each
+// named arg as NNTensor → Var and passes it positionally.  That works for
+// the first argument but the second must be wrapped in ffi::Optional<Var>.
 //
-// The generic ExportModuleDebug helper always passes every named arg as a
-// plain Var.  Here the second argument must be wrapped in
-// ffi::Optional<Var> before being forwarded to _forward.
-//
-// This helper:
-//   1. Builds a MethodSpec whose forward lambda extracts "hidden_states" and
-//      "encoder_hidden_states" from named_args, wraps the latter in
-//      Optional<Var>, and calls
-//      _forward(mod, hidden_states_var, Optional<Var>(enc_var)).
-//   2. Passes named_params so the exporter appends weight/bias parameters
-//      to the function signature in NamedParameters traversal order.
-//   3. Calls mod_node->ExportTVM(mod_spec, debug=true).
+// This factory returns a custom forward_fn that handles the wrapping, so
+// the call site can still use the simple MethodSpec(forward_fn, ...) path.
 // ---------------------------------------------------------------------------
-static IRModule ExportAttentionDebug(runtime::ObjectRef mod_ref,
-                                     ffi::Map<ffi::String, NNParameter> named_params) {
-  const NNModuleNode* mod_node = mod_ref.as<NNModuleNode>();
-  TVM_FFI_ICHECK(mod_node != nullptr) << "ExportAttentionDebug: object is not an NNModuleNode";
-
-  ffi::TypedFunction<ffi::Any(ffi::Map<ffi::String, ffi::Any>)> forward_fn =
+static ffi::Function MakeAttentionForwardFn(runtime::ObjectRef mod_ref) {
+  return ffi::TypedFunction<ffi::Any(ffi::Map<ffi::String, ffi::Any>)>(
       [mod_ref](ffi::Map<ffi::String, ffi::Any> named_args) -> ffi::Any {
-    namespace refl = tvm::ffi::reflection;
-    std::string type_key = mod_ref->GetTypeKey();
-    ffi::Function fwd = refl::GetMethod(type_key, "_forward");
-    TVM_FFI_ICHECK(fwd.defined()) << "Module '" << type_key
-                                  << "' does not have a '_forward' method";
-
-    // Extract both inputs as plain Vars from their NNTensor wrappers.
-    NNTensor hs_t = named_args.at("hidden_states").cast<NNTensor>();
-    NNTensor enc_t = named_args.at("encoder_hidden_states").cast<NNTensor>();
-    Var hs_var = hs_t->expr;
-    Var enc_var = enc_t->expr;
-
-    // _forward(self, hidden_states: Var,
-    //          encoder_hidden_states: ffi::Optional<Var>)
-    ffi::Optional<Var> opt_enc(enc_var);
-
-    std::vector<ffi::AnyView> call_args;
-    call_args.push_back(ffi::AnyView(mod_ref));
-    call_args.push_back(ffi::AnyView(hs_var));
-    call_args.push_back(ffi::AnyView(opt_enc));
-    ffi::Any rv;
-    fwd.CallPacked(ffi::PackedArgs(call_args.data(), call_args.size()), &rv);
-    return rv;
-  };
-
-  ffi::Array<ffi::String> arg_names{"hidden_states", "encoder_hidden_states"};
-  ffi::Array<ffi::Any> arg_specs{ffi::Any(MakeSpecTensor({2, 4096, 640}, "float32")),
-                                 ffi::Any(MakeSpecTensor({2, 77, 2048}, "float32"))};
-
-  MethodSpec ms(forward_fn, arg_names, arg_specs, "plain", "plain");
-  ModuleSpec mod_spec(ffi::Array<ffi::String>{ffi::String("forward")},
-                      ffi::Array<ffi::Any>{ffi::Any(ms)}, named_params, {});
-  return mod_node->ExportTVM(mod_spec, /*debug=*/true);
+        namespace refl = tvm::ffi::reflection;
+        ffi::Function fwd = refl::GetMethod(mod_ref->GetTypeKey(), "_forward");
+        TVM_FFI_ICHECK(fwd.defined());
+        NNTensor hs_t = named_args.at("hidden_states").cast<NNTensor>();
+        NNTensor enc_t = named_args.at("encoder_hidden_states").cast<NNTensor>();
+        ffi::Optional<Var> opt_enc(enc_t->expr);
+        std::vector<ffi::AnyView> args{ffi::AnyView(mod_ref), ffi::AnyView(hs_t->expr),
+                                       ffi::AnyView(opt_enc)};
+        ffi::Any rv;
+        fwd.CallPacked(ffi::PackedArgs(args.data(), args.size()), &rv);
+        return rv;
+      });
 }
 
 // ===========================================================================
@@ -1617,7 +1551,18 @@ TEST(NNModules, TestAttention) {
   // Collect named parameters in traversal order.
   ffi::Map<ffi::String, NNParameter> named_params = mod.get()->NamedParameters("");
 
-  IRModule actual = ExportAttentionDebug(mod, named_params);
+  // AttentionModuleNode::_forward takes Optional<Var> for encoder_hidden_states,
+  // so we supply a custom forward_fn instead of using the generic mod_ref constructor.
+  ffi::Array<ffi::String> attn_arg_names{"hidden_states", "encoder_hidden_states"};
+  ffi::Array<ffi::Any> attn_arg_specs{ffi::Any(MakeSpecTensor({2, 4096, 640}, "float32")),
+                                      ffi::Any(MakeSpecTensor({2, 77, 2048}, "float32"))};
+  MethodSpec attn_ms(MakeAttentionForwardFn(mod), attn_arg_names, attn_arg_specs,
+                     "plain", "plain");
+  ModuleSpec attn_mod_spec(ffi::Array<ffi::String>{ffi::String("forward")},
+                           ffi::Array<ffi::Any>{ffi::Any(attn_ms)}, named_params, {});
+  ffi::Array<ffi::Any> attn_result =
+      mod.get()->ExportTVM(attn_mod_spec, /*debug=*/true, /*allow_extern=*/false);
+  IRModule actual = attn_result[0].cast<IRModule>();
 
   // ---------------------------------------------------------------------------
   // Build expected IR
@@ -1826,7 +1771,7 @@ TEST(NNModules, TestAttention) {
 // For input x=(1,4) and embedding_dim=8:
 //   out_shape_if_nd = [1, 4, 8]   (batch × seq × dim)
 //
-// This is passed as extra_args = [Array<Any>{1, 4, 8}] to ExportModuleDebug.
+// This is passed as extra_args = [Array<Any>{1, 4, 8}] to ExportDebug.
 // ===========================================================================
 TEST(NNModules, TestEmbedding2D) {
   // Embedding(num_embeddings=4, embedding_dim=8, dtype="float32")
@@ -1847,7 +1792,7 @@ TEST(NNModules, TestEmbedding2D) {
   extra_args.push_back(ffi::Any(out_shape_if_nd));  // out_shape_if_nd = [1, 4, 8]
 
   IRModule actual =
-      ExportModuleDebug(mod, "forward", {"x"},
+      ExportDebug(mod, "forward", {"x"},
                         {ffi::Any(MakeSpecTensor({1, 4}, "int32"))},
                         named_params, extra_args);
 
@@ -1909,70 +1854,30 @@ TEST(NNModules, TestEmbedding2D) {
 }
 
 // ---------------------------------------------------------------------------
-// ExportTimestepEmbeddingDebug
+// MakeTimestepEmbeddingForwardFn
 //
-// Specialised export helper for TimestepEmbeddingModule.
+// TimestepEmbeddingModuleNode::_forward has the signature:
+//   _forward(self, sample: Var, condition: ffi::Optional<Var>)
 //
-// TimestepEmbeddingModuleNode::Forward has the signature:
-//   Forward(Var sample, ffi::Optional<Var> condition)
-//
-// The generic ExportModuleDebug helper in test_nn_modules.cc always extracts
-// every named arg as an NNTensor and passes it as a plain Var.  That works
-// for single-input modules, but here the second argument must be wrapped in
-// ffi::Optional<Var> before being forwarded to _forward.
-//
-// This helper:
-//   1. Builds a MethodSpec whose forward lambda extracts "sample" and
-//      "condition" from named_args, wraps condition in Optional<Var>, and
-//      calls _forward(mod, sample_var, Optional<Var>(condition_var)).
-//   2. Passes named_params so the exporter appends weight/bias parameters
-//      to the function signature in NamedParameters traversal order.
-//   3. Calls mod_node->ExportTVM(mod_spec, debug=true).
+// Same situation as Attention: the second arg must be Optional<Var>, so we
+// provide a custom forward_fn factory rather than using the generic
+// MethodSpec(mod_ref, ...) constructor.
 // ---------------------------------------------------------------------------
-static IRModule ExportTimestepEmbeddingDebug(
-    runtime::ObjectRef mod_ref, ffi::Map<ffi::String, NNParameter> named_params) {
-  const NNModuleNode* mod_node = mod_ref.as<NNModuleNode>();
-  TVM_FFI_ICHECK(mod_node != nullptr)
-      << "ExportTimestepEmbeddingDebug: object is not an NNModuleNode";
-
-  // The forward lambda receives named_args = {"sample": NNTensor, "condition": NNTensor}.
-  // It must call _forward(mod, sample_var, Optional<Var>(condition_var)).
-  ffi::TypedFunction<ffi::Any(ffi::Map<ffi::String, ffi::Any>)> forward_fn =
+static ffi::Function MakeTimestepEmbeddingForwardFn(runtime::ObjectRef mod_ref) {
+  return ffi::TypedFunction<ffi::Any(ffi::Map<ffi::String, ffi::Any>)>(
       [mod_ref](ffi::Map<ffi::String, ffi::Any> named_args) -> ffi::Any {
-    namespace refl = tvm::ffi::reflection;
-    std::string type_key = mod_ref->GetTypeKey();
-    ffi::Function fwd = refl::GetMethod(type_key, "_forward");
-    TVM_FFI_ICHECK(fwd.defined()) << "Module '" << type_key
-                                  << "' does not have a '_forward' method";
-
-    // Extract sample and condition as plain Vars from their NNTensor wrappers.
-    NNTensor sample_t = named_args.at("sample").cast<NNTensor>();
-    NNTensor cond_t = named_args.at("condition").cast<NNTensor>();
-    Var sample_var = sample_t->expr;
-    Var cond_var = cond_t->expr;
-
-    // _forward(self, sample: Var, condition: ffi::Optional<Var>)
-    // Pass condition as a populated Optional<Var>.
-    ffi::Optional<Var> opt_cond(cond_var);
-
-    std::vector<ffi::AnyView> call_args;
-    call_args.push_back(ffi::AnyView(mod_ref));
-    call_args.push_back(ffi::AnyView(sample_var));
-    call_args.push_back(ffi::AnyView(opt_cond));
-    ffi::Any rv;
-    fwd.CallPacked(ffi::PackedArgs(call_args.data(), call_args.size()), &rv);
-    return rv;
-  };
-
-  // arg_names and arg_specs for the two user-visible inputs.
-  ffi::Array<ffi::String> arg_names{"sample", "condition"};
-  ffi::Array<ffi::Any> arg_specs{ffi::Any(MakeSpecTensor({32, 32}, "float32")),
-                                 ffi::Any(MakeSpecTensor({32, 16}, "float32"))};
-
-  MethodSpec ms(forward_fn, arg_names, arg_specs, "plain", "plain");
-  ModuleSpec mod_spec(ffi::Array<ffi::String>{ffi::String("forward")},
-                      ffi::Array<ffi::Any>{ffi::Any(ms)}, named_params, {});
-  return mod_node->ExportTVM(mod_spec, /*debug=*/true);
+        namespace refl = tvm::ffi::reflection;
+        ffi::Function fwd = refl::GetMethod(mod_ref->GetTypeKey(), "_forward");
+        TVM_FFI_ICHECK(fwd.defined());
+        NNTensor sample_t = named_args.at("sample").cast<NNTensor>();
+        NNTensor cond_t = named_args.at("condition").cast<NNTensor>();
+        ffi::Optional<Var> opt_cond(cond_t->expr);
+        std::vector<ffi::AnyView> args{ffi::AnyView(mod_ref), ffi::AnyView(sample_t->expr),
+                                       ffi::AnyView(opt_cond)};
+        ffi::Any rv;
+        fwd.CallPacked(ffi::PackedArgs(args.data(), args.size()), &rv);
+        return rv;
+      });
 }
 
 // ===========================================================================
@@ -2044,7 +1949,18 @@ TEST(NNModules, TestTimestepEmbedding) {
   //   linear_2.weight [32,32], linear_2.bias [32]
   ffi::Map<ffi::String, NNParameter> named_params = mod.get()->NamedParameters("");
 
-  IRModule actual = ExportTimestepEmbeddingDebug(mod, named_params);
+  // TimestepEmbeddingModuleNode::_forward takes Optional<Var> for condition,
+  // so we supply a custom forward_fn instead of using the generic mod_ref constructor.
+  ffi::Array<ffi::String> tse_arg_names{"sample", "condition"};
+  ffi::Array<ffi::Any> tse_arg_specs{ffi::Any(MakeSpecTensor({32, 32}, "float32")),
+                                     ffi::Any(MakeSpecTensor({32, 16}, "float32"))};
+  MethodSpec tse_ms(MakeTimestepEmbeddingForwardFn(mod), tse_arg_names, tse_arg_specs,
+                    "plain", "plain");
+  ModuleSpec tse_mod_spec(ffi::Array<ffi::String>{ffi::String("forward")},
+                          ffi::Array<ffi::Any>{ffi::Any(tse_ms)}, named_params, {});
+  ffi::Array<ffi::Any> tse_result =
+      mod.get()->ExportTVM(tse_mod_spec, /*debug=*/true, /*allow_extern=*/false);
+  IRModule actual = tse_result[0].cast<IRModule>();
 
   // ---------------------------------------------------------------------------
   // Build expected IR
@@ -2223,7 +2139,7 @@ TEST(NNModules, TestTimesteps) {
   EXPECT_TRUE(named_params.empty());
 
   IRModule actual =
-      ExportModuleDebug(mod, "forward", {"x"}, {ffi::Any(MakeSpecTensor({3}, "float32"))});
+      ExportDebug(mod, "forward", {"x"}, {ffi::Any(MakeSpecTensor({3}, "float32"))});
 
   // ---------------------------------------------------------------------------
   // Build expected IR
@@ -2335,34 +2251,15 @@ TEST(NNModules, TestTimesteps) {
 // ExportTupleInputDebug
 //
 // Export helper for modules whose single input "x" is a SpecTuple.
-//
-// The exporter (EmitMethod) handles SpecTuple inputs by:
-//   1. Creating a Var "x" with TupleStructInfo.
-//   2. After BeginDataflowBlock, emitting TupleGetItem bindings for each
-//      element with hints "x_0", "x_1", … (name + "_" + index).
-//   3. Passing the resulting Array<Any> of NNTensors to the forward lambda
-//      as named_args["x"].
-//
-// The forward lambda receives named_args["x"] as ffi::Array<ffi::Any> where
-// each element is an NNTensor.  It calls the provided body_fn with the two
-// extracted NNTensors and returns an ffi::Array<ffi::Any> of the results.
-//
-// Parameters:
-//   body_fn   – called with (x0: NNTensor, x1: NNTensor) → Array<Any>
-//   elem_spec – SpecTensor for each of the two tuple elements (both identical)
-//   is_tuple  – true for tuple input, false for list input (same IR either way)
 // ---------------------------------------------------------------------------
 static IRModule ExportTupleInputDebug(
     std::function<ffi::Array<ffi::Any>(NNTensor, NNTensor)> body_fn, SpecTensor elem_spec,
     bool is_tuple) {
-  // Build the SpecTuple for "x": two identical SpecTensor elements.
   ffi::Array<ffi::Any> elements{ffi::Any(elem_spec), ffi::Any(elem_spec)};
   SpecTuple x_spec("x", elements, is_tuple);
 
   ffi::TypedFunction<ffi::Any(ffi::Map<ffi::String, ffi::Any>)> forward_fn =
       [body_fn](ffi::Map<ffi::String, ffi::Any> named_args) -> ffi::Any {
-    // named_args["x"] is an ffi::Array<ffi::Any> of two NNTensors,
-    // produced by BuildSpecTupleInput in exporter.cc.
     ffi::Array<ffi::Any> x_arr = named_args.at("x").cast<ffi::Array<ffi::Any>>();
     NNTensor x0 = x_arr[0].cast<NNTensor>();
     NNTensor x1 = x_arr[1].cast<NNTensor>();
@@ -2383,41 +2280,11 @@ static IRModule ExportTupleInputDebug(
 
 // ===========================================================================
 // TestNNModuleTupleInput
-//
-// Python equivalent:
-//   class Layer(nn.Module):
-//       def forward(self, x: tuple[nn.Tensor, nn.Tensor]):
-//           x0 = x[0]; x1 = x[1]
-//           y0 = nn.add(x0, x1)
-//           y1 = nn.subtract(x0, x1)
-//           return (y0, y1)
-//
-//   mod = Layer()
-//   tvm_mod, _ = mod.export_tvm(
-//       spec={"forward": {"x": (spec.Tensor([10,5],"float32"),
-//                               spec.Tensor([10,5],"float32"))}},
-//       debug=True)
-//   assert_structural_equal(tvm_mod["forward"], forward)
-//
-// Input spec: SpecTuple(name="x", elements=[SpecTensor([10,5],"f32"),
-//                                           SpecTensor([10,5],"f32")],
-//                       is_tuple=true)
-//
-// Expected dataflow bindings (C++ binding names):
-//   x_0      ← x[0]              (TupleGetItem, hint "x_0")
-//   x_1      ← x[1]              (TupleGetItem, hint "x_1")
-//   add      ← add(x_0, x_1)     (hint "add")
-//   subtract ← subtract(x_0, x_1)(hint "subtract")
-//   gv1      ← (add, subtract), (_io,)
-//
-// NOTE: Python IR uses "lv1"/"lv2" for the TupleGetItem bindings; C++ uses
-// "x_0"/"x_1" (BuildSpecTupleInput hint = name + "_" + index).
 // ===========================================================================
 TEST(NNModules, TestNNModuleTupleInput) {
   DataType f32 = DataType::Float(32);
   SpecTensor elem_spec = MakeSpecTensor({10, 5}, "float32");
 
-  // The forward body: add and subtract the two elements, return as tuple.
   auto body_fn = [](NNTensor x0, NNTensor x1) -> ffi::Array<ffi::Any> {
     BlockBuilder bb = BlockBuilder_Current();
     TVM_FFI_ICHECK(bb.defined());
@@ -2428,25 +2295,9 @@ TEST(NNModules, TestNNModuleTupleInput) {
 
   IRModule actual = ExportTupleInputDebug(body_fn, elem_spec, /*is_tuple=*/true);
 
-  // ---------------------------------------------------------------------------
-  // Build expected IR
-  //
-  // Function signature:
-  //   forward(x: R.Tuple(R.Tensor((10,5),"f32"), R.Tensor((10,5),"f32")),
-  //           _io: R.Object)
-  //   num_input = 2
-  //
-  // Dataflow:
-  //   x_0      ← x[0]
-  //   x_1      ← x[1]
-  //   add      ← add(x_0, x_1)
-  //   subtract ← subtract(x_0, x_1)
-  //   gv1      ← (add, subtract), (_io,)
-  // ---------------------------------------------------------------------------
   BlockBuilder bb = BlockBuilder::Create(std::nullopt);
   EmitInitEffect(bb);
   {
-    // x has TupleStructInfo([T(10,5,f32), T(10,5,f32)])
     TupleStructInfo x_sinfo(
         ffi::Array<StructInfo>{TSInfo({10, 5}, f32), TSInfo({10, 5}, f32)});
     Var x("x", x_sinfo);
@@ -2455,17 +2306,10 @@ TEST(NNModules, TestNNModuleTupleInput) {
     bb->BeginScope(params);
     bb->BeginDataflowBlock();
 
-    // x_0 ← x[0]   (BuildSpecTupleInput hint = "x_0")
     Var x_0 = bb->Emit(TupleGetItem(x, 0), "x_0");
-    // x_1 ← x[1]   (BuildSpecTupleInput hint = "x_1")
     Var x_1 = bb->Emit(TupleGetItem(x, 1), "x_1");
-
-    // add ← add(x_0, x_1)
     Var add_out = bb->Emit(relax::add(x_0, x_1), "add");
-    // subtract ← subtract(x_0, x_1)
     Var sub_out = bb->Emit(relax::subtract(x_0, x_1), "subtract");
-
-    // gv1 ← ((add, subtract), (_io,))
     Var gv1 = bb->EmitOutput(
         relax::Tuple({relax::Tuple({add_out, sub_out}), relax::Tuple({io})}), "gv1");
 
@@ -2473,7 +2317,6 @@ TEST(NNModules, TestNNModuleTupleInput) {
     Expr body = bb->Normalize(SeqExpr({df}, gv1));
     bb->EndScope();
 
-    // num_input = 2: x (tuple counts as one input) + _io
     ffi::Map<ffi::String, ffi::Any> attrs;
     attrs.Set("num_input", ffi::Any(int64_t(2)));
     attrs.Set("global_symbol", ffi::Any(ffi::String("forward")));
@@ -2485,36 +2328,11 @@ TEST(NNModules, TestNNModuleTupleInput) {
 
 // ===========================================================================
 // TestNNModuleListInput
-//
-// Python equivalent:
-//   class Layer(nn.Module):
-//       def forward(self, x: list[nn.Tensor]):
-//           x0 = x[0]; x1 = x[1]
-//           y0 = nn.add(x0, x1)
-//           y1 = nn.subtract(x0, x1)
-//           return [y0, y1]
-//
-//   mod = Layer()
-//   tvm_mod, _ = mod.export_tvm(
-//       spec={"forward": {"x": [spec.Tensor([10,5],"float32"),
-//                               spec.Tensor([10,5],"float32")]}},
-//       debug=True)
-//   assert_structural_equal(tvm_mod["forward"], forward)
-//
-// The list spec produces SpecTuple(is_tuple=false).  The exporter treats
-// is_tuple=false identically to is_tuple=true: same TupleStructInfo Var,
-// same TupleGetItem bindings, same IR.  The expected IRModule is therefore
-// identical to TestNNModuleTupleInput.
-//
-// NOTE: The Python test uses assert_structural_equal without the map_free_vars
-// flag (defaults to False), which is the same as True for this test since
-// there are no free variables.  We use the same AssertStructEqual helper.
 // ===========================================================================
 TEST(NNModules, TestNNModuleListInput) {
   DataType f32 = DataType::Float(32);
   SpecTensor elem_spec = MakeSpecTensor({10, 5}, "float32");
 
-  // Identical body to the tuple test.
   auto body_fn = [](NNTensor x0, NNTensor x1) -> ffi::Array<ffi::Any> {
     BlockBuilder bb = BlockBuilder_Current();
     TVM_FFI_ICHECK(bb.defined());
@@ -2523,11 +2341,8 @@ TEST(NNModules, TestNNModuleListInput) {
     return {ffi::Any(NNTensor(add_out)), ffi::Any(NNTensor(sub_out))};
   };
 
-  // is_tuple=false → SpecTuple with is_tuple=false (list spec)
   IRModule actual = ExportTupleInputDebug(body_fn, elem_spec, /*is_tuple=*/false);
 
-  // Expected IR is identical to the tuple variant: the exporter treats
-  // is_tuple=true and is_tuple=false identically.
   BlockBuilder bb = BlockBuilder::Create(std::nullopt);
   EmitInitEffect(bb);
   {
@@ -2561,58 +2376,24 @@ TEST(NNModules, TestNNModuleListInput) {
 
 // ===========================================================================
 // TestModuleList
-//
-// Python equivalent:
-//   class Module(nn.Module):
-//       def __init__(self):
-//           self.layers = nn.ModuleList(
-//               [nn.ModuleList([nn.Linear(4, 4, bias=False) for _ in range(2)])
-//                for _ in range(1)])
-//       def forward(self, x: nn.Tensor):
-//           return self.layers(x)
-//
-//   mod = Module()
-//   named_params = dict(mod.named_parameters())
-//   assert ["layers.0.0.weight", "layers.0.1.weight"] == sorted(list(named_params.keys()))
-//
-// This test only checks NamedParameters() — no export, no IRModule.
-//
-// C++ structure:
-//   NNModule with attrs["layers"] = ModuleList([
-//       ModuleList([
-//           MakeLinear(4→4, bias=false),   // layers.0.0
-//           MakeLinear(4→4, bias=false),   // layers.0.1
-//       ])
-//   ])
-//
-// NamedParameters("") traversal:
-//   "layers" → ModuleList[0] → ModuleList[0] → Linear → "layers.0.0.weight"
-//   "layers" → ModuleList[0] → ModuleList[1] → Linear → "layers.0.1.weight"
 // ===========================================================================
 TEST(NNModules, TestModuleList) {
-  // Build the inner ModuleList: [Linear(4→4, no bias), Linear(4→4, no bias)]
   LinearModule l0 = MakeLinear(ffi::Any(int64_t(4)), ffi::Any(int64_t(4)),
                                /*bias=*/false, std::nullopt, std::nullopt);
   LinearModule l1 = MakeLinear(ffi::Any(int64_t(4)), ffi::Any(int64_t(4)),
                                /*bias=*/false, std::nullopt, std::nullopt);
   ModuleList inner({ffi::Any(l0), ffi::Any(l1)});
-
-  // Build the outer ModuleList: [inner]
   ModuleList outer({ffi::Any(inner)});
 
-  // Build the top-level NNModule with attrs["layers"] = outer
   NNModule mod;
   mod->attrs.Set("layers", ffi::Any(outer));
 
-  // Collect named parameters
   ffi::Map<ffi::String, NNParameter> named_params = mod->NamedParameters("");
 
-  // Extract and sort the keys
   std::vector<std::string> keys;
   for (const auto& [k, _] : named_params) keys.push_back(std::string(k));
   std::sort(keys.begin(), keys.end());
 
-  // Python assertion: sorted keys == ["layers.0.0.weight", "layers.0.1.weight"]
   ASSERT_EQ(keys.size(), 2u);
   EXPECT_EQ(keys[0], "layers.0.0.weight");
   EXPECT_EQ(keys[1], "layers.0.1.weight");
@@ -2620,62 +2401,27 @@ TEST(NNModules, TestModuleList) {
 
 // ===========================================================================
 // TestModuleDict
-//
-// Python equivalent:
-//   class Module(nn.Module):
-//       def __init__(self):
-//           self.layers = nn.ModuleDict({
-//               "linear0": nn.Linear(4, 4, bias=False),
-//               "linear1": nn.Linear(4, 4, bias=False),
-//           })
-//       def forward(self, x: nn.Tensor):
-//           x = self.layers["linear0"](x)
-//           x = self.layers["linear1"](x)
-//           return x
-//
-//   mod = Module()
-//   named_params = dict(mod.named_parameters())
-//   assert ["layers.linear0.weight", "layers.linear1.weight"] ==
-//          sorted(list(named_params.keys()))
-//
-// This test only checks NamedParameters() — no export, no IRModule.
-//
-// C++ structure:
-//   NNModule with attrs["layers"] = ModuleDict({
-//       "linear0": MakeLinear(4→4, bias=false),
-//       "linear1": MakeLinear(4→4, bias=false),
-//   })
-//
-// NamedParameters("") traversal:
-//   "layers" → ModuleDict["linear0"] → Linear → "layers.linear0.weight"
-//   "layers" → ModuleDict["linear1"] → Linear → "layers.linear1.weight"
 // ===========================================================================
 TEST(NNModules, TestModuleDict) {
-  // Build the two Linear sub-modules
   LinearModule ld0 = MakeLinear(ffi::Any(int64_t(4)), ffi::Any(int64_t(4)),
                                 /*bias=*/false, std::nullopt, std::nullopt);
   LinearModule ld1 = MakeLinear(ffi::Any(int64_t(4)), ffi::Any(int64_t(4)),
                                 /*bias=*/false, std::nullopt, std::nullopt);
 
-  // Build the ModuleDict: {"linear0": ld0, "linear1": ld1}
   ffi::Map<ffi::String, ffi::Any> dict_map;
   dict_map.Set("linear0", ffi::Any(ld0));
   dict_map.Set("linear1", ffi::Any(ld1));
   ModuleDict layers(dict_map);
 
-  // Build the top-level NNModule with attrs["layers"] = layers
   NNModule mod;
   mod->attrs.Set("layers", ffi::Any(layers));
 
-  // Collect named parameters
   ffi::Map<ffi::String, NNParameter> named_params = mod->NamedParameters("");
 
-  // Extract and sort the keys
   std::vector<std::string> keys;
   for (const auto& [k, _] : named_params) keys.push_back(std::string(k));
   std::sort(keys.begin(), keys.end());
 
-  // Python assertion: sorted keys == ["layers.linear0.weight", "layers.linear1.weight"]
   ASSERT_EQ(keys.size(), 2u);
   EXPECT_EQ(keys[0], "layers.linear0.weight");
   EXPECT_EQ(keys[1], "layers.linear1.weight");
@@ -2686,3 +2432,4 @@ TEST(NNModules, TestModuleDict) {
 }  // namespace frontend
 }  // namespace relax
 }  // namespace tvm
+

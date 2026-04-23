@@ -498,8 +498,17 @@ void NNModuleNode::To(ffi::String dtype) const {
 // NNModuleNode::ExportTVM / Jit
 // ===========================================================================
 
-IRModule NNModuleNode::ExportTVM(ModuleSpec spec, bool debug) const {
-  return ExportToIRModule(std::move(spec), debug);
+ffi::Array<ffi::Any> NNModuleNode::ExportTVM(ModuleSpec spec, bool debug, bool allow_extern) const {
+  // Use the Exporter class to build the IRModule and collect extern_mods.
+  // This matches the Python implementation exactly.
+  Exporter exporter(debug);
+  ffi::Array<ffi::Any> result = exporter->Build(std::move(spec));
+  // result = [mod, named_params, extern_mods]
+  // If allow_extern=false, return [mod, named_params, empty_array]
+  if (!allow_extern) {
+    result.Set(2, ffi::Any(ffi::Array<runtime::ObjectRef>{}));
+  }
+  return result;
 }
 
 runtime::ObjectRef NNModuleNode::Jit(ModuleSpec spec, tvm::Device device, ffi::String pipeline,

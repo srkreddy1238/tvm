@@ -121,8 +121,9 @@ class TestModuleNode : public NNModuleNode {
                       ffi::Array<ffi::Any>{ffi::Any(ms)}, named_params, named_effects);
   }
 
-  IRModule ExportDebug(const std::string& method_name = "test") const {
-    return ExportTVM(MakeSpec(method_name), /*debug=*/true);
+    IRModule ExportDebug(const std::string& method_name = "test") const {
+    ffi::Array<ffi::Any> result = ExportTVM(MakeSpec(method_name), /*debug=*/true, /*allow_extern=*/false);
+    return result[0].cast<IRModule>();
   }
 
   static constexpr bool _type_mutable = true;
@@ -131,6 +132,7 @@ class TestModuleNode : public NNModuleNode {
 
 // Build and export a single-method module via NNModuleNode::ExportTVM.
 // debug=true by default (matches existing test expectations).
+// Returns just the IRModule (extracts from the Array[mod, params, extern_mods] result).
 static IRModule ExportSingle(const std::string& method_name, ffi::Function forward_fn,
                              ffi::Array<ffi::String> arg_names, ffi::Array<ffi::Any> arg_specs,
                              ffi::Map<ffi::String, NNParameter> named_params = {},
@@ -140,7 +142,8 @@ static IRModule ExportSingle(const std::string& method_name, ffi::Function forwa
                       ffi::Array<ffi::Any>{ffi::Any(ms)}, named_params, {});
   // Delegate through NNModuleNode::ExportTVM so the module-centric path is exercised.
   TestModuleNode mod(forward_fn, arg_names, arg_specs);
-  return mod.ExportTVM(mod.MakeSpec(method_name, named_params), debug);
+  ffi::Array<ffi::Any> result = mod.ExportTVM(mod.MakeSpec(method_name, named_params), debug, /*allow_extern=*/false);
+  return result[0].cast<IRModule>();
 }
 
 // ---------------------------------------------------------------------------

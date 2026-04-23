@@ -198,9 +198,41 @@ class MethodSpecNode : public runtime::Object {
 };
 class MethodSpec : public runtime::ObjectRef {
  public:
+  /*! \brief Primary constructor: caller supplies the forward ffi::Function. */
   explicit MethodSpec(ffi::Function forward, ffi::Array<ffi::String> arg_names,
                       ffi::Array<ffi::Any> arg_specs, ffi::String param_mode,
                       ffi::String effect_mode);
+
+  /*!
+   * \brief Module-aware constructor.
+   *
+   * Builds the forward ffi::Function automatically from a native C++
+   * NNModuleNode object by looking up its "_forward" method via
+   * ffi::reflection::GetMethod.  This eliminates the boilerplate
+   * ExportModuleDebug / ExportAttentionDebug helpers that every test file
+   * previously had to define.
+   *
+   * The generated forward function:
+   *   1. Looks up the "_forward" method on mod_ref's type.
+   *   2. Builds the call-args list:
+   *        [mod_ref, var_for_arg0, var_for_arg1, ..., extra_arg0, ...]
+   *      where each named arg is extracted from named_args as an NNTensor
+   *      and its underlying Var is passed to _forward.
+   *   3. Appends any extra_args (e.g. channel_axis, axes, out_shape) after
+   *      the spec-driven inputs.
+   *
+   * \param mod_ref      The NNModuleNode-derived object to call _forward on.
+   * \param arg_names    Ordered argument names (must match arg_specs).
+   * \param arg_specs    SpecTensor / SpecInt / SpecTuple for each argument.
+   * \param param_mode   "plain", "packed", or "none".
+   * \param effect_mode  "plain", "packed", or "none".
+   * \param extra_args   Optional trailing arguments appended to the _forward
+   *                     call after the spec-driven inputs (default: empty).
+   */
+  explicit MethodSpec(runtime::ObjectRef mod_ref, ffi::Array<ffi::String> arg_names,
+                      ffi::Array<ffi::Any> arg_specs, ffi::String param_mode,
+                      ffi::String effect_mode, ffi::Array<ffi::Any> extra_args = {});
+
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(MethodSpec, runtime::ObjectRef, MethodSpecNode);
 };
 
