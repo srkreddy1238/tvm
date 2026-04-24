@@ -57,8 +57,8 @@
 #include "../../../../../src/relax/frontend/nn/exporter.h"
 #include "../../../../../src/relax/frontend/nn/spec.h"
 #include "../../../../../src/relax/op/tensor/binary.h"
-#include "../../../../../src/relax/op/tensor/manipulate.h"
 #include "../../../../../src/relax/op/tensor/datatype.h"
+#include "../../../../../src/relax/op/tensor/manipulate.h"
 
 namespace tvm {
 namespace relax {
@@ -83,8 +83,9 @@ static SpecTensor MakeSpecTensor(std::initializer_list<int64_t> dims, const std:
 }
 
 static void AssertStructEqual(const IRModule& actual, const IRModule& expected) {
-  EXPECT_TRUE(ffi::StructuralEqual()(actual, expected))
-      << "\n=== Actual ===\n" << actual << "\n=== Expected ===\n" << expected;
+  EXPECT_TRUE(ffi::StructuralEqual()(actual, expected)) << "\n=== Actual ===\n"
+                                                        << actual << "\n=== Expected ===\n"
+                                                        << expected;
 }
 
 // Retrieve the registered nn.op FFI function by short name.
@@ -95,26 +96,23 @@ static ffi::Function NNOp(const std::string& name) {
 }
 
 // Export a single method (debug=True) via NNModule->ExportTVM.
-static IRModule ExportDebug(ffi::Function forward_fn,
-                            const std::string& method_name,
-                            ffi::Array<ffi::String> arg_names,
-                            ffi::Array<ffi::Any> arg_specs) {
+static IRModule ExportDebug(ffi::Function forward_fn, const std::string& method_name,
+                            ffi::Array<ffi::String> arg_names, ffi::Array<ffi::Any> arg_specs) {
   // Create a minimal NNModule wrapper
   NNModule mod;
-  
+
   // Build MethodSpec and ModuleSpec
   MethodSpec ms(forward_fn, arg_names, arg_specs, "plain", "plain");
   ModuleSpec mod_spec(ffi::Array<ffi::String>{ffi::String(method_name)},
                       ffi::Array<ffi::Any>{ffi::Any(ms)}, {}, {});
-  
+
   // Use NNModule->ExportTVM
   ffi::Array<ffi::Any> result = mod->ExportTVM(mod_spec, /*debug=*/true, /*allow_extern=*/false);
   return result[0].cast<IRModule>();
 }
 
 // Emit the debug output tuple (result, (_io,)) and return the binding Var.
-static Var EmitDebugOutput(BlockBuilder& bb, Expr result, Var io,
-                           const std::string& hint = "gv1") {
+static Var EmitDebugOutput(BlockBuilder& bb, Expr result, Var io, const std::string& hint = "gv1") {
   return bb->EmitOutput(relax::Tuple({result, relax::Tuple({io})}), hint);
 }
 
@@ -153,9 +151,8 @@ static void EmitInitEffect(BlockBuilder& bb) {
 TEST(NNTensor, TestTensorFromNumpy) {
   // Create a (1, 10) float32 tensor and wrap it in a relax.Constant.
   std::vector<float> data(10, 0.0f);
-  runtime::Tensor nd = runtime::Tensor::Empty(
-      ffi::Shape{1, 10}, DLDataType{kDLFloat, 32, 1},
-      DLDevice{kDLCPU, 0}, std::nullopt);
+  runtime::Tensor nd = runtime::Tensor::Empty(ffi::Shape{1, 10}, DLDataType{kDLFloat, 32, 1},
+                                              DLDevice{kDLCPU, 0}, std::nullopt);
   nd.CopyFromBytes(data.data(), data.size() * sizeof(float));
   relax::Constant c(nd, std::nullopt);
 
@@ -185,9 +182,8 @@ TEST(NNTensor, TestTensorFromNumpy) {
 // ===========================================================================
 TEST(NNTensor, TestTensorFromScalar) {
   // Create a scalar float16 constant.
-  runtime::Tensor nd = runtime::Tensor::Empty(
-      ffi::Shape{}, DLDataType{kDLFloat, 16, 1},
-      DLDevice{kDLCPU, 0}, std::nullopt);
+  runtime::Tensor nd = runtime::Tensor::Empty(ffi::Shape{}, DLDataType{kDLFloat, 16, 1},
+                                              DLDevice{kDLCPU, 0}, std::nullopt);
   relax::Constant c(nd, std::nullopt);
   const auto* ts = c->struct_info_.as<TensorStructInfoNode>();
   ASSERT_NE(ts, nullptr);
@@ -220,15 +216,15 @@ TEST(NNTensor, TestTensorFromScalar) {
 //     gv1 = (add,mul,divide,maximum,minimum), (_io,)
 // ===========================================================================
 TEST(NNTensor, TestTensorOpBinaryTensorTensor) {
-  const ffi::Function op_add     = NNOp("add");
-  const ffi::Function op_mul     = NNOp("multiply");
-  const ffi::Function op_div     = NNOp("divide");
+  const ffi::Function op_add = NNOp("add");
+  const ffi::Function op_mul = NNOp("multiply");
+  const ffi::Function op_div = NNOp("divide");
   const ffi::Function op_maximum = NNOp("maximum");
   const ffi::Function op_minimum = NNOp("minimum");
 
   ffi::TypedFunction<ffi::Any(ffi::Map<ffi::String, ffi::Any>)> test_fn =
-      [op_add, op_mul, op_div, op_maximum, op_minimum](
-          ffi::Map<ffi::String, ffi::Any> args) -> ffi::Any {
+      [op_add, op_mul, op_div, op_maximum,
+       op_minimum](ffi::Map<ffi::String, ffi::Any> args) -> ffi::Any {
     NNTensor x = args.at("x").cast<NNTensor>();
     NNTensor y = args.at("y").cast<NNTensor>();
     ffi::Any z0 = op_add(x->expr, y->expr, ffi::String("add"));
@@ -240,9 +236,9 @@ TEST(NNTensor, TestTensorOpBinaryTensorTensor) {
     return ffi::Any(out);
   };
 
-  IRModule actual = ExportDebug(test_fn, "test", {"x", "y"},
-                                {ffi::Any(MakeSpecTensor({1, 10}, "float32")),
-                                 ffi::Any(MakeSpecTensor({2, 1}, "float32"))});
+  IRModule actual = ExportDebug(
+      test_fn, "test", {"x", "y"},
+      {ffi::Any(MakeSpecTensor({1, 10}, "float32")), ffi::Any(MakeSpecTensor({2, 1}, "float32"))});
 
   // Build expected IR.
   BlockBuilder bb = BlockBuilder::Create(std::nullopt);
@@ -255,13 +251,12 @@ TEST(NNTensor, TestTensorOpBinaryTensorTensor) {
     ffi::Array<Var> params{x, y, io};
     bb->BeginScope(params);
     bb->BeginDataflowBlock();
-    Var add     = bb->Emit(relax::add(x, y), "add");
-    Var mul     = bb->Emit(relax::multiply(x, y), "mul");
-    Var divide  = bb->Emit(relax::divide(x, y), "divide");
+    Var add = bb->Emit(relax::add(x, y), "add");
+    Var mul = bb->Emit(relax::multiply(x, y), "mul");
+    Var divide = bb->Emit(relax::divide(x, y), "divide");
     Var maximum = bb->Emit(relax::maximum(x, y), "maximum");
     Var minimum = bb->Emit(relax::minimum(x, y), "minimum");
-    Var gv1 = EmitDebugOutput(bb,
-        relax::Tuple({add, mul, divide, maximum, minimum}), io);
+    Var gv1 = EmitDebugOutput(bb, relax::Tuple({add, mul, divide, maximum, minimum}), io);
     BindingBlock df = bb->EndBlock();
     Expr body = bb->Normalize(SeqExpr({df}, gv1));
     bb->EndScope();
@@ -290,24 +285,23 @@ TEST(NNTensor, TestTensorOpBinaryTensorTensor) {
 // The scalar 10 is folded into R.const(10, "float32") by the nn.op binary ops.
 // ===========================================================================
 TEST(NNTensor, TestTensorOpBinaryTensorScalar) {
-  const ffi::Function op_add     = NNOp("add");
-  const ffi::Function op_mul     = NNOp("multiply");
-  const ffi::Function op_div     = NNOp("divide");
+  const ffi::Function op_add = NNOp("add");
+  const ffi::Function op_mul = NNOp("multiply");
+  const ffi::Function op_div = NNOp("divide");
   const ffi::Function op_maximum = NNOp("maximum");
   const ffi::Function op_minimum = NNOp("minimum");
 
   // Helper: build a scalar float32 relax.Constant.
   auto MakeF32Const = [](float v) -> relax::Constant {
-    runtime::Tensor t = runtime::Tensor::Empty(
-        ffi::Shape{}, DLDataType{kDLFloat, 32, 1},
-        DLDevice{kDLCPU, 0}, std::nullopt);
+    runtime::Tensor t = runtime::Tensor::Empty(ffi::Shape{}, DLDataType{kDLFloat, 32, 1},
+                                               DLDevice{kDLCPU, 0}, std::nullopt);
     t.CopyFromBytes(&v, sizeof(float));
     return relax::Constant(t, std::nullopt);
   };
 
   ffi::TypedFunction<ffi::Any(ffi::Map<ffi::String, ffi::Any>)> test_fn =
-      [op_add, op_mul, op_div, op_maximum, op_minimum, MakeF32Const](
-          ffi::Map<ffi::String, ffi::Any> args) -> ffi::Any {
+      [op_add, op_mul, op_div, op_maximum, op_minimum,
+       MakeF32Const](ffi::Map<ffi::String, ffi::Any> args) -> ffi::Any {
     NNTensor x = args.at("x").cast<NNTensor>();
     relax::Constant scalar10 = MakeF32Const(10.0f);
     ffi::Any z0 = op_add(x->expr, scalar10, ffi::String("add"));
@@ -320,8 +314,8 @@ TEST(NNTensor, TestTensorOpBinaryTensorScalar) {
     return ffi::Any(out);
   };
 
-  IRModule actual = ExportDebug(test_fn, "test", {"x"},
-                                {ffi::Any(MakeSpecTensor({1, 10}, "float32"))});
+  IRModule actual =
+      ExportDebug(test_fn, "test", {"x"}, {ffi::Any(MakeSpecTensor({1, 10}, "float32"))});
 
   // Build expected IR.
   BlockBuilder bb = BlockBuilder::Create(std::nullopt);
@@ -334,14 +328,13 @@ TEST(NNTensor, TestTensorOpBinaryTensorScalar) {
     bb->BeginScope(params);
     bb->BeginDataflowBlock();
     relax::Constant c10 = MakeF32Const(10.0f);
-    Var add     = bb->Emit(relax::add(x, c10), "add");
-    Var add1    = bb->Emit(relax::add(x, c10), "add1");
-    Var mul     = bb->Emit(relax::multiply(x, c10), "mul");
-    Var divide  = bb->Emit(relax::divide(x, c10), "divide");
+    Var add = bb->Emit(relax::add(x, c10), "add");
+    Var add1 = bb->Emit(relax::add(x, c10), "add1");
+    Var mul = bb->Emit(relax::multiply(x, c10), "mul");
+    Var divide = bb->Emit(relax::divide(x, c10), "divide");
     Var maximum = bb->Emit(relax::maximum(x, c10), "maximum");
     Var minimum = bb->Emit(relax::minimum(x, c10), "minimum");
-    Var gv1 = EmitDebugOutput(bb,
-        relax::Tuple({add, add1, mul, divide, maximum, minimum}), io);
+    Var gv1 = EmitDebugOutput(bb, relax::Tuple({add, add1, mul, divide, maximum, minimum}), io);
     BindingBlock df = bb->EndBlock();
     Expr body = bb->Normalize(SeqExpr({df}, gv1));
     bb->EndScope();
@@ -380,8 +373,8 @@ TEST(NNTensor, TestTensorOpDatatype) {
     return op_astype(x->expr, ffi::String("float16"), ffi::String("astype"));
   };
 
-  IRModule actual = ExportDebug(test_fn, "test", {"x"},
-                                {ffi::Any(MakeSpecTensor({1, 10}, "float32"))});
+  IRModule actual =
+      ExportDebug(test_fn, "test", {"x"}, {ffi::Any(MakeSpecTensor({1, 10}, "float32"))});
 
   BlockBuilder bb = BlockBuilder::Create(std::nullopt);
   EmitInitEffect(bb);
@@ -394,7 +387,7 @@ TEST(NNTensor, TestTensorOpDatatype) {
     bb->BeginScope(params);
     bb->BeginDataflowBlock();
     Var astype = bb->Emit(relax::astype(x, f16), "astype");
-    Var gv1    = EmitDebugOutput(bb, astype, io);
+    Var gv1 = EmitDebugOutput(bb, astype, io);
     BindingBlock df = bb->EndBlock();
     Expr body = bb->Normalize(SeqExpr({df}, gv1));
     bb->EndScope();
@@ -431,11 +424,10 @@ TEST(NNTensor, TestTensorOpDatatype) {
 TEST(NNTensor, TestTensorOpManipulate) {
   const ffi::Function op_reshape = NNOp("reshape");
   const ffi::Function op_permute = NNOp("permute_dims");
-  const ffi::Function op_repeat  = NNOp("repeat");
+  const ffi::Function op_repeat = NNOp("repeat");
 
   ffi::TypedFunction<ffi::Any(ffi::Map<ffi::String, ffi::Any>)> test_fn =
-      [op_reshape, op_permute, op_repeat](
-          ffi::Map<ffi::String, ffi::Any> args) -> ffi::Any {
+      [op_reshape, op_permute, op_repeat](ffi::Map<ffi::String, ffi::Any> args) -> ffi::Any {
     NNTensor x = args.at("x").cast<NNTensor>();
 
     // reshape(x, [2, 5, 2])
@@ -445,19 +437,18 @@ TEST(NNTensor, TestTensorOpManipulate) {
 
     // permute_dims(x, axes=[2, 1, 0])
     ffi::Array<Integer> axes{Integer(2), Integer(1), Integer(0)};
-    ffi::Any z1 = op_permute(x->expr, ffi::Optional<ffi::Array<Integer>>(axes),
-                             ffi::String("permute_dims"));
+    ffi::Any z1 =
+        op_permute(x->expr, ffi::Optional<ffi::Array<Integer>>(axes), ffi::String("permute_dims"));
 
     // repeat(x, repeats=2, axis=1)
-    ffi::Any z2 = op_repeat(x->expr, int64_t(2), ffi::Optional<int64_t>(1),
-                            ffi::String("repeat"));
+    ffi::Any z2 = op_repeat(x->expr, int64_t(2), ffi::Optional<int64_t>(1), ffi::String("repeat"));
 
     ffi::Array<ffi::Any> out{z0, z1, z2};
     return ffi::Any(out);
   };
 
-  IRModule actual = ExportDebug(test_fn, "test", {"x"},
-                                {ffi::Any(MakeSpecTensor({2, 1, 10}, "float32"))});
+  IRModule actual =
+      ExportDebug(test_fn, "test", {"x"}, {ffi::Any(MakeSpecTensor({2, 1, 10}, "float32"))});
 
   BlockBuilder bb = BlockBuilder::Create(std::nullopt);
   EmitInitEffect(bb);
@@ -470,18 +461,17 @@ TEST(NNTensor, TestTensorOpManipulate) {
     bb->BeginDataflowBlock();
 
     // reshape(x, [2, 5, 2])
-    Var reshape = bb->Emit(
-        relax::reshape(x, ShapeExpr(ffi::Array<PrimExpr>{
-            IntImm(DataType::Int(64), 2),
-            IntImm(DataType::Int(64), 5),
-            IntImm(DataType::Int(64), 2)})),
-        "reshape");
+    Var reshape =
+        bb->Emit(relax::reshape(x, ShapeExpr(ffi::Array<PrimExpr>{IntImm(DataType::Int(64), 2),
+                                                                  IntImm(DataType::Int(64), 5),
+                                                                  IntImm(DataType::Int(64), 2)})),
+                 "reshape");
 
     // permute_dims(x, axes=[2, 1, 0])
-    Var permute = bb->Emit(
-        relax::permute_dims(x, ffi::Optional<ffi::Array<Integer>>(
-            ffi::Array<Integer>{Integer(2), Integer(1), Integer(0)})),
-        "permute_dims");
+    Var permute =
+        bb->Emit(relax::permute_dims(x, ffi::Optional<ffi::Array<Integer>>(ffi::Array<Integer>{
+                                            Integer(2), Integer(1), Integer(0)})),
+                 "permute_dims");
 
     // repeat(x, repeats=2, axis=1)
     Var repeat = bb->Emit(relax::repeat(x, 2, ffi::Optional<int64_t>(1)), "repeat");

@@ -108,7 +108,7 @@ static IRModule ExportSingle(const std::string& method_name, ffi::Function forwa
   MethodSpec ms(forward_fn, arg_names, arg_specs, "plain", "plain");
   ModuleSpec mod_spec(ffi::Array<ffi::String>{ffi::String(method_name)},
                       ffi::Array<ffi::Any>{ffi::Any(ms)}, named_params, {});
-  
+
   // Create a minimal NNModule wrapper and use ExportTVM
   NNModule mod;
   ffi::Array<ffi::Any> result = mod->ExportTVM(mod_spec, debug, /*allow_extern=*/false);
@@ -1090,9 +1090,9 @@ TEST(NNOps, TestSortArgsortTopk) {
   ffi::Array<ffi::Any> spec_shape;
   spec_shape.push_back(ffi::Any(ffi::String("seq_len")));
   spec_shape.push_back(ffi::Any(int64_t(64)));
-      MethodSpec ms_sort(forward, {"x"}, {ffi::Any(SpecTensor(spec_shape, "float16"))}, "plain",
+  MethodSpec ms_sort(forward, {"x"}, {ffi::Any(SpecTensor(spec_shape, "float16"))}, "plain",
                      "none");
-  
+
   // Create a minimal NNModule wrapper and use ExportTVM
   NNModule mod;
   ffi::Array<ffi::Any> result = mod->ExportTVM(
@@ -1143,9 +1143,9 @@ TEST(NNOps, TestTensorIrOpNoTirVar) {
                            ffi::Array<ffi::Any>{ffi::Any(out_ph)});
   };
 
-      MethodSpec ms_notv(forward, {"A"}, {ffi::Any(MakeSpecTensor({16, 16}, "float32"))}, "plain",
+  MethodSpec ms_notv(forward, {"A"}, {ffi::Any(MakeSpecTensor({16, 16}, "float32"))}, "plain",
                      "none");
-  
+
   // Create a minimal NNModule wrapper and use ExportTVM
   NNModule mod;
   ffi::Array<ffi::Any> result = mod->ExportTVM(
@@ -1277,15 +1277,15 @@ TEST(NNOps, TestTensorIrInplaceOp) {
   MethodSpec ms_ip(
       forward, {"embedding_table", "input_ids", "embedding_dst", "offset"},
       {ffi::Any(SpecTensor(et_shape, kInplaceDtype)), ffi::Any(SpecTensor(ii_shape, "int32")),
-                         ffi::Any(SpecTensor(ed_shape, kInplaceDtype)), ffi::Any(SpecInt())},
-        "packed", "none");
-    
-    // Create a minimal NNModule wrapper and use ExportTVM
-    NNModule mod;
-    ffi::Array<ffi::Any> result = mod->ExportTVM(
-        ModuleSpec(ffi::Array<ffi::String>{"test"}, ffi::Array<ffi::Any>{ffi::Any(ms_ip)}, {}, {}),
-        /*debug=*/false, /*allow_extern=*/false);
-    IRModule actual = result[0].cast<IRModule>();
+       ffi::Any(SpecTensor(ed_shape, kInplaceDtype)), ffi::Any(SpecInt())},
+      "packed", "none");
+
+  // Create a minimal NNModule wrapper and use ExportTVM
+  NNModule mod;
+  ffi::Array<ffi::Any> result = mod->ExportTVM(
+      ModuleSpec(ffi::Array<ffi::String>{"test"}, ffi::Array<ffi::Any>{ffi::Any(ms_ip)}, {}, {}),
+      /*debug=*/false, /*allow_extern=*/false);
+  IRModule actual = result[0].cast<IRModule>();
 
   BlockBuilder bb = BlockBuilder::Create(std::nullopt);
   {

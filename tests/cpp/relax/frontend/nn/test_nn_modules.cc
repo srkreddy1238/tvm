@@ -76,8 +76,9 @@
  *
  * For modules whose _forward takes extra arguments beyond the spec-driven
  * inputs (GroupNorm: channel_axis + axes; Embedding: out_shape_if_nd) the
- * ExportDebug helper still uses MethodSpec(mod_ref, ..., extra_args) which
- * calls DeriveMethodFunction internally.
+ * ExportDebug helper calls DeriveMethodFunction(mod_ref, method_name,
+ * arg_names, extra_args) directly and passes the result to MethodSpec's
+ * primary (ffi::Function) constructor.
  *
  * For modules with Optional<Var> arguments (Attention, TimestepEmbedding)
  * a custom forward_fn factory is still used (MakeAttentionForwardFn, etc.)
@@ -220,21 +221,24 @@ static IRModule ExportDebug(runtime::ObjectRef mod_ref, const std::string& metho
     // Simple case: use the module-aware ModuleSpec constructor.
     ffi::Map<ffi::String, ffi::Any> method_arg_spec;
     TVM_FFI_ICHECK_EQ(arg_names.size(), arg_specs.size());
-    for (size_t i = 0; i < arg_names.size(); ++i)
-      method_arg_spec.Set(arg_names[i], arg_specs[i]);
+    for (size_t i = 0; i < arg_names.size(); ++i) method_arg_spec.Set(arg_names[i], arg_specs[i]);
     ffi::Map<ffi::String, ffi::Map<ffi::String, ffi::Any>> spec;
     spec.Set(ffi::String(method_name), method_arg_spec);
     ModuleSpec mod_spec(mod_ref, spec, /*debug=*/true);
     if (!named_params.empty()) {
-      mod_spec = ModuleSpec(mod_spec->method_names, mod_spec->method_specs,
-                            named_params, mod_spec->named_effects);
+      mod_spec = ModuleSpec(mod_spec->method_names, mod_spec->method_specs, named_params,
+                            mod_spec->named_effects);
     }
     ffi::Array<ffi::Any> result =
         mod_node->ExportTVM(mod_spec, /*debug=*/true, /*allow_extern=*/false);
     return result[0].cast<IRModule>();
   } else {
-    // Extra-args case: use MethodSpec(mod_ref, ..., extra_args).
-    MethodSpec ms(mod_ref, arg_names, arg_specs, "plain", "plain", extra_args);
+    // Extra-args case: derive the ffi::Function via DeriveMethodFunction
+    // (which appends extra_args after the spec-driven inputs) and build
+    // MethodSpec with the primary (ffi::Function) constructor.
+    ffi::Function forward_fn =
+        DeriveMethodFunction(mod_ref, ffi::String(method_name), arg_names, extra_args);
+    MethodSpec ms(forward_fn, arg_names, arg_specs, "plain", "plain");
     ModuleSpec mod_spec(ffi::Array<ffi::String>{ffi::String(method_name)},
                         ffi::Array<ffi::Any>{ffi::Any(ms)}, named_params, {});
     ffi::Array<ffi::Any> result =
@@ -1471,7 +1475,7 @@ TEST(NNModules, TestKVCache) {
 //   _forward(self, hidden_states: Var,
 //            encoder_hidden_states: ffi::Optional<Var>)
 //
-// The generic MethodSpec(mod_ref, ...) constructor always unwraps each
+// DeriveMethodFunction always unwraps each
 // named arg as NNTensor → Var and passes it positionally.  That works for
 // the first argument but the second must be wrapped in ffi::Optional<Var>.
 //
@@ -1868,8 +1872,7 @@ TEST(NNModules, TestEmbedding2D) {
 //   _forward(self, sample: Var, condition: ffi::Optional<Var>)
 //
 // Same situation as Attention: the second arg must be Optional<Var>, so we
-// provide a custom forward_fn factory rather than using the generic
-// MethodSpec(mod_ref, ...) constructor.
+// provide a custom forward_fn factory rather than using DeriveMethodFunction.
 // ---------------------------------------------------------------------------
 static ffi::Function MakeTimestepEmbeddingForwardFn(runtime::ObjectRef mod_ref) {
   return ffi::TypedFunction<ffi::Any(ffi::Map<ffi::String, ffi::Any>)>(
@@ -2189,7 +2192,7 @@ TEST(NNModules, TestTimesteps) {
     // Always emitted even when x is already float32.
     Var timesteps = bb->Emit(relax::astype(x, f32), "timesteps");
 
-        // "timesteps1" ← expand_dims(timesteps, [1])
+    // "timesteps1" ← expand_dims(timesteps, [1])
     // Dedup: "timesteps" already used → suffix 1.
     Var timesteps1 = bb->Emit(relax::expand_dims(timesteps, {1}), "timesteps1");
 
