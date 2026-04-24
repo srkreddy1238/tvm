@@ -43,6 +43,30 @@
  *
  * ModuleSpec stores the pre-collected named_params so the C++ Exporter
  * does not need to call back into Python for parameter discovery.
+ *
+ * Module-aware ModuleSpec construction
+ * -------------------------------------
+ * The preferred C++ pattern for simple NNModule subclasses is:
+ *
+ *   // 1. Create the module
+ *   ReLUModule mod;
+ *   // 2. Build the per-method argument spec
+ *   ffi::Map<ffi::String, ffi::Any> forward_spec;
+ *   forward_spec.Set("x", ffi::Any(MakeSpecTensor({3, 3}, "float32")));
+ *   ffi::Map<ffi::String, ffi::Map<ffi::String, ffi::Any>> spec;
+ *   spec.Set("forward", forward_spec);
+ *   // 3. Create ModuleSpec — derives ffi::Function for each method via
+ *   //    reflection and builds MethodSpec objects internally.
+ *   ModuleSpec mod_spec(mod, spec, false);  // debug=false
+ *   // 4. Export
+ *   ffi::Array<ffi::Any> result =
+ *       mod->ExportTVM(mod_spec, false, false);  // debug=false, allow_extern=false
+ *   IRModule ir = result[0].cast<IRModule>();
+ *
+ * This removes the need for MethodSpec to hold or receive an NNModule
+ * object: ModuleSpec derives the ffi::Function for each method_name and
+ * passes it to MethodSpec.  The MethodSpec(mod_ref, ...) constructor is
+ * still available for advanced use-cases (e.g. Optional<Var> arguments).
  */
 
 #ifndef TVM_RELAX_FRONTEND_NN_SPEC_H_
@@ -283,11 +307,70 @@ class ModuleSpecNode : public runtime::Object {
 };
 class ModuleSpec : public runtime::ObjectRef {
  public:
+  /*! \brief Low-level constructor: caller supplies all fields explicitly. */
   explicit ModuleSpec(ffi::Array<ffi::String> method_names, ffi::Array<ffi::Any> method_specs,
                       ffi::Map<ffi::String, NNParameter> named_params,
                       ffi::Map<ffi::String, runtime::ObjectRef> named_effects);
+
+  /*!
+   * \brief Module-aware constructor (preferred for simple NNModule subclasses).
+   *
+   * Derives an ffi::Function for every method listed in \p spec by looking
+   * up the module's "_forward" method via ffi::reflection::GetMethod, then
+   * constructs a MethodSpec for each one.  Named parameters are collected
+   * automatically from \p mod via NNModuleNode::NamedParameters("").
+   *
+   * The spec dictionary maps each method name to an ordered map of
+   * argument-name → SpecTensor/SpecInt/SpecTuple:
+   *
+   *   ffi::Map<ffi::String, ffi::Any> fwd_spec;
+   *   fwd_spec.Set("x", ffi::Any(SpecTensor({3,3}, "float32")));
+   *   ffi::Map<ffi::String, ffi::Map<ffi::String,ffi::Any>> spec;
+   *   spec.Set("forward", fwd_spec);
+   *   ModuleSpec ms(mod, spec, false);  // debug=false
+   *
+   * \param mod    The NNModule whose "_forward" method is used for every
+   *               method listed in \p spec.
+   * \param spec   Map from method_name to (arg_name → arg_spec) map.
+   * \param debug  When true the effect_mode for each MethodSpec is set to
+   *               "plain"; when false it is set to "none".
+   */
+  explicit ModuleSpec(runtime::ObjectRef mod,
+                      ffi::Map<ffi::String, ffi::Map<ffi::String, ffi::Any>> spec,
+                      bool debug);
+
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(ModuleSpec, runtime::ObjectRef, ModuleSpecNode);
 };
+
+// ---------------------------------------------------------------------------
+// DeriveMethodFunction
+// ---------------------------------------------------------------------------
+
+/*!
+ * \brief Derive an ffi::Function for a single NNModule method.
+ *
+ * Looks up the "_forward" method on \p mod_ref's type via
+ * ffi::reflection::GetMethod and returns a closure with signature:
+ *   ffi::Any fn(ffi::Map<ffi::String, ffi::Any> named_args)
+ * where each value in named_args is an NNTensor whose underlying Var is
+ * extracted and passed positionally to _forward.
+ *
+ * This is the same logic that was previously embedded in the
+ * MethodSpec(mod_ref, ...) constructor, now factored out so that
+ * ModuleSpec can call it for each method without MethodSpec needing to
+ * hold a reference to the module.
+ *
+ * \param mod_ref    The NNModuleNode-derived object.
+ * \param arg_names  Ordered argument names (must match the arg_specs that
+ *                   will be passed to MethodSpec).
+ * \param extra_args Optional trailing arguments appended to the _forward
+ *                   call after the spec-driven inputs (default: empty).
+ * \return           An ffi::Function suitable for MethodSpec's primary
+ *                   constructor.
+ */
+ffi::Function DeriveMethodFunction(runtime::ObjectRef mod_ref,
+                                   ffi::Array<ffi::String> arg_names,
+                                   ffi::Array<ffi::Any> extra_args = {});
 
 }  // namespace nn
 }  // namespace frontend

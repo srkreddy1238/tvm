@@ -37,9 +37,29 @@
  *   - test_custom_module          (requires Python subclassing of nn.Module)
  *   - test_generate_parameters    (marked xfail in Python)
  *
- * Each test uses ExportModule / ExportToIRModule helpers (same pattern as
- * test_nn_ops.cc / test_nn_modules.cc) and asserts structural equality
- * against a manually-built expected IRModule.
+ * Each test uses the module-aware ModuleSpec constructor:
+ *
+ *   // 1. Create the module
+ *   ReLUModule mod;
+ *   // 2. Build the spec dictionary
+ *   ffi::Map<ffi::String, ffi::Any> forward_spec;
+ *   forward_spec.Set("x", ffi::Any(MakeSpecTensor({3, 3}, "float32")));
+ *   ffi::Map<ffi::String, ffi::Map<ffi::String, ffi::Any>> spec;
+ *   spec.Set("forward", forward_spec);
+ *   // 3. Create ModuleSpec from module and spec
+ *   ModuleSpec mod_spec(mod, spec, false);  // debug=false
+ *   // 4. Export via module->ExportTVM
+ *   ffi::Array<ffi::Any> result =
+ *       mod->ExportTVM(mod_spec, false, false);  // debug=false, allow_extern=false
+ *   IRModule actual = result[0].cast<IRModule>();
+ *
+ * This pattern removes the need for MethodSpec to hold or receive an
+ * NNModule object: ModuleSpec derives the ffi::Function for each
+ * method_name and passes it to MethodSpec.
+ *
+ * Tests that require custom forward lambdas (e.g. multi-function export,
+ * nested modules, duplicate-names) still build MethodSpec directly with
+ * an ffi::Function and assemble ModuleSpec from its low-level constructor.
  *
  * Design notes for the duplicate-names tests:
  *   The Python tests verify that the exporter deduplicates tir::Var objects
@@ -117,21 +137,7 @@ static void AssertStructEqual(const IRModule& actual, const IRModule& expected) 
       << "\n=== Actual ===\n" << actual << "\n=== Expected ===\n" << expected;
 }
 
-// Export via NNModuleNode::ExportTVM.
-static IRModule ExportModule(runtime::ObjectRef mod_ref, const std::string& method_name,
-                             ffi::Array<ffi::String> arg_names, ffi::Array<ffi::Any> arg_specs,
-                             ffi::Map<ffi::String, NNParameter> named_params = {},
-                             bool debug = false,
-                             const std::string& param_mode = "plain",
-                             const std::string& effect_mode = "plain") {
-  const NNModuleNode* mod_node = mod_ref.as<NNModuleNode>();
-  TVM_FFI_ICHECK(mod_node);
-  MethodSpec ms(mod_ref, arg_names, arg_specs, param_mode, effect_mode);
-  ModuleSpec mod_spec(ffi::Array<ffi::String>{ffi::String(method_name)},
-                      ffi::Array<ffi::Any>{ffi::Any(ms)}, named_params, {});
-  ffi::Array<ffi::Any> result = mod_node->ExportTVM(mod_spec, debug, /*allow_extern=*/false);
-  return result[0].cast<IRModule>();
-}
+
 
 // ===========================================================================
 // TestSimple
@@ -148,11 +154,23 @@ static IRModule ExportModule(runtime::ObjectRef mod_ref, const std::string& meth
 //       relu = R.nn.relu(x)
 //       R.output(relu)
 //     return relu
+//
+// Uses the module-aware ModuleSpec constructor:
+//   ModuleSpec(mod, spec, /*debug=*/false)
 // ===========================================================================
 TEST(NNExporter, TestSimple) {
+  // 1. Create the module
   ReLUModule mod;
-  IRModule actual = ExportModule(mod, "forward", {"x"},
-                                 {ffi::Any(MakeSpecTensor({3, 3}, "float32"))});
+  // 2. Build the spec dictionary
+  ffi::Map<ffi::String, ffi::Any> forward_spec;
+  forward_spec.Set("x", ffi::Any(MakeSpecTensor({3, 3}, "float32")));
+  ffi::Map<ffi::String, ffi::Map<ffi::String, ffi::Any>> spec;
+  spec.Set("forward", forward_spec);
+  // 3. Create ModuleSpec from module and spec
+  ModuleSpec mod_spec(mod, spec, /*debug=*/false);
+  // 4. Export via module->ExportTVM
+  ffi::Array<ffi::Any> result = mod->ExportTVM(mod_spec, /*debug=*/false, /*allow_extern=*/false);
+  IRModule actual = result[0].cast<IRModule>();
 
   BlockBuilder bb = BlockBuilder::Create(std::nullopt);
   {
@@ -191,12 +209,23 @@ TEST(NNExporter, TestSimple) {
 //     return output
 //
 //   def _initialize_effect() -> R.Tuple(R.Object): ...
+//
+// Uses the module-aware ModuleSpec constructor with debug=true:
+//   ModuleSpec(mod, spec, /*debug=*/true)
 // ===========================================================================
 TEST(NNExporter, TestDebugEffect) {
+  // 1. Create the module
   ReLUModule mod;
-  IRModule actual = ExportModule(mod, "forward", {"x"},
-                                 {ffi::Any(MakeSpecTensor({3, 3}, "float32"))},
-                                 {}, /*debug=*/true);
+  // 2. Build the spec dictionary
+  ffi::Map<ffi::String, ffi::Any> forward_spec;
+  forward_spec.Set("x", ffi::Any(MakeSpecTensor({3, 3}, "float32")));
+  ffi::Map<ffi::String, ffi::Map<ffi::String, ffi::Any>> spec;
+  spec.Set("forward", forward_spec);
+  // 3. Create ModuleSpec with debug=true (effect_mode="plain")
+  ModuleSpec mod_spec(mod, spec, /*debug=*/true);
+  // 4. Export via module->ExportTVM with debug=true
+  ffi::Array<ffi::Any> result = mod->ExportTVM(mod_spec, /*debug=*/true, /*allow_extern=*/false);
+  IRModule actual = result[0].cast<IRModule>();
 
   BlockBuilder bb = BlockBuilder::Create(std::nullopt);
   EmitInitEffect(bb);
@@ -235,16 +264,27 @@ TEST(NNExporter, TestDebugEffect) {
 //       relu = R.nn.relu(x)
 //       R.output(relu)
 //     return relu
+//
+// Uses the module-aware ModuleSpec constructor with a symbolic SpecTensor.
 // ===========================================================================
 TEST(NNExporter, TestDynamicShape) {
+  // 1. Create the module
   ReLUModule mod;
-
+  // 2. Build the spec dictionary with a symbolic batch_size dimension
   ffi::Array<ffi::Any> spec_shape;
   spec_shape.push_back(ffi::Any(ffi::String("batch_size")));
   spec_shape.push_back(ffi::Any(int64_t(8)));
   SpecTensor x_spec(spec_shape, "float32");
 
-  IRModule actual = ExportModule(mod, "forward", {"x"}, {ffi::Any(x_spec)});
+  ffi::Map<ffi::String, ffi::Any> forward_spec;
+  forward_spec.Set("x", ffi::Any(x_spec));
+  ffi::Map<ffi::String, ffi::Map<ffi::String, ffi::Any>> spec;
+  spec.Set("forward", forward_spec);
+  // 3. Create ModuleSpec from module and spec
+  ModuleSpec mod_spec(mod, spec, /*debug=*/false);
+  // 4. Export via module->ExportTVM
+  ffi::Array<ffi::Any> result = mod->ExportTVM(mod_spec, /*debug=*/false, /*allow_extern=*/false);
+  IRModule actual = result[0].cast<IRModule>();
 
   BlockBuilder bb = BlockBuilder::Create(std::nullopt);
   {
@@ -284,6 +324,10 @@ TEST(NNExporter, TestDynamicShape) {
 //
 // The same symbolic name "batch_size" in two separate MethodSpecs produces
 // two independent tir::Vars (one per function), which is the correct behaviour.
+//
+// This test uses custom ffi::Function lambdas (the module has two distinct
+// methods that are not registered as "_forward" on a single type) and
+// assembles ModuleSpec via its low-level constructor.
 // ===========================================================================
 TEST(NNExporter, TestDynamicShapeInMultipleFunctions) {
   static const ffi::Function op_relu =
@@ -291,6 +335,8 @@ TEST(NNExporter, TestDynamicShapeInMultipleFunctions) {
   static const ffi::Function op_silu =
       ffi::Function::GetGlobal("relax.frontend.nn.op.silu").value();
 
+  // Custom forward lambdas: each receives named_args and calls the
+  // corresponding op directly.  No NNModule object is held.
   ffi::TypedFunction<ffi::Any(ffi::Map<ffi::String, ffi::Any>)> relu_fn =
       [](ffi::Map<ffi::String, ffi::Any> args) -> ffi::Any {
     NNTensor x = args.at("x").cast<NNTensor>();
@@ -307,14 +353,19 @@ TEST(NNExporter, TestDynamicShapeInMultipleFunctions) {
   spec_shape.push_back(ffi::Any(int64_t(8)));
   SpecTensor x_spec(spec_shape, "float32");
 
-    MethodSpec ms_relu(relu_fn, {"x"}, {ffi::Any(x_spec)}, "plain", "none");
-  MethodSpec ms_silu(silu_fn, {"x"}, {ffi::Any(x_spec)}, "plain", "none");
+  // Build MethodSpec objects using the primary (ffi::Function) constructor:
+  // MethodSpec never holds an NNModule — it only receives the derived function.
+  MethodSpec ms_relu(relu_fn.packed(), {"x"}, {ffi::Any(x_spec)}, "plain", "none");
+  MethodSpec ms_silu(silu_fn.packed(), {"x"}, {ffi::Any(x_spec)}, "plain", "none");
+
+  // Assemble ModuleSpec via the low-level constructor.
   ModuleSpec mod_spec(
       ffi::Array<ffi::String>{"forward_relu", "forward_silu"},
-      ffi::Array<ffi::Any>{ffi::Any(ms_relu), ffi::Any(ms_silu)}, {}, {});
-  
-    
-  // Create a minimal NNModule wrapper and use ExportTVM
+      ffi::Array<ffi::Any>{ffi::Any(ms_relu), ffi::Any(ms_silu)},
+      /*named_params=*/{}, /*named_effects=*/{});
+
+  // A bare NNModule is used only as the ExportTVM entry-point;
+  // it holds no parameters and no module-specific logic.
   NNModule mod;
   ffi::Array<ffi::Any> result = mod->ExportTVM(mod_spec, /*debug=*/false, /*allow_extern=*/false);
   IRModule actual = result[0].cast<IRModule>();
@@ -357,6 +408,11 @@ TEST(NNExporter, TestDynamicShapeInMultipleFunctions) {
 // Expected function signature (debug=False, param_mode="plain"):
 //   forward(x, gate_proj_weight, up_proj_weight, down_proj_weight)
 //   num_input = 1
+//
+// This test uses a custom forward lambda that composes three Linear sub-modules.
+// ModuleSpec is assembled via its low-level constructor because the forward
+// function is not a simple "_forward" dispatch on a single module type.
+// MethodSpec receives the derived ffi::Function directly — no NNModule held.
 // ===========================================================================
 TEST(NNExporter, TestExportNestedModule) {
   const int64_t H = 4096;
@@ -369,6 +425,7 @@ TEST(NNExporter, TestExportNestedModule) {
   LinearModule down_proj = MakeLinear(ffi::Any(I), ffi::Any(H), false,
                                       ffi::Optional<ffi::String>("float16"), std::nullopt);
 
+  // Collect named parameters from each sub-module with their dotted prefixes.
   ffi::Map<ffi::String, NNParameter> named_params;
   for (const auto& [k, v] : gate_proj.get()->NamedParameters("gate_proj"))
     named_params.Set(k, v);
@@ -382,9 +439,12 @@ TEST(NNExporter, TestExportNestedModule) {
   static const ffi::Function op_mul =
       ffi::Function::GetGlobal("relax.frontend.nn.op.multiply").value();
 
+  // Custom forward lambda: composes gate_proj, up_proj, down_proj.
+  // ModuleSpec derives this ffi::Function and passes it to MethodSpec;
+  // MethodSpec never holds a reference to any NNModule.
   ffi::TypedFunction<ffi::Any(ffi::Map<ffi::String, ffi::Any>)> forward_fn =
       [gate_proj, up_proj, down_proj](ffi::Map<ffi::String, ffi::Any> args) -> ffi::Any {
-        NNTensor x    = args.at("x").cast<NNTensor>();
+    NNTensor x    = args.at("x").cast<NNTensor>();
     NNTensor gate = NNTensor(gate_proj.get()->Forward(x->expr));
     NNTensor up   = NNTensor(up_proj.get()->Forward(x->expr));
     ffi::Any silu_gate = op_silu(gate->expr, ffi::String("silu"));
@@ -399,11 +459,18 @@ TEST(NNExporter, TestExportNestedModule) {
   spec_shape.push_back(ffi::Any(H));
   SpecTensor x_spec(spec_shape, "float16");
 
-    MethodSpec ms(forward_fn, {"x"}, {ffi::Any(x_spec)}, "plain", "none");
-  ModuleSpec mod_spec({"forward"}, {ffi::Any(ms)}, named_params, {});
-  
-    
-  // Create a minimal NNModule wrapper and use ExportTVM
+  // Build MethodSpec with the primary (ffi::Function) constructor.
+  // MethodSpec does not hold or receive an NNModule object.
+  MethodSpec ms(forward_fn.packed(), {"x"}, {ffi::Any(x_spec)}, "plain", "none");
+
+  // Assemble ModuleSpec via the low-level constructor, supplying the
+  // pre-collected named_params from the three sub-modules.
+  ModuleSpec mod_spec(
+      ffi::Array<ffi::String>{"forward"},
+      ffi::Array<ffi::Any>{ffi::Any(ms)},
+      named_params, /*named_effects=*/{});
+
+  // A bare NNModule is used only as the ExportTVM entry-point.
   NNModule mod;
   ffi::Array<ffi::Any> result = mod->ExportTVM(mod_spec, /*debug=*/false, /*allow_extern=*/false);
   IRModule actual = result[0].cast<IRModule>();
@@ -456,16 +523,26 @@ TEST(NNExporter, TestExportNestedModule) {
 //   forward(x: (1,4)f32, _io: Object, weight: (n,4)f32, bias: (n,)f32)
 //   num_input = 2
 //   permute_dims → matmul → add → (add, (_io,))
+//
+// Uses the module-aware ModuleSpec constructor with debug=true.
+// The named_params (which carry the tir::Var "n" in the weight shape) are
+// collected automatically from the module by ModuleSpec.
 // ===========================================================================
 TEST(NNExporter, TestLinearDynamicShape) {
+  // 1. Create the module with a symbolic out_features dimension
   tir::Var n("n", DataType::Int(64));
   LinearModule mod = MakeLinear(ffi::Any(int64_t(4)), ffi::Any(PrimExpr(n)),
                                 /*bias=*/true, std::nullopt, std::nullopt);
-  ffi::Map<ffi::String, NNParameter> named_params = mod.get()->NamedParameters("");
-
-  IRModule actual = ExportModule(mod, "forward", {"x"},
-                                 {ffi::Any(MakeSpecTensor({1, 4}, "float32"))},
-                                 named_params, /*debug=*/true);
+  // 2. Build the spec dictionary
+  ffi::Map<ffi::String, ffi::Any> forward_spec;
+  forward_spec.Set("x", ffi::Any(MakeSpecTensor({1, 4}, "float32")));
+  ffi::Map<ffi::String, ffi::Map<ffi::String, ffi::Any>> spec;
+  spec.Set("forward", forward_spec);
+  // 3. Create ModuleSpec — named_params (with tir::Var "n") are auto-collected
+  ModuleSpec mod_spec(mod, spec, /*debug=*/true);
+  // 4. Export via module->ExportTVM with debug=true
+  ffi::Array<ffi::Any> result = mod->ExportTVM(mod_spec, /*debug=*/true, /*allow_extern=*/false);
+  IRModule actual = result[0].cast<IRModule>();
 
   BlockBuilder bb = BlockBuilder::Create(std::nullopt);
   EmitInitEffect(bb);
@@ -564,12 +641,20 @@ static IRModule ExportDuplicateNamesModel(tir::Var hs, tir::Var is_) {
   spec_shape.push_back(ffi::Any(int64_t(1024)));
   SpecTensor state_spec(spec_shape, "float32");
 
-  // arg_specs covers only the user input "state"; named params are injected
+    // arg_specs covers only the user input "state"; named params are injected
   // automatically by the exporter from named_params.
-      MethodSpec ms(forward_fn, {"state"}, {ffi::Any(state_spec)}, "plain", "none");
-  ModuleSpec mod_spec({"forward"}, {ffi::Any(ms)}, named_params, {});
-  
-  // Create a minimal NNModule wrapper and use ExportTVM
+  // Build MethodSpec with the primary (ffi::Function) constructor:
+  // MethodSpec does not hold or receive an NNModule object.
+  MethodSpec ms(forward_fn.packed(), {"state"}, {ffi::Any(state_spec)}, "plain", "none");
+
+  // Assemble ModuleSpec via the low-level constructor, supplying the
+  // pre-built named_params (which carry the tir::Var shapes).
+  ModuleSpec mod_spec(
+      ffi::Array<ffi::String>{"forward"},
+      ffi::Array<ffi::Any>{ffi::Any(ms)},
+      named_params, /*named_effects=*/{});
+
+  // A bare NNModule is used only as the ExportTVM entry-point.
   NNModule mod;
   ffi::Array<ffi::Any> result = mod->ExportTVM(mod_spec, /*debug=*/false, /*allow_extern=*/false);
   return result[0].cast<IRModule>();

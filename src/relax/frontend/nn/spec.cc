@@ -174,6 +174,81 @@ ModuleSpec::ModuleSpec(ffi::Array<ffi::String> method_names, ffi::Array<ffi::Any
 }
 
 // ---------------------------------------------------------------------------
+// DeriveMethodFunction
+// ---------------------------------------------------------------------------
+
+ffi::Function DeriveMethodFunction(runtime::ObjectRef mod_ref,
+                                   ffi::Array<ffi::String> arg_names,
+                                   ffi::Array<ffi::Any> extra_args) {
+  TVM_FFI_ICHECK(mod_ref.defined() && mod_ref->IsInstance<NNModuleNode>())
+      << "DeriveMethodFunction: mod_ref must be an NNModuleNode, got "
+      << (mod_ref.defined() ? mod_ref->GetTypeKey() : "null");
+
+  ffi::TypedFunction<ffi::Any(ffi::Map<ffi::String, ffi::Any>)> forward_fn =
+      [mod_ref, arg_names, extra_args](ffi::Map<ffi::String, ffi::Any> named_args) -> ffi::Any {
+    namespace refl = tvm::ffi::reflection;
+    std::string type_key = mod_ref->GetTypeKey();
+    ffi::Function fwd = refl::GetMethod(type_key, "_forward");
+    TVM_FFI_ICHECK(fwd.defined()) << "DeriveMethodFunction: module '" << type_key
+                                  << "' has no '_forward' method";
+
+    std::vector<ffi::AnyView> call_args;
+    call_args.push_back(ffi::AnyView(mod_ref));
+    for (const ffi::String& name : arg_names) {
+      ffi::Any val = named_args.at(name);
+      NNTensor t = val.cast<NNTensor>();
+      call_args.push_back(ffi::AnyView(t->expr));
+    }
+    for (const ffi::Any& ea : extra_args) call_args.push_back(ffi::AnyView(ea));
+
+    ffi::Any rv;
+    fwd.CallPacked(ffi::PackedArgs(call_args.data(), call_args.size()), &rv);
+    return rv;
+  };
+
+  return forward_fn.packed();
+}
+
+// Module-aware ModuleSpec constructor.
+ModuleSpec::ModuleSpec(runtime::ObjectRef mod,
+                       ffi::Map<ffi::String, ffi::Map<ffi::String, ffi::Any>> spec,
+                       bool debug) {
+  TVM_FFI_ICHECK(mod.defined() && mod->IsInstance<NNModuleNode>())
+      << "ModuleSpec(mod, spec, debug): mod must be an NNModuleNode, got "
+      << (mod.defined() ? mod->GetTypeKey() : "null");
+
+  const NNModuleNode* mod_node = mod.as<NNModuleNode>();
+  ffi::Map<ffi::String, NNParameter> named_params = mod_node->NamedParameters("");
+  ffi::String effect_mode = debug ? ffi::String("plain") : ffi::String("none");
+
+  ffi::Array<ffi::String> method_names;
+  ffi::Array<ffi::Any> method_specs;
+
+  for (const auto& [method_name, arg_spec_map] : spec) {
+    // Collect ordered arg_names and arg_specs from the per-method map.
+    ffi::Array<ffi::String> arg_names;
+    ffi::Array<ffi::Any> arg_specs;
+    for (const auto& [arg_name, arg_spec] : arg_spec_map) {
+      arg_names.push_back(arg_name);
+      arg_specs.push_back(arg_spec);
+    }
+
+    // Derive the ffi::Function for this method from the module.
+    ffi::Function forward_fn = DeriveMethodFunction(mod, arg_names);
+
+    // Build the MethodSpec using the primary (ffi::Function) constructor.
+    MethodSpec ms(forward_fn, arg_names, arg_specs, "plain", effect_mode);
+
+    method_names.push_back(method_name);
+    method_specs.push_back(ffi::Any(ms));
+  }
+
+    data_ = ffi::make_object<ModuleSpecNode>(std::move(method_names), std::move(method_specs),
+                                           std::move(named_params),
+                                           ffi::Map<ffi::String, runtime::ObjectRef>{});
+}
+
+// ---------------------------------------------------------------------------
 // Registration
 // ---------------------------------------------------------------------------
 

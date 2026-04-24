@@ -53,11 +53,35 @@
  *   3. Builds the expected IRModule manually using BlockBuilder.
  *   4. Asserts structural equality between actual and expected.
  *
- * The pattern mirrors test_nn_ops.cc / test_nn_debug.cc exactly:
- *   - ExportDebug() wraps the module's Forward() in a MethodSpec and
- *     calls NNModuleNode::ExportTVM(spec, debug=true).
- *   - EmitInitEffect() / EmitDebugOutput() / AssertStructEqual() are the
- *     same shared helpers used in the other test files.
+ * Export pattern
+ * --------------
+ * The preferred pattern for simple modules (ReLU, SiLU, Linear, ...) is the
+ * module-aware ModuleSpec constructor, which derives the ffi::Function for
+ * each method via reflection and passes it to MethodSpec internally.
+ * MethodSpec never holds or receives an NNModule object:
+ *
+ *   // 1. Create the module
+ *   ReLUModule mod;
+ *   // 2. Build the spec dictionary
+ *   ffi::Map<ffi::String, ffi::Any> forward_spec;
+ *   forward_spec.Set("x", ffi::Any(MakeSpecTensor({3, 3}, "float32")));
+ *   ffi::Map<ffi::String, ffi::Map<ffi::String, ffi::Any>> spec;
+ *   spec.Set("forward", forward_spec);
+ *   // 3. Create ModuleSpec from module and spec (debug=true -> effect_mode="plain")
+ *   ModuleSpec mod_spec(mod, spec, true);
+ *   // 4. Export via module->ExportTVM
+ *   ffi::Array<ffi::Any> result =
+ *       mod->ExportTVM(mod_spec, true, false);
+ *   IRModule actual = result[0].cast<IRModule>();
+ *
+ * For modules whose _forward takes extra arguments beyond the spec-driven
+ * inputs (GroupNorm: channel_axis + axes; Embedding: out_shape_if_nd) the
+ * ExportDebug helper still uses MethodSpec(mod_ref, ..., extra_args) which
+ * calls DeriveMethodFunction internally.
+ *
+ * For modules with Optional<Var> arguments (Attention, TimestepEmbedding)
+ * a custom forward_fn factory is still used (MakeAttentionForwardFn, etc.)
+ * and ModuleSpec is assembled via its low-level constructor.
  */
 
 #include <gtest/gtest.h>
@@ -192,13 +216,31 @@ static IRModule ExportDebug(runtime::ObjectRef mod_ref, const std::string& metho
   const NNModuleNode* mod_node = mod_ref.as<NNModuleNode>();
   TVM_FFI_ICHECK(mod_node != nullptr) << "ExportDebug: object is not an NNModuleNode";
 
-  // MethodSpec(mod_ref, ...) builds the forward_fn internally via reflection.
-  MethodSpec ms(mod_ref, arg_names, arg_specs, "plain", "plain", extra_args);
-  ModuleSpec mod_spec(ffi::Array<ffi::String>{ffi::String(method_name)},
-                      ffi::Array<ffi::Any>{ffi::Any(ms)}, named_params, {});
-  ffi::Array<ffi::Any> result =
-      mod_node->ExportTVM(mod_spec, /*debug=*/true, /*allow_extern=*/false);
-  return result[0].cast<IRModule>();
+  if (extra_args.empty()) {
+    // Simple case: use the module-aware ModuleSpec constructor.
+    ffi::Map<ffi::String, ffi::Any> method_arg_spec;
+    TVM_FFI_ICHECK_EQ(arg_names.size(), arg_specs.size());
+    for (size_t i = 0; i < arg_names.size(); ++i)
+      method_arg_spec.Set(arg_names[i], arg_specs[i]);
+    ffi::Map<ffi::String, ffi::Map<ffi::String, ffi::Any>> spec;
+    spec.Set(ffi::String(method_name), method_arg_spec);
+    ModuleSpec mod_spec(mod_ref, spec, /*debug=*/true);
+    if (!named_params.empty()) {
+      mod_spec = ModuleSpec(mod_spec->method_names, mod_spec->method_specs,
+                            named_params, mod_spec->named_effects);
+    }
+    ffi::Array<ffi::Any> result =
+        mod_node->ExportTVM(mod_spec, /*debug=*/true, /*allow_extern=*/false);
+    return result[0].cast<IRModule>();
+  } else {
+    // Extra-args case: use MethodSpec(mod_ref, ..., extra_args).
+    MethodSpec ms(mod_ref, arg_names, arg_specs, "plain", "plain", extra_args);
+    ModuleSpec mod_spec(ffi::Array<ffi::String>{ffi::String(method_name)},
+                        ffi::Array<ffi::Any>{ffi::Any(ms)}, named_params, {});
+    ffi::Array<ffi::Any> result =
+        mod_node->ExportTVM(mod_spec, /*debug=*/true, /*allow_extern=*/false);
+    return result[0].cast<IRModule>();
+  }
 }
 
 // ===========================================================================
@@ -1281,18 +1323,16 @@ TEST(NNModules, TestKVCache) {
   ffi::Array<ffi::String> arg_names{"x"};
   ffi::Array<ffi::Any> arg_specs{ffi::Any(MakeSpecTensor({2, 4}, "float32"))};
 
-  MethodSpec ms(forward_fn, arg_names, arg_specs, "plain", "plain");
+  MethodSpec ms(forward_fn.packed(), arg_names, arg_specs, "plain", "plain");
 
   // named_effects: {"cache": kv}
   ffi::Map<ffi::String, runtime::ObjectRef> named_effects;
   named_effects.Set("cache", kv);
 
-    ModuleSpec mod_spec(ffi::Array<ffi::String>{ffi::String("forward")},
+  ModuleSpec mod_spec(ffi::Array<ffi::String>{ffi::String("forward")},
                       ffi::Array<ffi::Any>{ffi::Any(ms)},
                       /*named_params=*/{}, named_effects);
 
-  
-  // Create a minimal NNModule wrapper and use ExportTVM
   NNModule mod;
   ffi::Array<ffi::Any> result = mod->ExportTVM(mod_spec, /*debug=*/true, /*allow_extern=*/false);
   IRModule actual = result[0].cast<IRModule>();
@@ -1527,7 +1567,9 @@ TEST(NNModules, TestAttention) {
   ffi::Map<ffi::String, NNParameter> named_params = mod.get()->NamedParameters("");
 
   // AttentionModuleNode::_forward takes Optional<Var> for encoder_hidden_states,
-  // so we supply a custom forward_fn instead of using the generic mod_ref constructor.
+  // so we supply a custom forward_fn instead of using the module-aware
+  // ModuleSpec constructor.  MethodSpec receives the derived ffi::Function
+  // directly -- no NNModule object is held.
   ffi::Array<ffi::String> attn_arg_names{"hidden_states", "encoder_hidden_states"};
   ffi::Array<ffi::Any> attn_arg_specs{ffi::Any(MakeSpecTensor({2, 4096, 640}, "float32")),
                                       ffi::Any(MakeSpecTensor({2, 77, 2048}, "float32"))};
@@ -1916,7 +1958,9 @@ TEST(NNModules, TestTimestepEmbedding) {
   ffi::Map<ffi::String, NNParameter> named_params = mod.get()->NamedParameters("");
 
   // TimestepEmbeddingModuleNode::_forward takes Optional<Var> for condition,
-  // so we supply a custom forward_fn instead of using the generic mod_ref constructor.
+  // so we supply a custom forward_fn instead of using the module-aware
+  // ModuleSpec constructor.  MethodSpec receives the derived ffi::Function
+  // directly -- no NNModule object is held.
   ffi::Array<ffi::String> tse_arg_names{"sample", "condition"};
   ffi::Array<ffi::Any> tse_arg_specs{ffi::Any(MakeSpecTensor({32, 32}, "float32")),
                                      ffi::Any(MakeSpecTensor({32, 16}, "float32"))};
@@ -2145,7 +2189,7 @@ TEST(NNModules, TestTimesteps) {
     // Always emitted even when x is already float32.
     Var timesteps = bb->Emit(relax::astype(x, f32), "timesteps");
 
-    // "timesteps1" ← expand_dims(timesteps, [1])
+        // "timesteps1" ← expand_dims(timesteps, [1])
     // Dedup: "timesteps" already used → suffix 1.
     Var timesteps1 = bb->Emit(relax::expand_dims(timesteps, {1}), "timesteps1");
 
@@ -2215,6 +2259,9 @@ TEST(NNModules, TestTimesteps) {
 // ExportTupleInputDebug
 //
 // Export helper for modules whose single input "x" is a SpecTuple.
+// Uses a custom forward lambda (SpecTuple inputs are not dispatched via
+// "_forward" reflection), so MethodSpec is built with the primary
+// (ffi::Function) constructor.  MethodSpec never holds an NNModule.
 // ---------------------------------------------------------------------------
 static IRModule ExportTupleInputDebug(
     std::function<ffi::Array<ffi::Any>(NNTensor, NNTensor)> body_fn, SpecTensor elem_spec,
@@ -2234,13 +2281,17 @@ static IRModule ExportTupleInputDebug(
   ffi::Array<ffi::String> arg_names{"x"};
   ffi::Array<ffi::Any> arg_specs{ffi::Any(x_spec)};
 
-    MethodSpec ms(forward_fn, arg_names, arg_specs, "plain", "plain");
+  // Build MethodSpec with the primary (ffi::Function) constructor.
+  // MethodSpec does not hold or receive an NNModule object.
+  MethodSpec ms(forward_fn.packed(), arg_names, arg_specs, "plain", "plain");
+
+  // Assemble ModuleSpec via the low-level constructor.
   ModuleSpec mod_spec(ffi::Array<ffi::String>{ffi::String("forward")},
-                                            ffi::Array<ffi::Any>{ffi::Any(ms)},
+                      ffi::Array<ffi::Any>{ffi::Any(ms)},
                       /*named_params=*/{},
                       /*named_effects=*/{});
-  
-  // Create a minimal NNModule wrapper and use ExportTVM
+
+  // A bare NNModule is used only as the ExportTVM entry-point.
   NNModule mod;
   ffi::Array<ffi::Any> result = mod->ExportTVM(mod_spec, /*debug=*/true, /*allow_extern=*/false);
   return result[0].cast<IRModule>();
