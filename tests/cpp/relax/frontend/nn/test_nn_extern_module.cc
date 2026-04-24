@@ -89,7 +89,8 @@ namespace testing {
 
 // Path to the shared extern module source (relative to workspace root).
 static std::filesystem::path ExternModuleSourcePath() {
-  return std::filesystem::path("tests") / "python" / "relax" / "frontend_nn_extern_module.cc";
+  return std::filesystem::path("tests") / "python" / "relax" /
+         "frontend_nn_extern_module.cc";
 }
 
 // Build a placeholder NNTensor Var with the given struct_info (used as the
@@ -152,7 +153,8 @@ static IRModule BuildExpectedIR() {
     static const Op& call_dps = Op::Get("relax.call_dps_packed");
     Expr func_name = relax::StringImm("ext_scalar_add");
     Expr args_tuple = relax::Tuple({a, b});
-    Call call(call_dps, {func_name, args_tuple}, Attrs(), ffi::Array<StructInfo>{scalar_sinfo});
+    Call call(call_dps, {func_name, args_tuple}, Attrs(),
+              ffi::Array<StructInfo>{scalar_sinfo});
     Var ext_sa = bb->Emit(call, "ext_scalar_add");
     Var gv = bb->EmitOutput(ext_sa, "gv");
     BindingBlock df = bb->EndBlock();
@@ -169,9 +171,12 @@ static IRModule BuildExpectedIR() {
     tir::Var x("x", DataType::Int(64));
     tir::Var y("y", DataType::Int(64));
     tir::Var z("z", DataType::Int(64));
-    TensorStructInfo a_sinfo(ShapeExpr(ffi::Array<PrimExpr>{x, y, I64(1)}), f32);
-    TensorStructInfo b_sinfo(ShapeExpr(ffi::Array<PrimExpr>{y, z, I64(5)}), f32);
-    TensorStructInfo out_sinfo(ShapeExpr(ffi::Array<PrimExpr>{x, y, z, I64(9)}), f32);
+    TensorStructInfo a_sinfo(
+        ShapeExpr(ffi::Array<PrimExpr>{x, y, I64(1)}), f32);
+    TensorStructInfo b_sinfo(
+        ShapeExpr(ffi::Array<PrimExpr>{y, z, I64(5)}), f32);
+    TensorStructInfo out_sinfo(
+        ShapeExpr(ffi::Array<PrimExpr>{x, y, z, I64(9)}), f32);
     Var a("a", a_sinfo);
     Var b("b", b_sinfo);
     ffi::Array<Var> params{a, b};
@@ -181,7 +186,8 @@ static IRModule BuildExpectedIR() {
     static const Op& call_dps = Op::Get("relax.call_dps_packed");
     Expr func_name = relax::StringImm("ext_test_sym");
     Expr args_tuple = relax::Tuple({a, b});
-    Call call(call_dps, {func_name, args_tuple}, Attrs(), ffi::Array<StructInfo>{out_sinfo});
+    Call call(call_dps, {func_name, args_tuple}, Attrs(),
+              ffi::Array<StructInfo>{out_sinfo});
     Var ext_ts = bb->Emit(call, "ext_test_sym");
     Var gv1 = bb->EmitOutput(ext_ts, "gv1");
     BindingBlock df = bb->EndBlock();
@@ -255,13 +261,15 @@ static ModuleSpec BuildExternModuleSpec() {
   b_sym_shape.push_back(ffi::Any(int64_t(5)));
   SpecTensor b_sym_spec(b_sym_shape, "float32");
 
-  MethodSpec ms_scalar(scalar_add_fn, {"a", "b"}, {ffi::Any(scalar_spec), ffi::Any(scalar_spec)},
-                       "plain", "none");
-  MethodSpec ms_sym(test_sym_fn, {"a", "b"}, {ffi::Any(a_sym_spec), ffi::Any(b_sym_spec)}, "plain",
-                    "none");
+  MethodSpec ms_scalar(scalar_add_fn, {"a", "b"},
+                       {ffi::Any(scalar_spec), ffi::Any(scalar_spec)}, "plain", "none");
+  MethodSpec ms_sym(test_sym_fn, {"a", "b"},
+                    {ffi::Any(a_sym_spec), ffi::Any(b_sym_spec)}, "plain", "none");
 
-  return ModuleSpec(ffi::Array<ffi::String>{"scalar_add", "test_sym"},
-                    ffi::Array<ffi::Any>{ffi::Any(ms_scalar), ffi::Any(ms_sym)}, {}, {});
+  return ModuleSpec(
+      ffi::Array<ffi::String>{"scalar_add", "test_sym"},
+      ffi::Array<ffi::Any>{ffi::Any(ms_scalar), ffi::Any(ms_sym)},
+      {}, {});
 }
 
 // ===========================================================================
@@ -298,8 +306,12 @@ static ffi::Module LoadAndInitVM(const ffi::Module& compiled) {
 
   Device cpu{kDLCPU, 0};
   std::vector<ffi::AnyView> init_args = {
-      cpu.device_type, static_cast<int>(cpu.device_id), memory::AllocatorType::kPooled,
-      cpu.device_type, static_cast<int>(cpu.device_id), memory::AllocatorType::kPooled,
+      cpu.device_type,
+      static_cast<int>(cpu.device_id),
+      memory::AllocatorType::kPooled,
+      cpu.device_type,
+      static_cast<int>(cpu.device_id),
+      memory::AllocatorType::kPooled,
   };
   ffi::Any rv;
   vm->GetFunction("vm_initialization")
@@ -311,7 +323,7 @@ static ffi::Module LoadAndInitVM(const ffi::Module& compiled) {
 // Invoke a no-effect VM function by name with the given tensor inputs and
 // return the output tensor.  Uses the stateful set_input/invoke/get_output API.
 static runtime::Tensor InvokeVM(const ffi::Module& vm, const std::string& func_name,
-                                std::vector<runtime::Tensor> inputs) {
+                                 std::vector<runtime::Tensor> inputs) {
   // set_input(func_name, *inputs)
   std::vector<ffi::AnyView> set_args;
   set_args.push_back(ffi::String(func_name));
@@ -342,10 +354,10 @@ static void RunAndVerify(const ffi::Module& compiled) {
 
   // --- scalar_add: 1.0 + 3.0 = 4.0 ---
   {
-    runtime::Tensor a =
-        runtime::Tensor::Empty(ffi::Shape{}, DLDataType{kDLFloat, 32, 1}, cpu, std::nullopt);
-    runtime::Tensor b =
-        runtime::Tensor::Empty(ffi::Shape{}, DLDataType{kDLFloat, 32, 1}, cpu, std::nullopt);
+    runtime::Tensor a = runtime::Tensor::Empty(
+        ffi::Shape{}, DLDataType{kDLFloat, 32, 1}, cpu, std::nullopt);
+    runtime::Tensor b = runtime::Tensor::Empty(
+        ffi::Shape{}, DLDataType{kDLFloat, 32, 1}, cpu, std::nullopt);
     float va = 1.0f, vb = 3.0f;
     a.CopyFromBytes(&va, sizeof(float));
     b.CopyFromBytes(&vb, sizeof(float));
@@ -357,10 +369,10 @@ static void RunAndVerify(const ffi::Module& compiled) {
 
   // --- test_sym: shapes (3,4,1) x (4,2,5) -> (3,4,2,9) ---
   {
-    runtime::Tensor a =
-        runtime::Tensor::Empty(ffi::Shape{3, 4, 1}, DLDataType{kDLFloat, 32, 1}, cpu, std::nullopt);
-    runtime::Tensor b =
-        runtime::Tensor::Empty(ffi::Shape{4, 2, 5}, DLDataType{kDLFloat, 32, 1}, cpu, std::nullopt);
+    runtime::Tensor a = runtime::Tensor::Empty(
+        ffi::Shape{3, 4, 1}, DLDataType{kDLFloat, 32, 1}, cpu, std::nullopt);
+    runtime::Tensor b = runtime::Tensor::Empty(
+        ffi::Shape{4, 2, 5}, DLDataType{kDLFloat, 32, 1}, cpu, std::nullopt);
     runtime::Tensor c = InvokeVM(vm, "test_sym", {a, b});
     ASSERT_EQ(c.ndim(), 4);
     EXPECT_EQ(c.shape()[0], 3);
@@ -386,19 +398,21 @@ TEST(NNExternModule, TestExternObject) {
 
   // Build the symbols map for the extern functions.
   ffi::Map<ffi::String, ffi::Function> symbols;
-  symbols.Set(
-      "ext_scalar_add", ffi::Function([](ffi::PackedArgs args, ffi::Any* rv) {
-        *rv = ffi::Any(NNTensor(
-            Var("out", TensorStructInfo(ShapeExpr(ffi::Array<PrimExpr>{}), DataType::Float(32)))));
-      }));
-  symbols.Set("ext_test_sym", ffi::Function([](ffi::PackedArgs args, ffi::Any* rv) {
+  symbols.Set("ext_scalar_add",
+              ffi::Function([](ffi::PackedArgs args, ffi::Any* rv) {
+                *rv = ffi::Any(NNTensor(
+                    Var("out", TensorStructInfo(
+                        ShapeExpr(ffi::Array<PrimExpr>{}), DataType::Float(32)))));
+              }));
+  symbols.Set("ext_test_sym",
+              ffi::Function([](ffi::PackedArgs args, ffi::Any* rv) {
                 NNTensor a = args[0].cast<NNTensor>();
                 NNTensor b = args[1].cast<NNTensor>();
                 ffi::Array<PrimExpr> as = a->GetShape();
                 ffi::Array<PrimExpr> bs = b->GetShape();
                 TensorStructInfo out_sinfo(ShapeExpr(ffi::Array<PrimExpr>{
-                                               as[0], as[1], bs[1], IntImm(DataType::Int(64), 9)}),
-                                           DataType::Float(32));
+                    as[0], as[1], bs[1], IntImm(DataType::Int(64), 9)}),
+                    DataType::Float(32));
                 *rv = ffi::Any(NNTensor(Var("out", out_sinfo)));
               }));
 
@@ -411,15 +425,18 @@ TEST(NNExternModule, TestExternObject) {
 
   // Export to IRModule and verify IR equality.
   ModuleSpec mod_spec = BuildExternModuleSpec();
-  Exporter exporter(/*debug=*/false);
-  IRModule mod = exporter.get()->Build(mod_spec)[0].cast<IRModule>();
+  
+  // Create a minimal NNModule wrapper and use ExportTVM
+  NNModule mod_wrapper;
+  ffi::Array<ffi::Any> result = mod_wrapper->ExportTVM(mod_spec, /*debug=*/false, /*allow_extern=*/false);
+  IRModule mod = result[0].cast<IRModule>();
   IRModule expected = BuildExpectedIR();
-  EXPECT_TRUE(ffi::StructuralEqual()(mod, expected)) << "\n=== Actual ===\n"
-                                                     << mod << "\n=== Expected ===\n"
-                                                     << expected;
+  EXPECT_TRUE(ffi::StructuralEqual()(mod, expected))
+      << "\n=== Actual ===\n" << mod << "\n=== Expected ===\n" << expected;
 
   // Attach and compile.
-  relax::transform::Pass attach_pass = relax::transform::AttachExternModules(ext_mods_arr);
+  relax::transform::Pass attach_pass =
+      relax::transform::AttachExternModules(ext_mods_arr);
   IRModule mod_with_ext = attach_pass(mod);
 
   // Compile and run.
@@ -442,19 +459,21 @@ TEST(NNExternModule, TestExternSource) {
 
   // Build the symbols map (same as TestExternObject).
   ffi::Map<ffi::String, ffi::Function> symbols;
-  symbols.Set(
-      "ext_scalar_add", ffi::Function([](ffi::PackedArgs args, ffi::Any* rv) {
-        *rv = ffi::Any(NNTensor(
-            Var("out", TensorStructInfo(ShapeExpr(ffi::Array<PrimExpr>{}), DataType::Float(32)))));
-      }));
-  symbols.Set("ext_test_sym", ffi::Function([](ffi::PackedArgs args, ffi::Any* rv) {
+  symbols.Set("ext_scalar_add",
+              ffi::Function([](ffi::PackedArgs args, ffi::Any* rv) {
+                *rv = ffi::Any(NNTensor(
+                    Var("out", TensorStructInfo(
+                        ShapeExpr(ffi::Array<PrimExpr>{}), DataType::Float(32)))));
+              }));
+  symbols.Set("ext_test_sym",
+              ffi::Function([](ffi::PackedArgs args, ffi::Any* rv) {
                 NNTensor a = args[0].cast<NNTensor>();
                 NNTensor b = args[1].cast<NNTensor>();
                 ffi::Array<PrimExpr> as = a->GetShape();
                 ffi::Array<PrimExpr> bs = b->GetShape();
                 TensorStructInfo out_sinfo(ShapeExpr(ffi::Array<PrimExpr>{
-                                               as[0], as[1], bs[1], IntImm(DataType::Int(64), 9)}),
-                                           DataType::Float(32));
+                    as[0], as[1], bs[1], IntImm(DataType::Int(64), 9)}),
+                    DataType::Float(32));
                 *rv = ffi::Any(NNTensor(Var("out", out_sinfo)));
               }));
 
@@ -462,23 +481,27 @@ TEST(NNExternModule, TestExternSource) {
   auto make_src_mod = ffi::Function::GetGlobal("relax.frontend.nn.MakeSourceModule");
   TVM_FFI_ICHECK(make_src_mod.has_value());
   // MakeSourceModule(symbols, source_code, source_format, compile_options, compiler, output_format)
-  SourceModule src_mod = (*make_src_mod)(symbols, ffi::String(src.string()), ffi::String("cpp"),
-                                         ffi::Optional<ffi::Array<ffi::String>>(),
-                                         ffi::Optional<ffi::String>(), ffi::String(".o"))
-                             .cast<SourceModule>();
+  SourceModule src_mod =
+      (*make_src_mod)(symbols, ffi::String(src.string()), ffi::String("cpp"),
+                      ffi::Optional<ffi::Array<ffi::String>>(),
+                      ffi::Optional<ffi::String>(),
+                      ffi::String(".o")).cast<SourceModule>();
   ffi::Array<runtime::ObjectRef> ext_mods_arr{src_mod};
 
   // Export to IRModule and verify IR equality.
   ModuleSpec mod_spec = BuildExternModuleSpec();
-  Exporter exporter(/*debug=*/false);
-  IRModule mod = exporter.get()->Build(mod_spec)[0].cast<IRModule>();
+  
+  // Create a minimal NNModule wrapper and use ExportTVM
+  NNModule mod_wrapper;
+  ffi::Array<ffi::Any> result = mod_wrapper->ExportTVM(mod_spec, /*debug=*/false, /*allow_extern=*/false);
+  IRModule mod = result[0].cast<IRModule>();
   IRModule expected = BuildExpectedIR();
-  EXPECT_TRUE(ffi::StructuralEqual()(mod, expected)) << "\n=== Actual ===\n"
-                                                     << mod << "\n=== Expected ===\n"
-                                                     << expected;
+  EXPECT_TRUE(ffi::StructuralEqual()(mod, expected))
+      << "\n=== Actual ===\n" << mod << "\n=== Expected ===\n" << expected;
 
   // Attach and compile.
-  relax::transform::Pass attach_pass2 = relax::transform::AttachExternModules(ext_mods_arr);
+  relax::transform::Pass attach_pass2 =
+      relax::transform::AttachExternModules(ext_mods_arr);
   IRModule mod_with_ext = attach_pass2(mod);
 
   ffi::Module compiled = tvm::driver::Compile(mod_with_ext, ffi::String("llvm"));

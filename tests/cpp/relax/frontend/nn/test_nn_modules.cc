@@ -1287,14 +1287,15 @@ TEST(NNModules, TestKVCache) {
   ffi::Map<ffi::String, runtime::ObjectRef> named_effects;
   named_effects.Set("cache", kv);
 
-  ModuleSpec mod_spec(ffi::Array<ffi::String>{ffi::String("forward")},
+    ModuleSpec mod_spec(ffi::Array<ffi::String>{ffi::String("forward")},
                       ffi::Array<ffi::Any>{ffi::Any(ms)},
                       /*named_params=*/{}, named_effects);
 
-  // Use Exporter to export the module
-  Exporter exporter(/*debug=*/true);
-  ffi::Array<ffi::Any> export_result = exporter->Build(mod_spec);
-  IRModule actual = export_result[0].cast<IRModule>();
+  
+  // Create a minimal NNModule wrapper and use ExportTVM
+  NNModule mod;
+  ffi::Array<ffi::Any> result = mod->ExportTVM(mod_spec, /*debug=*/true, /*allow_extern=*/false);
+  IRModule actual = result[0].cast<IRModule>();
 
   // ---------------------------------------------------------------------------
   // Build expected IRModule
@@ -2233,16 +2234,16 @@ static IRModule ExportTupleInputDebug(
   ffi::Array<ffi::String> arg_names{"x"};
   ffi::Array<ffi::Any> arg_specs{ffi::Any(x_spec)};
 
-  MethodSpec ms(forward_fn, arg_names, arg_specs, "plain", "plain");
+    MethodSpec ms(forward_fn, arg_names, arg_specs, "plain", "plain");
   ModuleSpec mod_spec(ffi::Array<ffi::String>{ffi::String("forward")},
-                      ffi::Array<ffi::Any>{ffi::Any(ms)},
+                                            ffi::Array<ffi::Any>{ffi::Any(ms)},
                       /*named_params=*/{},
                       /*named_effects=*/{});
-
-  // Use Exporter to export the module
-  Exporter exporter(/*debug=*/true);
-  ffi::Array<ffi::Any> export_result = exporter->Build(mod_spec);
-  return export_result[0].cast<IRModule>();
+  
+  // Create a minimal NNModule wrapper and use ExportTVM
+  NNModule mod;
+  ffi::Array<ffi::Any> result = mod->ExportTVM(mod_spec, /*debug=*/true, /*allow_extern=*/false);
+  return result[0].cast<IRModule>();
 }
 
 // ===========================================================================

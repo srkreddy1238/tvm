@@ -110,7 +110,8 @@ static std::vector<float> ToFloatVec(const runtime::Tensor& t) {
 }
 
 // Element-wise approximate equality for float vectors.
-static bool AllClose(const std::vector<float>& a, const std::vector<float>& b, float atol = 1e-5f) {
+static bool AllClose(const std::vector<float>& a, const std::vector<float>& b,
+                     float atol = 1e-5f) {
   if (a.size() != b.size()) return false;
   for (size_t i = 0; i < a.size(); ++i) {
     if (std::fabs(a[i] - b[i]) > atol) return false;
@@ -295,7 +296,9 @@ TEST_P(TestJitWithEffect, KVCacheAppendView) {
   CppModule model = Jit(mod_spec, {kDLCPU, 0}, "cpu_generic", debug);
 
   // Helper: fill a [1, 10, 5] tensor with a constant value.
-  auto make_input = [](float val) -> runtime::Tensor { return MakeF32Const({1, 10, 5}, val); };
+  auto make_input = [](float val) -> runtime::Tensor {
+    return MakeF32Const({1, 10, 5}, val);
+  };
 
   // --- Step 1: append x0, view seq_len=1 → should equal x0 ---
   runtime::Tensor x0 = make_input(1.0f);
@@ -306,7 +309,8 @@ TEST_P(TestJitWithEffect, KVCacheAppendView) {
   EXPECT_EQ(y0.shape()[0], 1);
   EXPECT_EQ(y0.shape()[1], 10);
   EXPECT_EQ(y0.shape()[2], 5);
-  EXPECT_TRUE(AllClose(ToFloatVec(y0), ToFloatVec(x0))) << "TestJitWithEffect step 1 mismatch";
+  EXPECT_TRUE(AllClose(ToFloatVec(y0), ToFloatVec(x0)))
+      << "TestJitWithEffect step 1 mismatch";
 
   // --- Step 2: append x1, view seq_len=2 → should equal concat([x0, x1]) ---
   runtime::Tensor x1 = make_input(2.0f);
@@ -319,7 +323,8 @@ TEST_P(TestJitWithEffect, KVCacheAppendView) {
   std::vector<float> expected1(2 * 10 * 5);
   std::fill(expected1.begin(), expected1.begin() + 50, 1.0f);
   std::fill(expected1.begin() + 50, expected1.end(), 2.0f);
-  EXPECT_TRUE(AllClose(y1_data, expected1)) << "TestJitWithEffect step 2 mismatch";
+  EXPECT_TRUE(AllClose(y1_data, expected1))
+      << "TestJitWithEffect step 2 mismatch";
 
   // --- Step 3: append x2, view seq_len=3 → concat([x0, x1, x2]) ---
   runtime::Tensor x2 = make_input(3.0f);
@@ -332,7 +337,8 @@ TEST_P(TestJitWithEffect, KVCacheAppendView) {
   std::fill(expected2.begin(), expected2.begin() + 50, 1.0f);
   std::fill(expected2.begin() + 50, expected2.begin() + 100, 2.0f);
   std::fill(expected2.begin() + 100, expected2.end(), 3.0f);
-  EXPECT_TRUE(AllClose(y2_data, expected2)) << "TestJitWithEffect step 3 mismatch";
+  EXPECT_TRUE(AllClose(y2_data, expected2))
+      << "TestJitWithEffect step 3 mismatch";
 }
 
 INSTANTIATE_TEST_SUITE_P(DebugModes, TestJitWithEffect, ::testing::Values(true, false));

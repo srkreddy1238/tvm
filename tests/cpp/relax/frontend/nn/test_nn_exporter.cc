@@ -31,8 +31,7 @@
  *   - TestDuplicateNamesSamePythonString       (test_duplicate_names/same_python_string)
  *   - TestDuplicateNamesDifferentPythonString  (test_duplicate_names/different_python_string)
  *   - TestDuplicateNamesSameTirVar             (test_duplicate_names/same_tir_var)
- *   - TestDuplicateNamesDistinctTirVarsDistinctNames
- * (test_duplicate_names/distinct_tir_vars_with_distinct_names)
+ *   - TestDuplicateNamesDistinctTirVarsDistinctNames (test_duplicate_names/distinct_tir_vars_with_distinct_names)
  *
  * Skipped (Python-only / xfail):
  *   - test_custom_module          (requires Python subclassing of nn.Module)
@@ -108,21 +107,22 @@ static void EmitInitEffect(BlockBuilder& bb) {
                   "_initialize_effect");
 }
 
-static Var EmitDebugOutput(BlockBuilder& bb, Expr result, Var io, const std::string& hint = "gv1") {
+static Var EmitDebugOutput(BlockBuilder& bb, Expr result, Var io,
+                           const std::string& hint = "gv1") {
   return bb->EmitOutput(relax::Tuple({result, relax::Tuple({io})}), hint);
 }
 
 static void AssertStructEqual(const IRModule& actual, const IRModule& expected) {
-  EXPECT_TRUE(ffi::StructuralEqual()(actual, expected)) << "\n=== Actual ===\n"
-                                                        << actual << "\n=== Expected ===\n"
-                                                        << expected;
+  EXPECT_TRUE(ffi::StructuralEqual()(actual, expected))
+      << "\n=== Actual ===\n" << actual << "\n=== Expected ===\n" << expected;
 }
 
 // Export via NNModuleNode::ExportTVM.
 static IRModule ExportModule(runtime::ObjectRef mod_ref, const std::string& method_name,
                              ffi::Array<ffi::String> arg_names, ffi::Array<ffi::Any> arg_specs,
                              ffi::Map<ffi::String, NNParameter> named_params = {},
-                             bool debug = false, const std::string& param_mode = "plain",
+                             bool debug = false,
+                             const std::string& param_mode = "plain",
                              const std::string& effect_mode = "plain") {
   const NNModuleNode* mod_node = mod_ref.as<NNModuleNode>();
   TVM_FFI_ICHECK(mod_node);
@@ -151,8 +151,8 @@ static IRModule ExportModule(runtime::ObjectRef mod_ref, const std::string& meth
 // ===========================================================================
 TEST(NNExporter, TestSimple) {
   ReLUModule mod;
-  IRModule actual =
-      ExportModule(mod, "forward", {"x"}, {ffi::Any(MakeSpecTensor({3, 3}, "float32"))});
+  IRModule actual = ExportModule(mod, "forward", {"x"},
+                                 {ffi::Any(MakeSpecTensor({3, 3}, "float32"))});
 
   BlockBuilder bb = BlockBuilder::Create(std::nullopt);
   {
@@ -161,7 +161,7 @@ TEST(NNExporter, TestSimple) {
     bb->BeginScope(params);
     bb->BeginDataflowBlock();
     Var relu = bb->Emit(relax::relu(x), "relu");
-    Var gv = bb->EmitOutput(relu, "relu");
+    Var gv   = bb->EmitOutput(relu, "relu");
     BindingBlock df = bb->EndBlock();
     Expr body = bb->Normalize(SeqExpr({df}, gv));
     bb->EndScope();
@@ -195,7 +195,8 @@ TEST(NNExporter, TestSimple) {
 TEST(NNExporter, TestDebugEffect) {
   ReLUModule mod;
   IRModule actual = ExportModule(mod, "forward", {"x"},
-                                 {ffi::Any(MakeSpecTensor({3, 3}, "float32"))}, {}, /*debug=*/true);
+                                 {ffi::Any(MakeSpecTensor({3, 3}, "float32"))},
+                                 {}, /*debug=*/true);
 
   BlockBuilder bb = BlockBuilder::Create(std::nullopt);
   EmitInitEffect(bb);
@@ -206,7 +207,7 @@ TEST(NNExporter, TestDebugEffect) {
     bb->BeginScope(params);
     bb->BeginDataflowBlock();
     Var relu = bb->Emit(relax::relu(x), "relu");
-    Var gv1 = EmitDebugOutput(bb, relu, io);
+    Var gv1  = EmitDebugOutput(bb, relu, io);
     BindingBlock df = bb->EndBlock();
     Expr body = bb->Normalize(SeqExpr({df}, gv1));
     bb->EndScope();
@@ -256,7 +257,7 @@ TEST(NNExporter, TestDynamicShape) {
     bb->BeginScope(params);
     bb->BeginDataflowBlock();
     Var relu = bb->Emit(relax::relu(x), "relu");
-    Var gv = bb->EmitOutput(relu, "relu");
+    Var gv   = bb->EmitOutput(relu, "relu");
     BindingBlock df = bb->EndBlock();
     Expr body = bb->Normalize(SeqExpr({df}, gv));
     bb->EndScope();
@@ -306,15 +307,17 @@ TEST(NNExporter, TestDynamicShapeInMultipleFunctions) {
   spec_shape.push_back(ffi::Any(int64_t(8)));
   SpecTensor x_spec(spec_shape, "float32");
 
-  MethodSpec ms_relu(relu_fn, {"x"}, {ffi::Any(x_spec)}, "plain", "none");
+    MethodSpec ms_relu(relu_fn, {"x"}, {ffi::Any(x_spec)}, "plain", "none");
   MethodSpec ms_silu(silu_fn, {"x"}, {ffi::Any(x_spec)}, "plain", "none");
-  ModuleSpec mod_spec(ffi::Array<ffi::String>{"forward_relu", "forward_silu"},
-                      ffi::Array<ffi::Any>{ffi::Any(ms_relu), ffi::Any(ms_silu)}, {}, {});
-
-  // Use Exporter to export the module
-  Exporter exporter(/*debug=*/false);
-  ffi::Array<ffi::Any> export_result = exporter->Build(mod_spec);
-  IRModule actual = export_result[0].cast<IRModule>();
+  ModuleSpec mod_spec(
+      ffi::Array<ffi::String>{"forward_relu", "forward_silu"},
+      ffi::Array<ffi::Any>{ffi::Any(ms_relu), ffi::Any(ms_silu)}, {}, {});
+  
+    
+  // Create a minimal NNModule wrapper and use ExportTVM
+  NNModule mod;
+  ffi::Array<ffi::Any> result = mod->ExportTVM(mod_spec, /*debug=*/false, /*allow_extern=*/false);
+  IRModule actual = result[0].cast<IRModule>();
 
   // Build expected: two independent functions each with their own batch_size var.
   BlockBuilder bb = BlockBuilder::Create(std::nullopt);
@@ -328,7 +331,7 @@ TEST(NNExporter, TestDynamicShapeInMultipleFunctions) {
     bb->BeginScope(params);
     bb->BeginDataflowBlock();
     Var out = bb->Emit(op_fn(x), hint);
-    Var gv = bb->EmitOutput(out, hint);
+    Var gv  = bb->EmitOutput(out, hint);
     BindingBlock df = bb->EndBlock();
     Expr body = bb->Normalize(SeqExpr({df}, gv));
     bb->EndScope();
@@ -361,15 +364,18 @@ TEST(NNExporter, TestExportNestedModule) {
 
   LinearModule gate_proj = MakeLinear(ffi::Any(H), ffi::Any(I), false,
                                       ffi::Optional<ffi::String>("float16"), std::nullopt);
-  LinearModule up_proj = MakeLinear(ffi::Any(H), ffi::Any(I), false,
-                                    ffi::Optional<ffi::String>("float16"), std::nullopt);
+  LinearModule up_proj   = MakeLinear(ffi::Any(H), ffi::Any(I), false,
+                                      ffi::Optional<ffi::String>("float16"), std::nullopt);
   LinearModule down_proj = MakeLinear(ffi::Any(I), ffi::Any(H), false,
                                       ffi::Optional<ffi::String>("float16"), std::nullopt);
 
   ffi::Map<ffi::String, NNParameter> named_params;
-  for (const auto& [k, v] : gate_proj.get()->NamedParameters("gate_proj")) named_params.Set(k, v);
-  for (const auto& [k, v] : up_proj.get()->NamedParameters("up_proj")) named_params.Set(k, v);
-  for (const auto& [k, v] : down_proj.get()->NamedParameters("down_proj")) named_params.Set(k, v);
+  for (const auto& [k, v] : gate_proj.get()->NamedParameters("gate_proj"))
+    named_params.Set(k, v);
+  for (const auto& [k, v] : up_proj.get()->NamedParameters("up_proj"))
+    named_params.Set(k, v);
+  for (const auto& [k, v] : down_proj.get()->NamedParameters("down_proj"))
+    named_params.Set(k, v);
 
   static const ffi::Function op_silu =
       ffi::Function::GetGlobal("relax.frontend.nn.op.silu").value();
@@ -378,11 +384,11 @@ TEST(NNExporter, TestExportNestedModule) {
 
   ffi::TypedFunction<ffi::Any(ffi::Map<ffi::String, ffi::Any>)> forward_fn =
       [gate_proj, up_proj, down_proj](ffi::Map<ffi::String, ffi::Any> args) -> ffi::Any {
-    NNTensor x = args.at("x").cast<NNTensor>();
+        NNTensor x    = args.at("x").cast<NNTensor>();
     NNTensor gate = NNTensor(gate_proj.get()->Forward(x->expr));
-    NNTensor up = NNTensor(up_proj.get()->Forward(x->expr));
+    NNTensor up   = NNTensor(up_proj.get()->Forward(x->expr));
     ffi::Any silu_gate = op_silu(gate->expr, ffi::String("silu"));
-    ffi::Any mul_out = op_mul(silu_gate.cast<Var>(), up->expr, ffi::String("mul"));
+    ffi::Any mul_out   = op_mul(silu_gate.cast<Var>(), up->expr, ffi::String("mul"));
     NNTensor mul_tensor(mul_out.cast<Var>());
     NNTensor out = NNTensor(down_proj.get()->Forward(mul_tensor->expr));
     return ffi::Any(out);
@@ -393,13 +399,14 @@ TEST(NNExporter, TestExportNestedModule) {
   spec_shape.push_back(ffi::Any(H));
   SpecTensor x_spec(spec_shape, "float16");
 
-  MethodSpec ms(forward_fn, {"x"}, {ffi::Any(x_spec)}, "plain", "none");
+    MethodSpec ms(forward_fn, {"x"}, {ffi::Any(x_spec)}, "plain", "none");
   ModuleSpec mod_spec({"forward"}, {ffi::Any(ms)}, named_params, {});
-
-  // Use Exporter to export the module
-  Exporter exporter(/*debug=*/false);
-  ffi::Array<ffi::Any> export_result = exporter->Build(mod_spec);
-  IRModule actual = export_result[0].cast<IRModule>();
+  
+    
+  // Create a minimal NNModule wrapper and use ExportTVM
+  NNModule mod;
+  ffi::Array<ffi::Any> result = mod->ExportTVM(mod_spec, /*debug=*/false, /*allow_extern=*/false);
+  IRModule actual = result[0].cast<IRModule>();
 
   BlockBuilder bb = BlockBuilder::Create(std::nullopt);
   {
@@ -417,13 +424,13 @@ TEST(NNExporter, TestExportNestedModule) {
     bb->BeginDataflowBlock();
 
     Var pd_gate = bb->Emit(relax::permute_dims(gate_proj_weight, std::nullopt), "permute_dims");
-    Var gate = bb->Emit(relax::matmul(x, pd_gate, std::nullopt), "linear");
-    Var pd_up = bb->Emit(relax::permute_dims(up_proj_weight, std::nullopt), "permute_dims1");
-    Var up = bb->Emit(relax::matmul(x, pd_up, std::nullopt), "linear1");
-    Var silu_g = bb->Emit(relax::silu(gate), "silu");
+    Var gate    = bb->Emit(relax::matmul(x, pd_gate, std::nullopt), "linear");
+    Var pd_up   = bb->Emit(relax::permute_dims(up_proj_weight, std::nullopt), "permute_dims1");
+    Var up      = bb->Emit(relax::matmul(x, pd_up, std::nullopt), "linear1");
+    Var silu_g  = bb->Emit(relax::silu(gate), "silu");
     Var mul_out = bb->Emit(relax::multiply(silu_g, up), "mul");
     Var pd_down = bb->Emit(relax::permute_dims(down_proj_weight, std::nullopt), "permute_dims2");
-    Var down = bb->Emit(relax::matmul(mul_out, pd_down, std::nullopt), "linear2");
+    Var down    = bb->Emit(relax::matmul(mul_out, pd_down, std::nullopt), "linear2");
 
     Var gv = bb->EmitOutput(down, "gv");
     BindingBlock df = bb->EndBlock();
@@ -456,9 +463,9 @@ TEST(NNExporter, TestLinearDynamicShape) {
                                 /*bias=*/true, std::nullopt, std::nullopt);
   ffi::Map<ffi::String, NNParameter> named_params = mod.get()->NamedParameters("");
 
-  IRModule actual =
-      ExportModule(mod, "forward", {"x"}, {ffi::Any(MakeSpecTensor({1, 4}, "float32"))},
-                   named_params, /*debug=*/true);
+  IRModule actual = ExportModule(mod, "forward", {"x"},
+                                 {ffi::Any(MakeSpecTensor({1, 4}, "float32"))},
+                                 named_params, /*debug=*/true);
 
   BlockBuilder bb = BlockBuilder::Create(std::nullopt);
   EmitInitEffect(bb);
@@ -466,8 +473,9 @@ TEST(NNExporter, TestLinearDynamicShape) {
     tir::Var n_var("n", DataType::Int(64));
     Var x("x", TSInfo({1, 4}, DataType::Float(32)));
     Var io("_io", ObjectStructInfo());
-    TensorStructInfo w_sinfo(ShapeExpr(ffi::Array<PrimExpr>{n_var, IntImm(DataType::Int(64), 4)}),
-                             DataType::Float(32));
+    TensorStructInfo w_sinfo(
+        ShapeExpr(ffi::Array<PrimExpr>{n_var, IntImm(DataType::Int(64), 4)}),
+        DataType::Float(32));
     TensorStructInfo b_sinfo(ShapeExpr(ffi::Array<PrimExpr>{n_var}), DataType::Float(32));
     Var weight("weight", w_sinfo);
     Var bias("bias", b_sinfo);
@@ -475,9 +483,9 @@ TEST(NNExporter, TestLinearDynamicShape) {
     bb->BeginScope(params);
     bb->BeginDataflowBlock();
     Var perm = bb->Emit(relax::permute_dims(weight, std::nullopt), "permute_dims");
-    Var mm = bb->Emit(relax::matmul(x, perm, std::nullopt), "matmul");
-    Var add = bb->Emit(relax::add(mm, bias), "add");
-    Var gv1 = EmitDebugOutput(bb, add, io);
+    Var mm   = bb->Emit(relax::matmul(x, perm, std::nullopt), "matmul");
+    Var add  = bb->Emit(relax::add(mm, bias), "add");
+    Var gv1  = EmitDebugOutput(bb, add, io);
     BindingBlock df = bb->EndBlock();
     Expr body = bb->Normalize(SeqExpr({df}, gv1));
     bb->EndScope();
@@ -514,37 +522,40 @@ static IRModule ExportDuplicateNamesModel(tir::Var hs, tir::Var is_) {
 
   // Build NNParameter objects by constructing a Var with the right TensorStructInfo.
   // embedding: (hs, 1024)
-  NNParameter emb_w(Var("embedding_weights",
-                        TensorStructInfo(ShapeExpr(ffi::Array<PrimExpr>{hs, I64(1024)}), f32)));
+  NNParameter emb_w(
+      Var("embedding_weights",
+          TensorStructInfo(ShapeExpr(ffi::Array<PrimExpr>{hs, I64(1024)}), f32)));
 
   // up: (is_, hs)
   NNParameter up_w(
-      Var("up_weights", TensorStructInfo(ShapeExpr(ffi::Array<PrimExpr>{is_, hs}), f32)));
+      Var("up_weights",
+          TensorStructInfo(ShapeExpr(ffi::Array<PrimExpr>{is_, hs}), f32)));
 
   // down: (hs, is_)
   NNParameter down_w(
-      Var("down_weights", TensorStructInfo(ShapeExpr(ffi::Array<PrimExpr>{hs, is_}), f32)));
+      Var("down_weights",
+          TensorStructInfo(ShapeExpr(ffi::Array<PrimExpr>{hs, is_}), f32)));
 
   ffi::Map<ffi::String, NNParameter> named_params;
   named_params.Set("embedding_weights", emb_w);
   named_params.Set("up_weights", up_w);
   named_params.Set("down_weights", down_w);
 
-  // The forward lambda accesses parameters via their NNParameter::expr,
+    // The forward lambda accesses parameters via their NNParameter::expr,
   // which the exporter sets to the emitted Var before calling the lambda.
   ffi::TypedFunction<ffi::Any(ffi::Map<ffi::String, ffi::Any>)> forward_fn =
       [emb_w, up_w, down_w](ffi::Map<ffi::String, ffi::Any> args) -> ffi::Any {
-    NNTensor state = args.at("state").cast<NNTensor>();
-    Var emb_var = emb_w->expr;
-    Var up_var = up_w->expr;
+    NNTensor state  = args.at("state").cast<NNTensor>();
+    Var emb_var  = emb_w->expr;
+    Var up_var   = up_w->expr;
     Var down_var = down_w->expr;
-    ffi::Any s1 =
-        op_matmul(state->expr, emb_var, ffi::Optional<ffi::String>(), ffi::String("state"));
-    ffi::Any s2 =
-        op_matmul(s1.cast<Var>(), up_var, ffi::Optional<ffi::String>(), ffi::String("state"));
+    ffi::Any s1 = op_matmul(state->expr, emb_var,
+                            ffi::Optional<ffi::String>(), ffi::String("state"));
+    ffi::Any s2 = op_matmul(s1.cast<Var>(), up_var,
+                            ffi::Optional<ffi::String>(), ffi::String("state"));
     ffi::Any s3 = op_silu(s2.cast<Var>(), ffi::String("state"));
-    ffi::Any s4 =
-        op_matmul(s3.cast<Var>(), down_var, ffi::Optional<ffi::String>(), ffi::String("state"));
+    ffi::Any s4 = op_matmul(s3.cast<Var>(), down_var,
+                            ffi::Optional<ffi::String>(), ffi::String("state"));
     return s4;
   };
 
@@ -555,13 +566,13 @@ static IRModule ExportDuplicateNamesModel(tir::Var hs, tir::Var is_) {
 
   // arg_specs covers only the user input "state"; named params are injected
   // automatically by the exporter from named_params.
-  MethodSpec ms(forward_fn, {"state"}, {ffi::Any(state_spec)}, "plain", "none");
+      MethodSpec ms(forward_fn, {"state"}, {ffi::Any(state_spec)}, "plain", "none");
   ModuleSpec mod_spec({"forward"}, {ffi::Any(ms)}, named_params, {});
-
-  // Use Exporter to export the module
-  Exporter exporter(/*debug=*/false);
-  ffi::Array<ffi::Any> export_result = exporter->Build(mod_spec);
-  return export_result[0].cast<IRModule>();
+  
+  // Create a minimal NNModule wrapper and use ExportTVM
+  NNModule mod;
+  ffi::Array<ffi::Any> result = mod->ExportTVM(mod_spec, /*debug=*/false, /*allow_extern=*/false);
+  return result[0].cast<IRModule>();
 }
 
 // Helper: extract the tir::Var at dim_idx in the shape of param at param_idx.
@@ -588,11 +599,11 @@ TEST(NNExporter, TestDuplicateNamesSamePythonString) {
   IRModule actual = ExportDuplicateNamesModel(hs, hs);  // is_ == hs
 
   // params: state(0), embedding_weights(1), up_weights(2), down_weights(3)
-  ASSERT_EQ((*actual->functions.begin()).second.as<FunctionNode>()->params.size(), 4u);
+    ASSERT_EQ((*actual->functions.begin()).second.as<FunctionNode>()->params.size(), 4u);
 
-  tir::Var v_emb0 = GetParamShapeVar(actual, 1, 0);   // embedding_weights[0] = hs
-  tir::Var v_up0 = GetParamShapeVar(actual, 2, 0);    // up_weights[0] = is_ (== hs)
-  tir::Var v_up1 = GetParamShapeVar(actual, 2, 1);    // up_weights[1] = hs
+  tir::Var v_emb0  = GetParamShapeVar(actual, 1, 0);  // embedding_weights[0] = hs
+  tir::Var v_up0   = GetParamShapeVar(actual, 2, 0);  // up_weights[0] = is_ (== hs)
+  tir::Var v_up1   = GetParamShapeVar(actual, 2, 1);  // up_weights[1] = hs
   tir::Var v_down0 = GetParamShapeVar(actual, 3, 0);  // down_weights[0] = hs
   tir::Var v_down1 = GetParamShapeVar(actual, 3, 1);  // down_weights[1] = is_ (== hs)
 
@@ -614,7 +625,7 @@ TEST(NNExporter, TestDuplicateNamesDifferentPythonString) {
   tir::Var is_("intermediate_size", DataType::Int(64));
   IRModule actual = ExportDuplicateNamesModel(hs, is_);
 
-  ASSERT_EQ((*actual->functions.begin()).second.as<FunctionNode>()->params.size(), 4u);
+    ASSERT_EQ((*actual->functions.begin()).second.as<FunctionNode>()->params.size(), 4u);
 
   tir::Var v_hs = GetParamShapeVar(actual, 1, 0);  // embedding_weights[0] = hs
   tir::Var v_is = GetParamShapeVar(actual, 2, 0);  // up_weights[0] = is_

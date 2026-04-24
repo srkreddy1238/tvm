@@ -94,9 +94,8 @@ static TensorStructInfo TSInfo(std::initializer_list<int64_t> dims, DataType dty
 }
 
 static void AssertStructEqual(const IRModule& actual, const IRModule& expected) {
-  EXPECT_TRUE(ffi::StructuralEqual()(actual, expected)) << "\n=== Actual ===\n"
-                                                        << actual << "\n=== Expected ===\n"
-                                                        << expected;
+  EXPECT_TRUE(ffi::StructuralEqual()(actual, expected))
+      << "\n=== Actual ===\n" << actual << "\n=== Expected ===\n" << expected;
 }
 
 // ===========================================================================
@@ -129,21 +128,24 @@ TEST(NNPacking, TestNNExportToRelax) {
   const int64_t OUT = 20;
 
   // Build two Linear sub-modules (no bias, float32).
-  LinearModule linear_1 =
-      MakeLinear(ffi::Any(IN), ffi::Any(OUT), false, std::nullopt, std::nullopt);
-  LinearModule linear_2 =
-      MakeLinear(ffi::Any(IN), ffi::Any(OUT), false, std::nullopt, std::nullopt);
+  LinearModule linear_1 = MakeLinear(ffi::Any(IN), ffi::Any(OUT), false,
+                                     std::nullopt, std::nullopt);
+  LinearModule linear_2 = MakeLinear(ffi::Any(IN), ffi::Any(OUT), false,
+                                     std::nullopt, std::nullopt);
 
   // Collect named params in order: linear_1.weight, linear_2.weight.
   ffi::Map<ffi::String, NNParameter> named_params;
-  for (const auto& [k, v] : linear_1.get()->NamedParameters("linear_1")) named_params.Set(k, v);
-  for (const auto& [k, v] : linear_2.get()->NamedParameters("linear_2")) named_params.Set(k, v);
+  for (const auto& [k, v] : linear_1.get()->NamedParameters("linear_1"))
+    named_params.Set(k, v);
+  for (const auto& [k, v] : linear_2.get()->NamedParameters("linear_2"))
+    named_params.Set(k, v);
 
-  static const ffi::Function op_add = ffi::Function::GetGlobal("relax.frontend.nn.op.add").value();
+  static const ffi::Function op_add =
+      ffi::Function::GetGlobal("relax.frontend.nn.op.add").value();
 
   ffi::TypedFunction<ffi::Any(ffi::Map<ffi::String, ffi::Any>)> forward_fn =
       [linear_1, linear_2](ffi::Map<ffi::String, ffi::Any> args) -> ffi::Any {
-    NNTensor x = args.at("x").cast<NNTensor>();
+    NNTensor x  = args.at("x").cast<NNTensor>();
     NNTensor x1 = NNTensor(linear_1.get()->Forward(x->expr));
     NNTensor x2 = NNTensor(linear_2.get()->Forward(x->expr));
     return op_add(x1->expr, x2->expr, ffi::String("add"));
@@ -157,11 +159,11 @@ TEST(NNPacking, TestNNExportToRelax) {
   // param_mode="packed", effect_mode="none"
   MethodSpec ms(forward_fn, {"x"}, {ffi::Any(x_spec)}, "packed", "none");
   ModuleSpec mod_spec({"forward"}, {ffi::Any(ms)}, named_params, {});
-
-  // Use Exporter to export the module
-  Exporter exporter(/*debug=*/false);
-  ffi::Array<ffi::Any> export_result = exporter->Build(mod_spec);
-  IRModule actual = export_result[0].cast<IRModule>();
+  
+  // Create a minimal NNModule wrapper and use ExportTVM
+  NNModule mod;
+  ffi::Array<ffi::Any> result = mod->ExportTVM(mod_spec, /*debug=*/false, /*allow_extern=*/false);
+  IRModule actual = result[0].cast<IRModule>();
 
   // ===========================================================================
   // Build expected IR
@@ -173,12 +175,10 @@ TEST(NNPacking, TestNNExportToRelax) {
 
     // packed_params: Tuple(Tensor(20,10), Tensor(20,10))
     TupleStructInfo packed_sinfo(ffi::Array<StructInfo>{
-        TensorStructInfo(ShapeExpr(ffi::Array<PrimExpr>{IntImm(DataType::Int(64), OUT),
-                                                        IntImm(DataType::Int(64), IN)}),
-                         f32),
-        TensorStructInfo(ShapeExpr(ffi::Array<PrimExpr>{IntImm(DataType::Int(64), OUT),
-                                                        IntImm(DataType::Int(64), IN)}),
-                         f32),
+        TensorStructInfo(ShapeExpr(ffi::Array<PrimExpr>{
+            IntImm(DataType::Int(64), OUT), IntImm(DataType::Int(64), IN)}), f32),
+        TensorStructInfo(ShapeExpr(ffi::Array<PrimExpr>{
+            IntImm(DataType::Int(64), OUT), IntImm(DataType::Int(64), IN)}), f32),
     });
     Var packed_params("packed_params", packed_sinfo);
     ffi::Array<Var> params{x, packed_params};
