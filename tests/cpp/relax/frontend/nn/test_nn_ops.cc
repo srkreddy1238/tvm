@@ -99,7 +99,7 @@ static SpecTensor MakeSpecTensor(std::initializer_list<int64_t> dims, const std:
   return SpecTensor(shape, dtype);
 }
 
-// Build and export a single-method module via ExportToIRModule.
+// Build and export a single-method module via Exporter.
 // debug=true by default (matches existing test expectations).
 static IRModule ExportSingle(const std::string& method_name, ffi::Function forward_fn,
                              ffi::Array<ffi::String> arg_names, ffi::Array<ffi::Any> arg_specs,
@@ -108,7 +108,11 @@ static IRModule ExportSingle(const std::string& method_name, ffi::Function forwa
   MethodSpec ms(forward_fn, arg_names, arg_specs, "plain", "plain");
   ModuleSpec mod_spec(ffi::Array<ffi::String>{ffi::String(method_name)},
                       ffi::Array<ffi::Any>{ffi::Any(ms)}, named_params, {});
-  return ExportToIRModule(mod_spec, debug);
+
+  // Use Exporter to export the module
+  Exporter exporter(debug);
+  ffi::Array<ffi::Any> export_result = exporter->Build(mod_spec);
+  return export_result[0].cast<IRModule>();
 }
 
 // ---------------------------------------------------------------------------
@@ -1088,9 +1092,12 @@ TEST(NNOps, TestSortArgsortTopk) {
   spec_shape.push_back(ffi::Any(int64_t(64)));
   MethodSpec ms_sort(forward, {"x"}, {ffi::Any(SpecTensor(spec_shape, "float16"))}, "plain",
                      "none");
-  IRModule actual = ExportToIRModule(
-      ModuleSpec(ffi::Array<ffi::String>{"foo"}, ffi::Array<ffi::Any>{ffi::Any(ms_sort)}, {}, {}),
-      /*debug=*/false);
+
+  // Use Exporter to export the module
+  Exporter exporter(/*debug=*/false);
+  ffi::Array<ffi::Any> export_result = exporter->Build(
+      ModuleSpec(ffi::Array<ffi::String>{"foo"}, ffi::Array<ffi::Any>{ffi::Any(ms_sort)}, {}, {}));
+  IRModule actual = export_result[0].cast<IRModule>();
 
   BlockBuilder bb = BlockBuilder::Create(std::nullopt);
   {
@@ -1137,9 +1144,12 @@ TEST(NNOps, TestTensorIrOpNoTirVar) {
 
   MethodSpec ms_notv(forward, {"A"}, {ffi::Any(MakeSpecTensor({16, 16}, "float32"))}, "plain",
                      "none");
-  IRModule actual = ExportToIRModule(
-      ModuleSpec(ffi::Array<ffi::String>{"test"}, ffi::Array<ffi::Any>{ffi::Any(ms_notv)}, {}, {}),
-      /*debug=*/false);
+
+  // Use Exporter to export the module
+  Exporter exporter(/*debug=*/false);
+  ffi::Array<ffi::Any> export_result = exporter->Build(
+      ModuleSpec(ffi::Array<ffi::String>{"test"}, ffi::Array<ffi::Any>{ffi::Any(ms_notv)}, {}, {}));
+  IRModule actual = export_result[0].cast<IRModule>();
 
   BlockBuilder bb = BlockBuilder::Create(std::nullopt);
   {
@@ -1267,9 +1277,12 @@ TEST(NNOps, TestTensorIrInplaceOp) {
       {ffi::Any(SpecTensor(et_shape, kInplaceDtype)), ffi::Any(SpecTensor(ii_shape, "int32")),
        ffi::Any(SpecTensor(ed_shape, kInplaceDtype)), ffi::Any(SpecInt())},
       "packed", "none");
-  IRModule actual = ExportToIRModule(
-      ModuleSpec(ffi::Array<ffi::String>{"test"}, ffi::Array<ffi::Any>{ffi::Any(ms_ip)}, {}, {}),
-      /*debug=*/false);
+
+  // Use Exporter to export the module
+  Exporter exporter(/*debug=*/false);
+  ffi::Array<ffi::Any> export_result = exporter->Build(
+      ModuleSpec(ffi::Array<ffi::String>{"test"}, ffi::Array<ffi::Any>{ffi::Any(ms_ip)}, {}, {}));
+  IRModule actual = export_result[0].cast<IRModule>();
 
   BlockBuilder bb = BlockBuilder::Create(std::nullopt);
   {

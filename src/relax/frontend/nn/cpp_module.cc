@@ -290,8 +290,13 @@ ffi::Any CppMethodCaller::operator()(const std::vector<ffi::Any>& args) const {
 
 CppModule Jit(ModuleSpec spec, tvm::Device device, ffi::String pipeline, bool debug,
               ffi::Array<runtime::ObjectRef> extern_mods) {
-  // 1. Export to IRModule.
-  IRModule mod = ExportToIRModule(spec, debug);
+  // 1. Export to IRModule using Exporter.
+  Exporter exporter(debug);
+  for (const auto& ext_mod : extern_mods) {
+    exporter->AddExternalModule(ext_mod);
+  }
+  ffi::Array<ffi::Any> export_result = exporter->Build(spec);
+  IRModule mod = export_result[0].cast<IRModule>();
 
   // 2. Attach external modules if any.
   if (!extern_mods.empty()) {

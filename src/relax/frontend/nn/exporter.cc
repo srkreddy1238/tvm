@@ -729,8 +729,8 @@ ffi::Array<ffi::Any> ExporterNode::Build(ModuleSpec spec) {
   // nn.add_extern() called from Python forward() can find it.
   ExporterScope exporter_scope(this);
 
-  // Delegate to ExportToIRModule
-  IRModule mod = ExportToIRModule(spec, debug);
+  // Delegate to ExportToIRModule (now a member method)
+  IRModule mod = this->ExportToIRModule(spec, debug);
 
   // Return [mod, named_params, extern_mods] as Array<Any>
   ffi::Array<ffi::Any> result;
@@ -754,10 +754,10 @@ void ExporterNode::RegisterReflection() {
 Exporter::Exporter(bool debug) { data_ = ffi::make_object<ExporterNode>(debug); }
 
 // ===========================================================================
-// ExportToIRModule
+// ExporterNode::ExportToIRModule
 // ===========================================================================
 
-IRModule ExportToIRModule(ModuleSpec spec, bool debug) {
+IRModule ExporterNode::ExportToIRModule(ModuleSpec spec, bool debug) {
   const ModuleSpecNode* ms_node = spec.get();
   BlockBuilder bb = BlockBuilder::Create(std::nullopt);
 
@@ -795,10 +795,6 @@ TVM_FFI_STATIC_INIT_BLOCK() {
 
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef()
-      .def("relax.frontend.nn.ExportToIRModule",
-           [](ModuleSpec spec, bool debug) -> IRModule {
-             return ExportToIRModule(std::move(spec), debug);
-           })
       .def("relax.frontend.nn.GetCurrentIOVar", GetCurrentIOVar)
 
       .def("relax.frontend.nn.SetCurrentIOVar", SetCurrentIOVar)

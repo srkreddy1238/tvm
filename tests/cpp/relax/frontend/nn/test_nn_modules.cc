@@ -1291,7 +1291,10 @@ TEST(NNModules, TestKVCache) {
                       ffi::Array<ffi::Any>{ffi::Any(ms)},
                       /*named_params=*/{}, named_effects);
 
-  IRModule actual = ExportToIRModule(mod_spec, /*debug=*/true);
+  // Use Exporter to export the module
+  Exporter exporter(/*debug=*/true);
+  ffi::Array<ffi::Any> export_result = exporter->Build(mod_spec);
+  IRModule actual = export_result[0].cast<IRModule>();
 
   // ---------------------------------------------------------------------------
   // Build expected IRModule
@@ -2235,7 +2238,11 @@ static IRModule ExportTupleInputDebug(
                       ffi::Array<ffi::Any>{ffi::Any(ms)},
                       /*named_params=*/{},
                       /*named_effects=*/{});
-  return ExportToIRModule(mod_spec, /*debug=*/true);
+
+  // Use Exporter to export the module
+  Exporter exporter(/*debug=*/true);
+  ffi::Array<ffi::Any> export_result = exporter->Build(mod_spec);
+  return export_result[0].cast<IRModule>();
 }
 
 // ===========================================================================

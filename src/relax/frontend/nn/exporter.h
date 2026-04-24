@@ -58,15 +58,6 @@ namespace frontend {
 namespace nn {
 
 /*!
- * \brief Build a TVM IRModule from a ModuleSpec.
- *
- * \param spec    The ModuleSpec describing methods and parameters.
- * \param debug   If true, add IOEffect (_io) to every method signature.
- * \return        The compiled IRModule.
- */
-IRModule ExportToIRModule(ModuleSpec spec, bool debug);
-
-/*!
  * \brief Get the current debug _io Var from the thread-local storage.
  * Set by EmitMethod before calling forward(), updated by NNDebugFunc.
  */
@@ -105,6 +96,14 @@ class ExporterNode : public runtime::Object {
    * \return Array[IRModule, named_params as Map, extern_mods as Array]
    */
   ffi::Array<ffi::Any> Build(ModuleSpec spec);
+
+  /*!
+   * \brief Build a TVM IRModule from a ModuleSpec (internal implementation).
+   * \param spec    The ModuleSpec describing methods and parameters.
+   * \param debug   If true, add IOEffect (_io) to every method signature.
+   * \return        The compiled IRModule.
+   */
+  IRModule ExportToIRModule(ModuleSpec spec, bool debug);
 
   static void RegisterReflection();
 
