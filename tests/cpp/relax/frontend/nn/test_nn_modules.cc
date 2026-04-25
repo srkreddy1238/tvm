@@ -81,8 +81,9 @@
  * primary (ffi::Function) constructor.
  *
  * For modules with Optional<Var> arguments (Attention, TimestepEmbedding)
- * a custom forward_fn factory is still used (MakeAttentionForwardFn, etc.)
- * and ModuleSpec is assembled via its low-level constructor.
+ * thin wrapper modules (AttentionWrapperModule, TimestepEmbeddingWrapperModule)
+ * expose a plain Var signature so DeriveMethodFunction can dispatch them
+ * via the module-aware ModuleSpec constructor.
  */
 
 #include <gtest/gtest.h>
@@ -1449,36 +1450,45 @@ TEST(NNModules, TestKVCache) {
 
   AssertStructEqual(actual, bb->Finalize());
 }
-// ---------------------------------------------------------------------------
-// MakeAttentionForwardFn
+// ===========================================================================
+// AttentionWrapperModuleNode / AttentionWrapperModule
 //
-// AttentionModuleNode::_forward has the signature:
-//   _forward(self, hidden_states: Var,
-//            encoder_hidden_states: ffi::Optional<Var>)
-//
-// DeriveMethodFunction always unwraps each
-// named arg as NNTensor → Var and passes it positionally.  That works for
-// the first argument but the second must be wrapped in ffi::Optional<Var>.
-//
-// This factory returns a custom forward_fn that handles the wrapping, so
-// the call site can still use the simple MethodSpec(forward_fn, ...) path.
-// ---------------------------------------------------------------------------
-static ffi::Function MakeAttentionForwardFn(runtime::ObjectRef mod_ref) {
-  return ffi::TypedFunction<ffi::Any(ffi::Map<ffi::String, ffi::Any>)>(
-      [mod_ref](ffi::Map<ffi::String, ffi::Any> named_args) -> ffi::Any {
-        namespace refl = tvm::ffi::reflection;
-        ffi::Function fwd = refl::GetMethod(mod_ref->GetTypeKey(), "_forward");
-        TVM_FFI_ICHECK(fwd.defined());
-        NNTensor hs_t = named_args.at("hidden_states").cast<NNTensor>();
-        NNTensor enc_t = named_args.at("encoder_hidden_states").cast<NNTensor>();
-        ffi::Optional<Var> opt_enc(enc_t->expr);
-        std::vector<ffi::AnyView> args{ffi::AnyView(mod_ref), ffi::AnyView(hs_t->expr),
-                                       ffi::AnyView(opt_enc)};
-        ffi::Any rv;
-        fwd.CallPacked(ffi::PackedArgs(args.data(), args.size()), &rv);
-        return rv;
-      });
-}
+// Thin wrapper around AttentionModule that exposes a _forward(Var, Var)
+// signature (both args as plain Var) so DeriveMethodFunction can dispatch
+// it without needing to handle ffi::Optional<Var>.
+// The wrapper converts the second Var to ffi::Optional<Var> before
+// delegating to AttentionModuleNode::Forward.
+// ===========================================================================
+class AttentionWrapperModuleNode : public NNModuleNode {
+ public:
+  AttentionModule attn;
+
+  explicit AttentionWrapperModuleNode(AttentionModule attn) : attn(std::move(attn)) {}
+
+  Var Forward(Var hidden_states, Var encoder_hidden_states) const {
+    return attn.get()->Forward(hidden_states, ffi::Optional<Var>(encoder_hidden_states));
+  }
+
+  static void RegisterReflection() {
+    namespace refl = tvm::ffi::reflection;
+    refl::ObjectDef<AttentionWrapperModuleNode>()
+        .def(refl::init<AttentionModule>())
+        .def_ro("attn", &AttentionWrapperModuleNode::attn)
+        .def("_forward", &AttentionWrapperModuleNode::Forward);
+  }
+  static constexpr bool _type_mutable = false;
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.frontend.nn.testing.AttentionWrapper",
+                                    AttentionWrapperModuleNode, NNModuleNode);
+};
+class AttentionWrapperModule : public runtime::ObjectRef {
+ public:
+  explicit AttentionWrapperModule(AttentionModule attn) {
+    data_ = ffi::make_object<AttentionWrapperModuleNode>(std::move(attn));
+  }
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(AttentionWrapperModule, runtime::ObjectRef,
+                                                AttentionWrapperModuleNode);
+};
+TVM_FFI_STATIC_INIT_BLOCK() { AttentionWrapperModuleNode::RegisterReflection(); }
 
 // ===========================================================================
 // TestAttention
@@ -1538,29 +1548,33 @@ static ffi::Function MakeAttentionForwardFn(runtime::ObjectRef mod_ref) {
 //   gv1           ← (linear3, (_io,))
 // ===========================================================================
 TEST(NNModules, TestAttention) {
-  // Attention(query_dim=640, cross_attention_dim=2048, heads=10, norm_num_groups=8)
-  // Python defaults: dim_head=64, bias=False, out_bias=True
-  AttentionModule mod = MakeAttention(/*query_dim=*/640,
-                                      /*cross_attention_dim=*/ffi::Optional<int64_t>(int64_t(2048)),
-                                      /*heads=*/10,
-                                      /*dim_head=*/64,
-                                      /*bias=*/false,
-                                      /*norm_num_groups=*/ffi::Optional<int64_t>(int64_t(8)),
-                                      /*out_bias=*/true);
+  AttentionModule attn_mod =
+      MakeAttention(/*query_dim=*/640,
+                    /*cross_attention_dim=*/ffi::Optional<int64_t>(int64_t(2048)),
+                    /*heads=*/10,
+                    /*dim_head=*/64,
+                    /*bias=*/false,
+                    /*norm_num_groups=*/ffi::Optional<int64_t>(int64_t(8)),
+                    /*out_bias=*/true);
 
-  // Collect named parameters in traversal order.
-  ffi::Map<ffi::String, NNParameter> named_params = mod.get()->NamedParameters("");
+  // Wrap in AttentionWrapperModule so DeriveMethodFunction can dispatch
+  // _forward(Var, Var) without needing to handle ffi::Optional<Var>.
+  AttentionWrapperModule mod(attn_mod);
 
-  // AttentionModuleNode::_forward takes Optional<Var> for encoder_hidden_states,
-  // so we supply a custom forward_fn instead of using the module-aware
-  // ModuleSpec constructor.  MethodSpec receives the derived ffi::Function
-  // directly -- no NNModule object is held.
-  ffi::Array<ffi::String> attn_arg_names{"hidden_states", "encoder_hidden_states"};
-  ffi::Array<ffi::Any> attn_arg_specs{ffi::Any(MakeSpecTensor({2, 4096, 640}, "float32")),
-                                      ffi::Any(MakeSpecTensor({2, 77, 2048}, "float32"))};
-  MethodSpec attn_ms(MakeAttentionForwardFn(mod), attn_arg_names, attn_arg_specs, "plain", "plain");
-  ModuleSpec attn_mod_spec(ffi::Array<ffi::String>{ffi::String("forward")},
-                           ffi::Array<ffi::Any>{ffi::Any(attn_ms)}, named_params, {});
+  // named_params come from the inner AttentionModule.
+  ffi::Map<ffi::String, NNParameter> named_params = attn_mod.get()->NamedParameters("");
+
+  ffi::Map<ffi::String, ffi::Any> fwd_spec;
+  fwd_spec.Set("hidden_states", ffi::Any(MakeSpecTensor({2, 4096, 640}, "float32")));
+  fwd_spec.Set("encoder_hidden_states", ffi::Any(MakeSpecTensor({2, 77, 2048}, "float32")));
+  ffi::Map<ffi::String, ffi::Map<ffi::String, ffi::Any>> spec;
+  spec.Set("forward", fwd_spec);
+
+  ModuleSpec attn_mod_spec(mod, spec, /*debug=*/true);
+  // Override named_params with those from the inner AttentionModule.
+  attn_mod_spec = ModuleSpec(attn_mod_spec->method_names, attn_mod_spec->method_specs, named_params,
+                             attn_mod_spec->named_effects);
+
   ffi::Array<ffi::Any> attn_result =
       mod.get()->ExportTVM(attn_mod_spec, /*debug=*/true, /*allow_extern=*/false);
   IRModule actual = attn_result[0].cast<IRModule>();
@@ -1658,7 +1672,7 @@ TEST(NNModules, TestAttention) {
     //   "permute_dims" ← permute_dims(to_q_weight)
     Var permute_dims = bb->Emit(relax::permute_dims(to_q_weight, std::nullopt), "permute_dims");
     //   "linear" ← matmul(gn_out, permute_dims)   [hint "linear", no bias]
-    Var linear_q = bb->Emit(relax::matmul(gn_out, permute_dims, std::nullopt), "linear");
+    Var matmul_q = bb->Emit(relax::matmul(gn_out, permute_dims, std::nullopt), "matmul");
 
     // ---- enc = encoder_hidden_states (Optional<Var> is populated) ---------
 
@@ -1668,8 +1682,8 @@ TEST(NNModules, TestAttention) {
     //   "permute_dims1" ← permute_dims(to_k_weight)   [dedup suffix 1]
     Var permute_dims1 = bb->Emit(relax::permute_dims(to_k_weight, std::nullopt), "permute_dims1");
     //   "linear1" ← matmul(enc, permute_dims1)        [hint "linear" → dedup "linear1"]
-    Var linear_k =
-        bb->Emit(relax::matmul(encoder_hidden_states, permute_dims1, std::nullopt), "linear1");
+    Var matmul_k =
+        bb->Emit(relax::matmul(encoder_hidden_states, permute_dims1, std::nullopt), "matmul1");
 
     // ---- to_v.Forward(enc) — Linear, no bias ------------------------------
     // Emit(matmul(enc, permute_dims(to_v_weight)), "linear")
@@ -1677,22 +1691,22 @@ TEST(NNModules, TestAttention) {
     //   "permute_dims2" ← permute_dims(to_v_weight)   [dedup suffix 2]
     Var permute_dims2 = bb->Emit(relax::permute_dims(to_v_weight, std::nullopt), "permute_dims2");
     //   "linear2" ← matmul(enc, permute_dims2)        [hint "linear" → dedup "linear2"]
-    Var linear_v =
-        bb->Emit(relax::matmul(encoder_hidden_states, permute_dims2, std::nullopt), "linear2");
+    Var matmul_v =
+        bb->Emit(relax::matmul(encoder_hidden_states, permute_dims2, std::nullopt), "matmul2");
 
     // ---- reshape_4d(q=linear_q, "q") → [2, 4096, 10, 64] -----------------
     // AttentionModuleNode::reshape_4d uses shape [0, -1, heads, head_dim]
     // which the BlockBuilder resolves to [2, 4096, 10, 64] for this input.
     ShapeExpr q_shape(ffi::Array<PrimExpr>{I64(2), I64(4096), I64(10), I64(64)});
-    Var q = bb->Emit(relax::reshape(linear_q, q_shape), "q");
+    Var q = bb->Emit(relax::reshape(matmul_q, q_shape), "q");
 
     // ---- reshape_4d(k=linear_k, "k") → [2, 77, 10, 64] -------------------
     ShapeExpr k_shape(ffi::Array<PrimExpr>{I64(2), I64(77), I64(10), I64(64)});
-    Var k = bb->Emit(relax::reshape(linear_k, k_shape), "k");
+    Var k = bb->Emit(relax::reshape(matmul_k, k_shape), "k");
 
     // ---- reshape_4d(v=linear_v, "v") → [2, 77, 10, 64] -------------------
     ShapeExpr v_shape(ffi::Array<PrimExpr>{I64(2), I64(77), I64(10), I64(64)});
-    Var v = bb->Emit(relax::reshape(linear_v, v_shape), "v");
+    Var v = bb->Emit(relax::reshape(matmul_v, v_shape), "v");
 
     // ---- attention(q, k, v, bias=None, scale=None,
     //                causal_mask=None, window_size=None) → "attn_out" -------
@@ -1846,31 +1860,42 @@ TEST(NNModules, TestEmbedding2D) {
   AssertStructEqual(actual, bb->Finalize());
 }
 
-// ---------------------------------------------------------------------------
-// MakeTimestepEmbeddingForwardFn
+// ===========================================================================
+// TimestepEmbeddingWrapperModuleNode / TimestepEmbeddingWrapperModule
 //
-// TimestepEmbeddingModuleNode::_forward has the signature:
-//   _forward(self, sample: Var, condition: ffi::Optional<Var>)
-//
-// Same situation as Attention: the second arg must be Optional<Var>, so we
-// provide a custom forward_fn factory rather than using DeriveMethodFunction.
-// ---------------------------------------------------------------------------
-static ffi::Function MakeTimestepEmbeddingForwardFn(runtime::ObjectRef mod_ref) {
-  return ffi::TypedFunction<ffi::Any(ffi::Map<ffi::String, ffi::Any>)>(
-      [mod_ref](ffi::Map<ffi::String, ffi::Any> named_args) -> ffi::Any {
-        namespace refl = tvm::ffi::reflection;
-        ffi::Function fwd = refl::GetMethod(mod_ref->GetTypeKey(), "_forward");
-        TVM_FFI_ICHECK(fwd.defined());
-        NNTensor sample_t = named_args.at("sample").cast<NNTensor>();
-        NNTensor cond_t = named_args.at("condition").cast<NNTensor>();
-        ffi::Optional<Var> opt_cond(cond_t->expr);
-        std::vector<ffi::AnyView> args{ffi::AnyView(mod_ref), ffi::AnyView(sample_t->expr),
-                                       ffi::AnyView(opt_cond)};
-        ffi::Any rv;
-        fwd.CallPacked(ffi::PackedArgs(args.data(), args.size()), &rv);
-        return rv;
-      });
-}
+// Thin wrapper around TimestepEmbeddingModule that exposes _forward(Var, Var)
+// so DeriveMethodFunction can dispatch without handling ffi::Optional<Var>.
+// ===========================================================================
+class TimestepEmbeddingWrapperModuleNode : public NNModuleNode {
+ public:
+  TimestepEmbeddingModule tse;
+
+  explicit TimestepEmbeddingWrapperModuleNode(TimestepEmbeddingModule tse) : tse(std::move(tse)) {}
+
+  Var Forward(Var sample, Var condition) const {
+    return tse.get()->Forward(sample, ffi::Optional<Var>(condition));
+  }
+
+  static void RegisterReflection() {
+    namespace refl = tvm::ffi::reflection;
+    refl::ObjectDef<TimestepEmbeddingWrapperModuleNode>()
+        .def(refl::init<TimestepEmbeddingModule>())
+        .def_ro("tse", &TimestepEmbeddingWrapperModuleNode::tse)
+        .def("_forward", &TimestepEmbeddingWrapperModuleNode::Forward);
+  }
+  static constexpr bool _type_mutable = false;
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.frontend.nn.testing.TimestepEmbeddingWrapper",
+                                    TimestepEmbeddingWrapperModuleNode, NNModuleNode);
+};
+class TimestepEmbeddingWrapperModule : public runtime::ObjectRef {
+ public:
+  explicit TimestepEmbeddingWrapperModule(TimestepEmbeddingModule tse) {
+    data_ = ffi::make_object<TimestepEmbeddingWrapperModuleNode>(std::move(tse));
+  }
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(TimestepEmbeddingWrapperModule, runtime::ObjectRef,
+                                                TimestepEmbeddingWrapperModuleNode);
+};
+TVM_FFI_STATIC_INIT_BLOCK() { TimestepEmbeddingWrapperModuleNode::RegisterReflection(); }
 
 // ===========================================================================
 // TestTimestepEmbedding
@@ -1925,33 +1950,30 @@ static ffi::Function MakeTimestepEmbeddingForwardFn(runtime::ObjectRef mod_ref) 
 //   gv1           ← (linear2, (_io,))                        [output]
 // ===========================================================================
 TEST(NNModules, TestTimestepEmbedding) {
-  // TimestepEmbedding(in_channels=32, time_embed_dim=32, cond_proj_dim=16)
-  // Python: modules.TimestepEmbedding(32, 32, cond_proj_dim=16)
-  // C++ defaults: act_fn="silu", out_dim=nullopt, post_act_fn=nullopt
-  TimestepEmbeddingModule mod =
+  TimestepEmbeddingModule tse_mod =
       MakeTimestepEmbedding(/*in_channels=*/32, /*time_embed_dim=*/32,
                             /*act_fn=*/"silu",
                             /*out_dim=*/std::nullopt,
                             /*post_act_fn=*/std::nullopt,
                             /*cond_proj_dim=*/ffi::Optional<int64_t>(int64_t(16)));
 
-  // Collect named parameters in traversal order:
-  //   linear_1.weight [32,32], linear_1.bias [32],
-  //   cond_proj.weight [32,16],
-  //   linear_2.weight [32,32], linear_2.bias [32]
-  ffi::Map<ffi::String, NNParameter> named_params = mod.get()->NamedParameters("");
+  // Wrap so DeriveMethodFunction can dispatch _forward(Var, Var).
+  TimestepEmbeddingWrapperModule mod(tse_mod);
 
-  // TimestepEmbeddingModuleNode::_forward takes Optional<Var> for condition,
-  // so we supply a custom forward_fn instead of using the module-aware
-  // ModuleSpec constructor.  MethodSpec receives the derived ffi::Function
-  // directly -- no NNModule object is held.
-  ffi::Array<ffi::String> tse_arg_names{"sample", "condition"};
-  ffi::Array<ffi::Any> tse_arg_specs{ffi::Any(MakeSpecTensor({32, 32}, "float32")),
-                                     ffi::Any(MakeSpecTensor({32, 16}, "float32"))};
-  MethodSpec tse_ms(MakeTimestepEmbeddingForwardFn(mod), tse_arg_names, tse_arg_specs, "plain",
-                    "plain");
-  ModuleSpec tse_mod_spec(ffi::Array<ffi::String>{ffi::String("forward")},
-                          ffi::Array<ffi::Any>{ffi::Any(tse_ms)}, named_params, {});
+  // named_params come from the inner TimestepEmbeddingModule.
+  ffi::Map<ffi::String, NNParameter> named_params = tse_mod.get()->NamedParameters("");
+
+  ffi::Map<ffi::String, ffi::Any> fwd_spec;
+  fwd_spec.Set("sample", ffi::Any(MakeSpecTensor({32, 32}, "float32")));
+  fwd_spec.Set("condition", ffi::Any(MakeSpecTensor({32, 16}, "float32")));
+  ffi::Map<ffi::String, ffi::Map<ffi::String, ffi::Any>> spec;
+  spec.Set("forward", fwd_spec);
+
+  ModuleSpec tse_mod_spec(mod, spec, /*debug=*/true);
+  // Override named_params with those from the inner TimestepEmbeddingModule.
+  tse_mod_spec = ModuleSpec(tse_mod_spec->method_names, tse_mod_spec->method_specs, named_params,
+                            tse_mod_spec->named_effects);
+
   ffi::Array<ffi::Any> tse_result =
       mod.get()->ExportTVM(tse_mod_spec, /*debug=*/true, /*allow_extern=*/false);
   IRModule actual = tse_result[0].cast<IRModule>();
@@ -2020,10 +2042,10 @@ TEST(NNModules, TestTimestepEmbedding) {
     Var permute_dims =
         bb->Emit(relax::permute_dims(cond_proj_weight, std::nullopt), "permute_dims");
     //   "linear" ← matmul(condition, permute_dims)   [hint "linear", no bias]
-    Var linear_out = bb->Emit(relax::matmul(condition, permute_dims, std::nullopt), "linear");
+    Var matmul_out_cond = bb->Emit(relax::matmul(condition, permute_dims, std::nullopt), "matmul");
 
     // ---- Step 2: Emit(add(sample, linear), "cond_add") --------------------
-    Var cond_add = bb->Emit(relax::add(sample, linear_out), "cond_add");
+    Var cond_add = bb->Emit(relax::add(sample, matmul_out_cond), "cond_add");
 
     // ---- Step 3: linear_1.Forward(cond_add) — Linear, with bias -----------
     // Emit(add(matmul(cond_add, permute_dims(linear_1_weight)), linear_1_bias), "linear")
@@ -2239,64 +2261,60 @@ TEST(NNModules, TestTimesteps) {
   AssertStructEqual(actual, bb->Finalize());
 }
 
-// ---------------------------------------------------------------------------
-// ExportTupleInputDebug
+// ===========================================================================
+// TupleInputModuleNode / TupleInputModule
 //
-// Export helper for modules whose single input "x" is a SpecTuple.
-// Uses a custom forward lambda (SpecTuple inputs are not dispatched via
-// "_forward" reflection), so MethodSpec is built with the primary
-// (ffi::Function) constructor.  MethodSpec never holds an NNModule.
-// ---------------------------------------------------------------------------
-static IRModule ExportTupleInputDebug(
-    std::function<ffi::Array<ffi::Any>(NNTensor, NNTensor)> body_fn, SpecTensor elem_spec,
-    bool is_tuple) {
-  ffi::Array<ffi::Any> elements{ffi::Any(elem_spec), ffi::Any(elem_spec)};
-  SpecTuple x_spec("x", elements, is_tuple);
-
-  ffi::TypedFunction<ffi::Any(ffi::Map<ffi::String, ffi::Any>)> forward_fn =
-      [body_fn](ffi::Map<ffi::String, ffi::Any> named_args) -> ffi::Any {
-    ffi::Array<ffi::Any> x_arr = named_args.at("x").cast<ffi::Array<ffi::Any>>();
-    NNTensor x0 = x_arr[0].cast<NNTensor>();
-    NNTensor x1 = x_arr[1].cast<NNTensor>();
-    ffi::Array<ffi::Any> result = body_fn(x0, x1);
+// Test-only module for TestNNModuleTupleInput and TestNNModuleListInput.
+// forward(x: Array<Any>) unpacks x[0] and x[1] as NNTensors and returns
+// (add(x0, x1), subtract(x0, x1)).
+// The is_tuple flag is only used in the SpecTuple spec, not in the module.
+// ===========================================================================
+class TupleInputModuleNode : public NNModuleNode {
+ public:
+  ffi::Any ForwardAny(ffi::Array<ffi::Any> x) const {
+    BlockBuilder bb = BlockBuilder_Current();
+    TVM_FFI_ICHECK(bb.defined());
+    NNTensor x0 = x[0].cast<NNTensor>();
+    NNTensor x1 = x[1].cast<NNTensor>();
+    Var add_out = bb->Emit(relax::add(x0->expr, x1->expr), "add");
+    Var sub_out = bb->Emit(relax::subtract(x0->expr, x1->expr), "subtract");
+    ffi::Array<ffi::Any> result{ffi::Any(NNTensor(add_out)), ffi::Any(NNTensor(sub_out))};
     return ffi::Any(result);
-  };
-
-  ffi::Array<ffi::String> arg_names{"x"};
-  ffi::Array<ffi::Any> arg_specs{ffi::Any(x_spec)};
-
-  // Build MethodSpec with the primary (ffi::Function) constructor.
-  // MethodSpec does not hold or receive an NNModule object.
-  MethodSpec ms(forward_fn.packed(), arg_names, arg_specs, "plain", "plain");
-
-  // Assemble ModuleSpec via the low-level constructor.
-  ModuleSpec mod_spec(ffi::Array<ffi::String>{ffi::String("forward")},
-                      ffi::Array<ffi::Any>{ffi::Any(ms)},
-                      /*named_params=*/{},
-                      /*named_effects=*/{});
-
-  // A bare NNModule is used only as the ExportTVM entry-point.
-  NNModule mod;
-  ffi::Array<ffi::Any> result = mod->ExportTVM(mod_spec, /*debug=*/true, /*allow_extern=*/false);
-  return result[0].cast<IRModule>();
-}
+  }
+  static void RegisterReflection() {
+    namespace refl = tvm::ffi::reflection;
+    refl::ObjectDef<TupleInputModuleNode>()
+        .def(refl::init<>())
+        .def("_forward", &TupleInputModuleNode::ForwardAny);
+  }
+  static constexpr bool _type_mutable = false;
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.frontend.nn.testing.TupleInput", TupleInputModuleNode,
+                                    NNModuleNode);
+};
+class TupleInputModule : public runtime::ObjectRef {
+ public:
+  explicit TupleInputModule() { data_ = ffi::make_object<TupleInputModuleNode>(); }
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(TupleInputModule, runtime::ObjectRef,
+                                                TupleInputModuleNode);
+};
+TVM_FFI_STATIC_INIT_BLOCK() { TupleInputModuleNode::RegisterReflection(); }
 
 // ===========================================================================
 // TestNNModuleTupleInput
 // ===========================================================================
 TEST(NNModules, TestNNModuleTupleInput) {
   DataType f32 = DataType::Float(32);
+  TupleInputModule mod;
   SpecTensor elem_spec = MakeSpecTensor({10, 5}, "float32");
-
-  auto body_fn = [](NNTensor x0, NNTensor x1) -> ffi::Array<ffi::Any> {
-    BlockBuilder bb = BlockBuilder_Current();
-    TVM_FFI_ICHECK(bb.defined());
-    Var add_out = bb->Emit(relax::add(x0->expr, x1->expr), "add");
-    Var sub_out = bb->Emit(relax::subtract(x0->expr, x1->expr), "subtract");
-    return {ffi::Any(NNTensor(add_out)), ffi::Any(NNTensor(sub_out))};
-  };
-
-  IRModule actual = ExportTupleInputDebug(body_fn, elem_spec, /*is_tuple=*/true);
+  ffi::Array<ffi::Any> elements{ffi::Any(elem_spec), ffi::Any(elem_spec)};
+  SpecTuple x_spec("x", elements, /*is_tuple=*/true);
+  ffi::Map<ffi::String, ffi::Any> fwd_spec;
+  fwd_spec.Set("x", ffi::Any(x_spec));
+  ffi::Map<ffi::String, ffi::Map<ffi::String, ffi::Any>> spec;
+  spec.Set("forward", fwd_spec);
+  ModuleSpec mod_spec(mod, spec, /*debug=*/true);
+  ffi::Array<ffi::Any> result = mod->ExportTVM(mod_spec, /*debug=*/true, /*allow_extern=*/false);
+  IRModule actual = result[0].cast<IRModule>();
 
   BlockBuilder bb = BlockBuilder::Create(std::nullopt);
   EmitInitEffect(bb);
@@ -2333,17 +2351,17 @@ TEST(NNModules, TestNNModuleTupleInput) {
 // ===========================================================================
 TEST(NNModules, TestNNModuleListInput) {
   DataType f32 = DataType::Float(32);
+  TupleInputModule mod;
   SpecTensor elem_spec = MakeSpecTensor({10, 5}, "float32");
-
-  auto body_fn = [](NNTensor x0, NNTensor x1) -> ffi::Array<ffi::Any> {
-    BlockBuilder bb = BlockBuilder_Current();
-    TVM_FFI_ICHECK(bb.defined());
-    Var add_out = bb->Emit(relax::add(x0->expr, x1->expr), "add");
-    Var sub_out = bb->Emit(relax::subtract(x0->expr, x1->expr), "subtract");
-    return {ffi::Any(NNTensor(add_out)), ffi::Any(NNTensor(sub_out))};
-  };
-
-  IRModule actual = ExportTupleInputDebug(body_fn, elem_spec, /*is_tuple=*/false);
+  ffi::Array<ffi::Any> elements{ffi::Any(elem_spec), ffi::Any(elem_spec)};
+  SpecTuple x_spec("x", elements, /*is_tuple=*/false);
+  ffi::Map<ffi::String, ffi::Any> fwd_spec;
+  fwd_spec.Set("x", ffi::Any(x_spec));
+  ffi::Map<ffi::String, ffi::Map<ffi::String, ffi::Any>> spec;
+  spec.Set("forward", fwd_spec);
+  ModuleSpec mod_spec(mod, spec, /*debug=*/true);
+  ffi::Array<ffi::Any> result = mod->ExportTVM(mod_spec, /*debug=*/true, /*allow_extern=*/false);
+  IRModule actual = result[0].cast<IRModule>();
 
   BlockBuilder bb = BlockBuilder::Create(std::nullopt);
   EmitInitEffect(bb);

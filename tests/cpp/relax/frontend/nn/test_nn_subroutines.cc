@@ -93,6 +93,7 @@
 
 #include "../../../../../src/relax/frontend/nn/core.h"
 #include "../../../../../src/relax/frontend/nn/exporter.h"
+#include "../../../../../src/relax/frontend/nn/modules.h"
 #include "../../../../../src/relax/frontend/nn/spec.h"
 #include "../../../../../src/relax/op/nn/nn.h"
 #include "../../../../../src/relax/op/tensor/linear_algebra.h"
@@ -118,6 +119,110 @@ static void AssertStructEqual(const IRModule& actual, const IRModule& expected) 
                                                         << actual << "\n=== Expected ===\n"
                                                         << expected;
 }
+
+// ===========================================================================
+// SubroutinesTestModuleNode / SubroutinesTestModule
+//
+// Test-only module for TestLinear.
+// Mirrors:
+//   class Layer(nn.Module):
+//       define_subroutine = True
+//       def __init__(self, in_features, out_features):
+//           self.weights = nn.Parameter((in_features, out_features), "float32")
+//           self.activation = Activation()
+//       def forward(self, input):
+//           state = nn.op.matmul(input, self.weights)
+//           return self.activation(state)
+//
+// The _forward method emits two private subroutine functions (activation,
+// layer) via BlockBuilder::AddFunction before calling them from the main
+// dataflow block, exactly as the Python define_subroutine=True path does.
+// ===========================================================================
+class SubroutinesTestModuleNode : public NNModuleNode {
+ public:
+  NNParameter weights;
+
+  explicit SubroutinesTestModuleNode(NNParameter weights) : weights(std::move(weights)) {
+    // Populate attrs so NNModuleNode::NamedParameters() discovers this
+    // parameter and the exporter adds it as a function argument.
+    attrs.Set("weights", ffi::Any(this->weights));
+  }
+
+  Var Forward(Var state) const {
+    DataType f32 = DataType::Float(32);
+    BlockBuilder bb = BlockBuilder_Current();
+    TVM_FFI_ICHECK(bb.defined()) << "Forward called outside BlockBuilder scope";
+
+    // Emit private function: activation(state: (batch_size, 32)) -> silu(state)
+    GlobalVar gv_activation;
+    {
+      tir::Var bs("batch_size", DataType::Int(64));
+      TensorStructInfo sinfo(ShapeExpr(ffi::Array<PrimExpr>{bs, IntImm(DataType::Int(64), 32)}),
+                             f32);
+      Var state_param("state", sinfo);
+      ffi::Array<Var> act_params{state_param};
+      bb->BeginScope(act_params);
+      bb->BeginDataflowBlock();
+      Var silu_out = bb->Emit(relax::silu(state_param), "state");
+      Var df_out = bb->EmitOutput(silu_out, "dataflow_output");
+      BindingBlock df = bb->EndBlock();
+      Expr act_body = bb->Normalize(SeqExpr({df}, df_out));
+      bb->EndScope();
+      gv_activation = bb->AddFunction(
+          Function(act_params, act_body, sinfo, /*is_pure=*/true, DictAttrs()), "activation");
+    }
+
+    // Emit private function: layer(state: (batch_size, 64), weights: (64, 32))
+    GlobalVar gv_layer;
+    {
+      tir::Var bs("batch_size", DataType::Int(64));
+      TensorStructInfo in_sinfo(ShapeExpr(ffi::Array<PrimExpr>{bs, IntImm(DataType::Int(64), 64)}),
+                                f32);
+      TensorStructInfo out_sinfo(ShapeExpr(ffi::Array<PrimExpr>{bs, IntImm(DataType::Int(64), 32)}),
+                                 f32);
+      TensorStructInfo w_sinfo(ShapeExpr(ffi::Array<PrimExpr>{IntImm(DataType::Int(64), 64),
+                                                              IntImm(DataType::Int(64), 32)}),
+                               f32);
+      Var state_param("state", in_sinfo);
+      Var w_param("weights", w_sinfo);
+      ffi::Array<Var> layer_params{state_param, w_param};
+      bb->BeginScope(layer_params);
+      bb->BeginDataflowBlock();
+      Var mm = bb->Emit(relax::matmul(state_param, w_param, std::nullopt), "state");
+      Var act_out = bb->Emit(Call(gv_activation, {mm}), "state");
+      Var df_out = bb->EmitOutput(act_out, "dataflow_output");
+      BindingBlock df = bb->EndBlock();
+      Expr layer_body = bb->Normalize(SeqExpr({df}, df_out));
+      bb->EndScope();
+      gv_layer = bb->AddFunction(
+          Function(layer_params, layer_body, out_sinfo, /*is_pure=*/true, DictAttrs()), "layer");
+    }
+
+    // Call layer from the main dataflow block.
+    Var result = bb->Emit(Call(gv_layer, {state, weights->expr}), "state");
+    return result;
+  }
+
+  static void RegisterReflection() {
+    namespace refl = tvm::ffi::reflection;
+    refl::ObjectDef<SubroutinesTestModuleNode>()
+        .def(refl::init<NNParameter>())
+        .def_ro("weights", &SubroutinesTestModuleNode::weights)
+        .def("_forward", &SubroutinesTestModuleNode::Forward);
+  }
+  static constexpr bool _type_mutable = false;
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.frontend.nn.testing.SubroutinesTest",
+                                    SubroutinesTestModuleNode, NNModuleNode);
+};
+class SubroutinesTestModule : public runtime::ObjectRef {
+ public:
+  explicit SubroutinesTestModule(NNParameter weights) {
+    data_ = ffi::make_object<SubroutinesTestModuleNode>(std::move(weights));
+  }
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(SubroutinesTestModule, runtime::ObjectRef,
+                                                SubroutinesTestModuleNode);
+};
+TVM_FFI_STATIC_INIT_BLOCK() { SubroutinesTestModuleNode::RegisterReflection(); }
 
 // ===========================================================================
 // TestLinear
@@ -150,89 +255,25 @@ TEST(NNSubroutines, TestLinear) {
   DataType f32 = DataType::Float(32);
   tir::Var batch_size("batch_size", DataType::Int(64));
 
-  // Named parameter: weights (64, 32)
   NNParameter weights_param(Var(
       "weights", TensorStructInfo(ShapeExpr(ffi::Array<PrimExpr>{IntImm(DataType::Int(64), 64),
                                                                  IntImm(DataType::Int(64), 32)}),
                                   f32)));
-  ffi::Map<ffi::String, NNParameter> named_params;
-  named_params.Set("weights", weights_param);
 
-  // The forward lambda emits two private subroutine functions and then calls
-  // them from the main dataflow block.
-  ffi::TypedFunction<ffi::Any(ffi::Map<ffi::String, ffi::Any>)> forward_fn =
-      [batch_size, f32, weights_param](ffi::Map<ffi::String, ffi::Any> args) -> ffi::Any {
-    NNTensor input = args.at("input").cast<NNTensor>();
-    // Parameters are accessed via their NNParameter::expr, which the exporter
-    // sets to the emitted Var before calling the forward lambda.
-    Var weights_var = weights_param->expr;
-
-    BlockBuilder bb = BlockBuilder_Current();
-    TVM_FFI_ICHECK(bb.defined()) << "forward called outside BlockBuilder scope";
-
-    // --- Emit private function: activation(state) -> silu(state) ---
-    // AddFunction returns the GlobalVar; no global_symbol attr → private.
-    GlobalVar gv_activation;
-    {
-      tir::Var bs("batch_size", DataType::Int(64));
-      TensorStructInfo state_sinfo(
-          ShapeExpr(ffi::Array<PrimExpr>{bs, IntImm(DataType::Int(64), 32)}), f32);
-      Var state_param("state", state_sinfo);
-      ffi::Array<Var> act_params{state_param};
-      bb->BeginScope(act_params);
-      bb->BeginDataflowBlock();
-      Var silu_out = bb->Emit(relax::silu(state_param), "state");
-      Var df_out = bb->EmitOutput(silu_out, "dataflow_output");
-      BindingBlock df = bb->EndBlock();
-      Expr act_body = bb->Normalize(SeqExpr({df}, df_out));
-      bb->EndScope();
-      // No global_symbol → private function.
-      gv_activation = bb->AddFunction(
-          Function(act_params, act_body, state_sinfo, /*is_pure=*/true, DictAttrs()), "activation");
-    }
-
-    // --- Emit private function: layer(state, weights) ---
-    GlobalVar gv_layer;
-    {
-      tir::Var bs("batch_size", DataType::Int(64));
-      TensorStructInfo in_sinfo(ShapeExpr(ffi::Array<PrimExpr>{bs, IntImm(DataType::Int(64), 64)}),
-                                f32);
-      TensorStructInfo out_sinfo(ShapeExpr(ffi::Array<PrimExpr>{bs, IntImm(DataType::Int(64), 32)}),
-                                 f32);
-      TensorStructInfo w_sinfo(ShapeExpr(ffi::Array<PrimExpr>{IntImm(DataType::Int(64), 64),
-                                                              IntImm(DataType::Int(64), 32)}),
-                               f32);
-      Var state_param("state", in_sinfo);
-      Var w_param("weights", w_sinfo);
-      ffi::Array<Var> layer_params{state_param, w_param};
-      bb->BeginScope(layer_params);
-      bb->BeginDataflowBlock();
-      Var mm = bb->Emit(relax::matmul(state_param, w_param, std::nullopt), "state");
-      Var act_out = bb->Emit(Call(gv_activation, {mm}), "state");
-      Var df_out = bb->EmitOutput(act_out, "dataflow_output");
-      BindingBlock df = bb->EndBlock();
-      Expr layer_body = bb->Normalize(SeqExpr({df}, df_out));
-      bb->EndScope();
-      // No global_symbol → private function.
-      gv_layer = bb->AddFunction(
-          Function(layer_params, layer_body, out_sinfo, /*is_pure=*/true, DictAttrs()), "layer");
-    }
-
-    // --- Call layer from the main dataflow block ---
-    Var result = bb->Emit(Call(gv_layer, {input->expr, weights_var}), "state");
-    return ffi::Any(NNTensor(result));
-  };
+  SubroutinesTestModule mod(weights_param);
 
   ffi::Array<ffi::Any> spec_shape;
   spec_shape.push_back(ffi::Any(PrimExpr(batch_size)));
   spec_shape.push_back(ffi::Any(int64_t(64)));
   SpecTensor input_spec(spec_shape, "float32");
 
-  MethodSpec ms(forward_fn, {"input"}, {ffi::Any(input_spec)}, "plain", "plain");
-  ModuleSpec mod_spec({"forward"}, {ffi::Any(ms)}, named_params, {});
+  ffi::Map<ffi::String, ffi::Any> forward_arg_spec;
+  forward_arg_spec.Set("state", ffi::Any(input_spec));
+  ffi::Map<ffi::String, ffi::Map<ffi::String, ffi::Any>> spec;
+  spec.Set("forward", forward_arg_spec);
 
-  // Create a minimal NNModule wrapper and use ExportTVM
-  NNModule mod;
+  ModuleSpec mod_spec(mod, spec, /*debug=*/true);
+
   ffi::Array<ffi::Any> result = mod->ExportTVM(mod_spec, /*debug=*/true, /*allow_extern=*/false);
   IRModule actual = result[0].cast<IRModule>();
 
@@ -312,7 +353,7 @@ TEST(NNSubroutines, TestLinear) {
     bb->BeginScope(params);
     bb->BeginDataflowBlock();
     Var layer_out = bb->Emit(Call(gv_layer, {state, weights}), "state");
-    Var df_out = bb->EmitOutput(relax::Tuple({layer_out, relax::Tuple({io})}), "dataflow_output");
+    Var df_out = bb->EmitOutput(relax::Tuple({layer_out, relax::Tuple({io})}), "gv1");
     BindingBlock df = bb->EndBlock();
     Expr body = bb->Normalize(SeqExpr({df}, df_out));
     bb->EndScope();

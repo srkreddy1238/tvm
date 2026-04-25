@@ -119,6 +119,190 @@ static bool AllClose(const std::vector<float>& a, const std::vector<float>& b, f
 }
 
 // ===========================================================================
+// Test-only NNModule definitions for test_nn_jit.cc
+//
+// Each module mirrors the corresponding Python Layer class from
+// test_frontend_nn_jit.py and registers _forward via reflection so that
+// the module-aware ModuleSpec constructor can derive the ffi::Function.
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// AddSelfModuleNode — forward(x) = add(x, x)
+// ---------------------------------------------------------------------------
+class AddSelfModuleNode : public NNModuleNode {
+ public:
+  Var Forward(Var x) const {
+    static const ffi::Function op_add = NNOp("add");
+    return op_add(x, x, ffi::String("add")).cast<Var>();
+  }
+  static void RegisterReflection() {
+    namespace refl = tvm::ffi::reflection;
+    refl::ObjectDef<AddSelfModuleNode>()
+        .def(refl::init<>())
+        .def("_forward", &AddSelfModuleNode::Forward);
+  }
+  static constexpr bool _type_mutable = false;
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.frontend.nn.testing.AddSelf", AddSelfModuleNode,
+                                    NNModuleNode);
+};
+class AddSelfModule : public runtime::ObjectRef {
+ public:
+  explicit AddSelfModule() { data_ = ffi::make_object<AddSelfModuleNode>(); }
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(AddSelfModule, runtime::ObjectRef,
+                                                AddSelfModuleNode);
+};
+TVM_FFI_STATIC_INIT_BLOCK() { AddSelfModuleNode::RegisterReflection(); }
+
+// ---------------------------------------------------------------------------
+// AddReshapeModuleNode — forward(x, i) = reshape(add(x, x), [i, 5, 5])
+// ---------------------------------------------------------------------------
+class AddReshapeModuleNode : public NNModuleNode {
+ public:
+  Var Forward(Var x, tir::Var i) const {
+    static const ffi::Function op_add = NNOp("add");
+    static const ffi::Function op_reshape = NNOp("reshape");
+    ffi::Any y = op_add(x, x, ffi::String("add"));
+    ffi::Array<ffi::Any> new_shape;
+    new_shape.push_back(ffi::Any(PrimExpr(i)));
+    new_shape.push_back(ffi::Any(int64_t(5)));
+    new_shape.push_back(ffi::Any(int64_t(5)));
+    return op_reshape(y.cast<Var>(), new_shape, ffi::String("reshape")).cast<Var>();
+  }
+  static void RegisterReflection() {
+    namespace refl = tvm::ffi::reflection;
+    refl::ObjectDef<AddReshapeModuleNode>()
+        .def(refl::init<>())
+        .def("_forward", &AddReshapeModuleNode::Forward);
+  }
+  static constexpr bool _type_mutable = false;
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.frontend.nn.testing.AddReshape", AddReshapeModuleNode,
+                                    NNModuleNode);
+};
+class AddReshapeModule : public runtime::ObjectRef {
+ public:
+  explicit AddReshapeModule() { data_ = ffi::make_object<AddReshapeModuleNode>(); }
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(AddReshapeModule, runtime::ObjectRef,
+                                                AddReshapeModuleNode);
+};
+TVM_FFI_STATIC_INIT_BLOCK() { AddReshapeModuleNode::RegisterReflection(); }
+
+// ---------------------------------------------------------------------------
+// JitKVCacheModuleNode — forward(x, total_seq_len): cache.append(x); return
+// cache.view(total_seq_len)
+// ---------------------------------------------------------------------------
+class JitKVCacheModuleNode : public NNModuleNode {
+ public:
+  KVCacheModule cache;
+
+  explicit JitKVCacheModuleNode(KVCacheModule cache) : cache(std::move(cache)) {}
+
+  Var Forward(Var x, tir::Var total_seq_len) {
+    NNTensor x_tensor(x);
+    cache.get()->Append(x_tensor);
+    NNTensor view = cache.get()->View(PrimExpr(total_seq_len));
+    return view->expr;
+  }
+  static void RegisterReflection() {
+    namespace refl = tvm::ffi::reflection;
+    refl::ObjectDef<JitKVCacheModuleNode>()
+        .def(refl::init<KVCacheModule>())
+        .def_ro("cache", &JitKVCacheModuleNode::cache)
+        .def("_forward", &JitKVCacheModuleNode::Forward);
+  }
+  static constexpr bool _type_mutable = true;
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.frontend.nn.testing.JitKVCache", JitKVCacheModuleNode,
+                                    NNModuleNode);
+};
+class JitKVCacheModule : public runtime::ObjectRef {
+ public:
+  explicit JitKVCacheModule(KVCacheModule cache) {
+    data_ = ffi::make_object<JitKVCacheModuleNode>(std::move(cache));
+  }
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(JitKVCacheModule, runtime::ObjectRef,
+                                                JitKVCacheModuleNode);
+};
+TVM_FFI_STATIC_INIT_BLOCK() { JitKVCacheModuleNode::RegisterReflection(); }
+
+// ---------------------------------------------------------------------------
+// TupleAddSubModuleNode — forward(x: Array<Any>) = (add(x[0],x[1]), sub(x[0],x[1]))
+// Used for both TestJitTupleInput (is_tuple=true) and TestJitListInput (is_tuple=false).
+// Returns ffi::Any (Array<Any>) to handle tuple output.
+// ---------------------------------------------------------------------------
+class TupleAddSubModuleNode : public NNModuleNode {
+ public:
+  ffi::Any ForwardAny(ffi::Array<ffi::Any> x) const {
+    static const ffi::Function op_add = NNOp("add");
+    static const ffi::Function op_sub = NNOp("subtract");
+    NNTensor x0 = x[0].cast<NNTensor>();
+    NNTensor x1 = x[1].cast<NNTensor>();
+    ffi::Array<ffi::Any> out;
+    out.push_back(op_add(x0->expr, x1->expr, ffi::String("add")));
+    out.push_back(op_sub(x0->expr, x1->expr, ffi::String("subtract")));
+    return ffi::Any(out);
+  }
+  static void RegisterReflection() {
+    namespace refl = tvm::ffi::reflection;
+    refl::ObjectDef<TupleAddSubModuleNode>()
+        .def(refl::init<>())
+        .def("_forward", &TupleAddSubModuleNode::ForwardAny);
+  }
+  static constexpr bool _type_mutable = false;
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.frontend.nn.testing.TupleAddSub", TupleAddSubModuleNode,
+                                    NNModuleNode);
+};
+class TupleAddSubModule : public runtime::ObjectRef {
+ public:
+  explicit TupleAddSubModule() { data_ = ffi::make_object<TupleAddSubModuleNode>(); }
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(TupleAddSubModule, runtime::ObjectRef,
+                                                TupleAddSubModuleNode);
+};
+TVM_FFI_STATIC_INIT_BLOCK() { TupleAddSubModuleNode::RegisterReflection(); }
+
+// ---------------------------------------------------------------------------
+// TupleWithIntModuleNode — forward(x: Array<Any>) where x = [Tensor, Tensor, tir::Var]
+//   = (add(x[0],x[1]), sub(x[0],x[1]), reshape(x[0], [5, x[2], 5]))
+// ---------------------------------------------------------------------------
+class TupleWithIntModuleNode : public NNModuleNode {
+ public:
+  ffi::Any ForwardAny(ffi::Array<ffi::Any> x) const {
+    static const ffi::Function op_add = NNOp("add");
+    static const ffi::Function op_sub = NNOp("subtract");
+    static const ffi::Function op_reshape = NNOp("reshape");
+    NNTensor x0 = x[0].cast<NNTensor>();
+    NNTensor x1 = x[1].cast<NNTensor>();
+    tir::Var i = x[2].cast<tir::Var>();
+    ffi::Any y0 = op_add(x0->expr, x1->expr, ffi::String("add"));
+    ffi::Any y1 = op_sub(x0->expr, x1->expr, ffi::String("subtract"));
+    ffi::Array<ffi::Any> new_shape;
+    new_shape.push_back(ffi::Any(int64_t(5)));
+    new_shape.push_back(ffi::Any(PrimExpr(i)));
+    new_shape.push_back(ffi::Any(int64_t(5)));
+    ffi::Any y2 = op_reshape(x0->expr, new_shape, ffi::String("reshape"));
+    ffi::Array<ffi::Any> out;
+    out.push_back(y0);
+    out.push_back(y1);
+    out.push_back(y2);
+    return ffi::Any(out);
+  }
+  static void RegisterReflection() {
+    namespace refl = tvm::ffi::reflection;
+    refl::ObjectDef<TupleWithIntModuleNode>()
+        .def(refl::init<>())
+        .def("_forward", &TupleWithIntModuleNode::ForwardAny);
+  }
+  static constexpr bool _type_mutable = false;
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.frontend.nn.testing.TupleWithInt",
+                                    TupleWithIntModuleNode, NNModuleNode);
+};
+class TupleWithIntModule : public runtime::ObjectRef {
+ public:
+  explicit TupleWithIntModule() { data_ = ffi::make_object<TupleWithIntModuleNode>(); }
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(TupleWithIntModule, runtime::ObjectRef,
+                                                TupleWithIntModuleNode);
+};
+TVM_FFI_STATIC_INIT_BLOCK() { TupleWithIntModuleNode::RegisterReflection(); }
+
+// ===========================================================================
 // TestJit
 //
 // Python equivalent:
@@ -138,17 +322,12 @@ class TestJit : public ::testing::TestWithParam<bool> {};
 TEST_P(TestJit, AddSelf) {
   const bool debug = GetParam();
 
-  static const ffi::Function op_add = NNOp("add");
-
-  ffi::TypedFunction<ffi::Any(ffi::Map<ffi::String, ffi::Any>)> forward_fn =
-      [](ffi::Map<ffi::String, ffi::Any> args) -> ffi::Any {
-    NNTensor x = args.at("x").cast<NNTensor>();
-    return op_add(x->expr, x->expr, ffi::String("add"));
-  };
-
-  MethodSpec ms(forward_fn, {"x"}, {ffi::Any(MakeSpecTensor({10, 5}, "float32"))}, "plain",
-                "plain");
-  ModuleSpec mod_spec({"forward"}, {ffi::Any(ms)}, {}, {});
+  AddSelfModule mod;
+  ffi::Map<ffi::String, ffi::Any> fwd_spec;
+  fwd_spec.Set("x", ffi::Any(MakeSpecTensor({10, 5}, "float32")));
+  ffi::Map<ffi::String, ffi::Map<ffi::String, ffi::Any>> spec;
+  spec.Set("forward", fwd_spec);
+  ModuleSpec mod_spec(mod, spec, debug);
 
   CppModule model = Jit(mod_spec, {kDLCPU, 0}, "cpu_generic", debug);
 
@@ -192,27 +371,13 @@ class TestJitIntInput : public ::testing::TestWithParam<bool> {};
 TEST_P(TestJitIntInput, AddAndReshape) {
   const bool debug = GetParam();
 
-  static const ffi::Function op_add = NNOp("add");
-  static const ffi::Function op_reshape = NNOp("reshape");
-
-  ffi::TypedFunction<ffi::Any(ffi::Map<ffi::String, ffi::Any>)> forward_fn =
-      [](ffi::Map<ffi::String, ffi::Any> args) -> ffi::Any {
-    NNTensor x = args.at("x").cast<NNTensor>();
-    tir::Var i = args.at("i").cast<tir::Var>();
-    ffi::Any y = op_add(x->expr, x->expr, ffi::String("add"));
-    // reshape(y, [i, 5, 5])
-    ffi::Array<ffi::Any> new_shape;
-    new_shape.push_back(ffi::Any(PrimExpr(i)));
-    new_shape.push_back(ffi::Any(int64_t(5)));
-    new_shape.push_back(ffi::Any(int64_t(5)));
-    return op_reshape(y.cast<Var>(), new_shape, ffi::String("reshape"));
-  };
-
-  SpecInt spec_int;
-  MethodSpec ms(forward_fn, {"x", "i"},
-                {ffi::Any(MakeSpecTensor({10, 5}, "float32")), ffi::Any(spec_int)}, "plain",
-                "plain");
-  ModuleSpec mod_spec({"forward"}, {ffi::Any(ms)}, {}, {});
+  AddReshapeModule mod;
+  ffi::Map<ffi::String, ffi::Any> fwd_spec;
+  fwd_spec.Set("x", ffi::Any(MakeSpecTensor({10, 5}, "float32")));
+  fwd_spec.Set("i", ffi::Any(SpecInt()));
+  ffi::Map<ffi::String, ffi::Map<ffi::String, ffi::Any>> spec;
+  spec.Set("forward", fwd_spec);
+  ModuleSpec mod_spec(mod, spec, debug);
 
   CppModule model = Jit(mod_spec, {kDLCPU, 0}, "cpu_generic", debug);
 
@@ -268,29 +433,23 @@ class TestJitWithEffect : public ::testing::TestWithParam<bool> {};
 TEST_P(TestJitWithEffect, KVCacheAppendView) {
   const bool debug = GetParam();
 
-  // KVCache(init_seq_len=10, unit_shape=[10, 5], dtype="float32")
   KVCacheModule kv(/*init_seq_len=*/10,
                    /*unit_shape=*/ffi::Array<Integer>{Integer(10), Integer(5)},
                    /*dtype=*/"float32");
+  JitKVCacheModule mod(kv);
 
-  ffi::TypedFunction<ffi::Any(ffi::Map<ffi::String, ffi::Any>)> forward_fn =
-      [kv](ffi::Map<ffi::String, ffi::Any> args) -> ffi::Any {
-    NNTensor x = args.at("x").cast<NNTensor>();
-    tir::Var total_seq_len = args.at("total_seq_len").cast<tir::Var>();
-    kv.get()->Append(x);
-    NNTensor view = kv.get()->View(PrimExpr(total_seq_len));
-    return ffi::Any(view);
-  };
+  ffi::Map<ffi::String, ffi::Any> fwd_spec;
+  fwd_spec.Set("x", ffi::Any(MakeSpecTensor({1, 10, 5}, "float32")));
+  fwd_spec.Set("total_seq_len", ffi::Any(SpecInt()));
+  ffi::Map<ffi::String, ffi::Map<ffi::String, ffi::Any>> spec;
+  spec.Set("forward", fwd_spec);
 
-  SpecInt spec_int;
-  MethodSpec ms(forward_fn, {"x", "total_seq_len"},
-                {ffi::Any(MakeSpecTensor({1, 10, 5}, "float32")), ffi::Any(spec_int)}, "plain",
-                "plain");
-
+  ModuleSpec mod_spec(mod, spec, debug);
+  // Inject named_effect "cache" -> kv via low-level override.
   ffi::Map<ffi::String, runtime::ObjectRef> named_effects;
   named_effects.Set("cache", kv);
-
-  ModuleSpec mod_spec({"forward"}, {ffi::Any(ms)}, {}, named_effects);
+  mod_spec = ModuleSpec(mod_spec->method_names, mod_spec->method_specs, mod_spec->named_params,
+                        named_effects);
 
   CppModule model = Jit(mod_spec, {kDLCPU, 0}, "cpu_generic", debug);
 
@@ -357,26 +516,15 @@ class TestJitTupleInput : public ::testing::TestWithParam<bool> {};
 TEST_P(TestJitTupleInput, AddSubtract) {
   const bool debug = GetParam();
 
-  static const ffi::Function op_add = NNOp("add");
-  static const ffi::Function op_sub = NNOp("subtract");
-
-  ffi::TypedFunction<ffi::Any(ffi::Map<ffi::String, ffi::Any>)> forward_fn =
-      [](ffi::Map<ffi::String, ffi::Any> args) -> ffi::Any {
-    ffi::Array<ffi::Any> x_arr = args.at("x").cast<ffi::Array<ffi::Any>>();
-    NNTensor x0 = x_arr[0].cast<NNTensor>();
-    NNTensor x1 = x_arr[1].cast<NNTensor>();
-    ffi::Array<ffi::Any> out;
-    out.push_back(op_add(x0->expr, x1->expr, ffi::String("add")));
-    out.push_back(op_sub(x0->expr, x1->expr, ffi::String("subtract")));
-    return ffi::Any(out);
-  };
-
+  TupleAddSubModule mod;
   SpecTensor elem_spec = MakeSpecTensor({10, 5}, "float32");
   ffi::Array<ffi::Any> tuple_elems{ffi::Any(elem_spec), ffi::Any(elem_spec)};
   SpecTuple x_spec("x", tuple_elems, /*is_tuple=*/true);
-
-  MethodSpec ms(forward_fn, {"x"}, {ffi::Any(x_spec)}, "plain", "plain");
-  ModuleSpec mod_spec({"forward"}, {ffi::Any(ms)}, {}, {});
+  ffi::Map<ffi::String, ffi::Any> fwd_spec;
+  fwd_spec.Set("x", ffi::Any(x_spec));
+  ffi::Map<ffi::String, ffi::Map<ffi::String, ffi::Any>> spec;
+  spec.Set("forward", fwd_spec);
+  ModuleSpec mod_spec(mod, spec, debug);
 
   CppModule model = Jit(mod_spec, {kDLCPU, 0}, "cpu_generic", debug);
 
@@ -431,27 +579,15 @@ class TestJitListInput : public ::testing::TestWithParam<bool> {};
 TEST_P(TestJitListInput, AddSubtract) {
   const bool debug = GetParam();
 
-  static const ffi::Function op_add = NNOp("add");
-  static const ffi::Function op_sub = NNOp("subtract");
-
-  ffi::TypedFunction<ffi::Any(ffi::Map<ffi::String, ffi::Any>)> forward_fn =
-      [](ffi::Map<ffi::String, ffi::Any> args) -> ffi::Any {
-    ffi::Array<ffi::Any> x_arr = args.at("x").cast<ffi::Array<ffi::Any>>();
-    NNTensor x0 = x_arr[0].cast<NNTensor>();
-    NNTensor x1 = x_arr[1].cast<NNTensor>();
-    ffi::Array<ffi::Any> out;
-    out.push_back(op_add(x0->expr, x1->expr, ffi::String("add")));
-    out.push_back(op_sub(x0->expr, x1->expr, ffi::String("subtract")));
-    return ffi::Any(out);
-  };
-
+  TupleAddSubModule mod;
   SpecTensor elem_spec = MakeSpecTensor({10, 5}, "float32");
   ffi::Array<ffi::Any> list_elems{ffi::Any(elem_spec), ffi::Any(elem_spec)};
-  // is_tuple=false → list semantics (same IR, different Python annotation)
   SpecTuple x_spec("x", list_elems, /*is_tuple=*/false);
-
-  MethodSpec ms(forward_fn, {"x"}, {ffi::Any(x_spec)}, "plain", "plain");
-  ModuleSpec mod_spec({"forward"}, {ffi::Any(ms)}, {}, {});
+  ffi::Map<ffi::String, ffi::Any> fwd_spec;
+  fwd_spec.Set("x", ffi::Any(x_spec));
+  ffi::Map<ffi::String, ffi::Map<ffi::String, ffi::Any>> spec;
+  spec.Set("forward", fwd_spec);
+  ModuleSpec mod_spec(mod, spec, debug);
 
   CppModule model = Jit(mod_spec, {kDLCPU, 0}, "cpu_generic", debug);
 
@@ -515,42 +651,17 @@ class TestJitTupleInputWithInt : public ::testing::TestWithParam<bool> {};
 TEST_P(TestJitTupleInputWithInt, AddSubtractReshape) {
   const bool debug = GetParam();
 
-  static const ffi::Function op_add = NNOp("add");
-  static const ffi::Function op_sub = NNOp("subtract");
-  static const ffi::Function op_reshape = NNOp("reshape");
-
-  ffi::TypedFunction<ffi::Any(ffi::Map<ffi::String, ffi::Any>)> forward_fn =
-      [](ffi::Map<ffi::String, ffi::Any> args) -> ffi::Any {
-    ffi::Array<ffi::Any> x_arr = args.at("x").cast<ffi::Array<ffi::Any>>();
-    NNTensor x0 = x_arr[0].cast<NNTensor>();
-    NNTensor x1 = x_arr[1].cast<NNTensor>();
-    tir::Var i = x_arr[2].cast<tir::Var>();
-
-    ffi::Any y0 = op_add(x0->expr, x1->expr, ffi::String("add"));
-    ffi::Any y1 = op_sub(x0->expr, x1->expr, ffi::String("subtract"));
-
-    // reshape(x0, [5, i, 5])
-    ffi::Array<ffi::Any> new_shape;
-    new_shape.push_back(ffi::Any(int64_t(5)));
-    new_shape.push_back(ffi::Any(PrimExpr(i)));
-    new_shape.push_back(ffi::Any(int64_t(5)));
-    ffi::Any y2 = op_reshape(x0->expr, new_shape, ffi::String("reshape"));
-
-    ffi::Array<ffi::Any> out;
-    out.push_back(y0);
-    out.push_back(y1);
-    out.push_back(y2);
-    return ffi::Any(out);
-  };
-
+  TupleWithIntModule mod;
   SpecTensor tensor_spec = MakeSpecTensor({10, 5}, "float32");
   SpecInt int_spec;
   ffi::Array<ffi::Any> tuple_elems{ffi::Any(tensor_spec), ffi::Any(tensor_spec),
                                    ffi::Any(int_spec)};
   SpecTuple x_spec("x", tuple_elems, /*is_tuple=*/true);
-
-  MethodSpec ms(forward_fn, {"x"}, {ffi::Any(x_spec)}, "plain", "plain");
-  ModuleSpec mod_spec({"forward"}, {ffi::Any(ms)}, {}, {});
+  ffi::Map<ffi::String, ffi::Any> fwd_spec;
+  fwd_spec.Set("x", ffi::Any(x_spec));
+  ffi::Map<ffi::String, ffi::Map<ffi::String, ffi::Any>> spec;
+  spec.Set("forward", fwd_spec);
+  ModuleSpec mod_spec(mod, spec, debug);
 
   CppModule model = Jit(mod_spec, {kDLCPU, 0}, "cpu_generic", debug);
 

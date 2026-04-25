@@ -221,11 +221,13 @@ LinearModule::LinearModule(NNParameter weight, ffi::Optional<NNParameter> bias,
 Var LinearModuleNode::Forward(Var x) const {
   // Delegate permute_dims naming to NNPermuteDims (op.cc), which mirrors
   // the Python nn.op.permute_dims logic: when no name is given it derives
-  // the name from the weight var's name_hint ("linear" -> "matmul").
+  // the name from the weight var's name_hint.
+  // Both paths use hint "matmul" for the matmul, matching Python nn.modules.Linear.forward.
+  // With bias the add result uses hint "linear".
   Var w = NNPermuteDims(weight->expr, std::nullopt);
-  Var mm = NNMatmul(x, w, out_dtype);
+  Var mm = NNMatmul(x, w, out_dtype, "matmul");
   if (bias.has_value()) {
-    return NNAdd(mm, bias.value()->expr);
+    return NNAdd(mm, bias.value()->expr, "linear");
   }
   return mm;
 }

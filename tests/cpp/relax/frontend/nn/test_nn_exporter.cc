@@ -139,24 +139,179 @@ static void AssertStructEqual(const IRModule& actual, const IRModule& expected) 
 }
 
 // ===========================================================================
-// TestSimple
+// BeforeModuleNode / BeforeModule
 //
-// Python equivalent:
-//   slm_mod = nn.modules.ReLU()
-//   exported_mod, _ = slm_mod.export_tvm(
-//       spec={"forward": {"x": nn.spec.Tensor((3, 3), "float32")}}, debug=False)
+// Test-only module for TestDynamicShapeInMultipleFunctions.
+// Mirrors:
+//   class Before(nn.Module):
+//       def forward_relu(self, x): return nn.relu(x)
+//       def forward_silu(self, x): return nn.silu(x)
 //
-// Expected:
-//   def forward(x: R.Tensor([3,3],"float32")):
-//     R.func_attr({"num_input": 1})
-//     with R.dataflow():
-//       relu = R.nn.relu(x)
-//       R.output(relu)
-//     return relu
-//
-// Uses the module-aware ModuleSpec constructor:
-//   ModuleSpec(mod, spec, /*debug=*/false)
+// Two methods are registered as "forward_relu" and "forward_silu" (no "_" prefix)
+// so that DeriveMethodFunction can look them up verbatim: it only maps
+// "forward" -> "_forward" as a special case; all other names are used as-is.
 // ===========================================================================
+class BeforeModuleNode : public NNModuleNode {
+ public:
+  Var ForwardRelu(Var x) const { return BlockBuilder_Current()->Emit(relax::relu(x), "relu"); }
+  Var ForwardSilu(Var x) const { return BlockBuilder_Current()->Emit(relax::silu(x), "silu"); }
+
+  static void RegisterReflection() {
+    namespace refl = tvm::ffi::reflection;
+    refl::ObjectDef<BeforeModuleNode>()
+        .def(refl::init<>())
+        .def("forward_relu", &BeforeModuleNode::ForwardRelu)
+        .def("forward_silu", &BeforeModuleNode::ForwardSilu);
+  }
+  static constexpr bool _type_mutable = false;
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.frontend.nn.testing.Before", BeforeModuleNode,
+                                    NNModuleNode);
+};
+class BeforeModule : public runtime::ObjectRef {
+ public:
+  explicit BeforeModule() { data_ = ffi::make_object<BeforeModuleNode>(); }
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(BeforeModule, runtime::ObjectRef, BeforeModuleNode);
+};
+TVM_FFI_STATIC_INIT_BLOCK() { BeforeModuleNode::RegisterReflection(); }
+
+// ===========================================================================
+// LlamaMLPModuleNode / LlamaMLPModule
+//
+// Test-only module for TestExportNestedModule.
+// Mirrors:
+//   class LlamaMLP(nn.Module):
+//       def __init__(self, hidden_size, intermediate_size):
+//           self.gate_proj = nn.Linear(hidden_size, intermediate_size, bias=False)
+//           self.up_proj   = nn.Linear(hidden_size, intermediate_size, bias=False)
+//           self.down_proj = nn.Linear(intermediate_size, hidden_size, bias=False)
+//       def forward(self, x):
+//           return self.down_proj(nn.silu(self.gate_proj(x)) * self.up_proj(x))
+// ===========================================================================
+class LlamaMLPModuleNode : public NNModuleNode {
+ public:
+  LinearModule gate_proj;
+  LinearModule up_proj;
+  LinearModule down_proj;
+
+  LlamaMLPModuleNode(LinearModule gate_proj, LinearModule up_proj, LinearModule down_proj)
+      : gate_proj(std::move(gate_proj)),
+        up_proj(std::move(up_proj)),
+        down_proj(std::move(down_proj)) {
+    // Populate attrs so NNModuleNode::NamedParameters() can traverse sub-modules
+    // and produce "gate_proj.weight", "up_proj.weight", "down_proj.weight".
+    attrs.Set("gate_proj", ffi::Any(this->gate_proj));
+    attrs.Set("up_proj", ffi::Any(this->up_proj));
+    attrs.Set("down_proj", ffi::Any(this->down_proj));
+  }
+
+  Var Forward(Var x) const {
+    static const ffi::Function op_silu =
+        ffi::Function::GetGlobal("relax.frontend.nn.op.silu").value();
+    static const ffi::Function op_mul =
+        ffi::Function::GetGlobal("relax.frontend.nn.op.multiply").value();
+    NNTensor gate = NNTensor(gate_proj.get()->Forward(x));
+    NNTensor up = NNTensor(up_proj.get()->Forward(x));
+    ffi::Any silu_out = op_silu(gate->expr, ffi::String("silu"));
+    ffi::Any mul_out = op_mul(silu_out.cast<Var>(), up->expr, ffi::String("mul"));
+    NNTensor mul_t(mul_out.cast<Var>());
+    NNTensor out = NNTensor(down_proj.get()->Forward(mul_t->expr));
+    return out->expr;
+  }
+
+  static void RegisterReflection() {
+    namespace refl = tvm::ffi::reflection;
+    refl::ObjectDef<LlamaMLPModuleNode>()
+        .def(refl::init<LinearModule, LinearModule, LinearModule>())
+        .def_ro("gate_proj", &LlamaMLPModuleNode::gate_proj)
+        .def_ro("up_proj", &LlamaMLPModuleNode::up_proj)
+        .def_ro("down_proj", &LlamaMLPModuleNode::down_proj)
+        .def("_forward", &LlamaMLPModuleNode::Forward);
+  }
+  static constexpr bool _type_mutable = false;
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.frontend.nn.testing.LlamaMLP", LlamaMLPModuleNode,
+                                    NNModuleNode);
+};
+class LlamaMLPModule : public runtime::ObjectRef {
+ public:
+  explicit LlamaMLPModule(LinearModule gate_proj, LinearModule up_proj, LinearModule down_proj) {
+    data_ = ffi::make_object<LlamaMLPModuleNode>(std::move(gate_proj), std::move(up_proj),
+                                                 std::move(down_proj));
+  }
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(LlamaMLPModule, runtime::ObjectRef,
+                                                LlamaMLPModuleNode);
+};
+TVM_FFI_STATIC_INIT_BLOCK() { LlamaMLPModuleNode::RegisterReflection(); }
+
+// ===========================================================================
+// DuplicateNamesModuleNode / DuplicateNamesModule
+//
+// Test-only module for ExportDuplicateNamesModel.
+// Holds three NNParameter members (embedding_weights, up_weights, down_weights)
+// and implements forward(state) as:
+//   s1 = matmul(state, embedding_weights)
+//   s2 = matmul(s1,    up_weights)
+//   s3 = silu(s2)
+//   s4 = matmul(s3,    down_weights)
+//   return s4
+// ===========================================================================
+class DuplicateNamesModuleNode : public NNModuleNode {
+ public:
+  NNParameter embedding_weights;
+  NNParameter up_weights;
+  NNParameter down_weights;
+
+  DuplicateNamesModuleNode(NNParameter embedding_weights, NNParameter up_weights,
+                           NNParameter down_weights)
+      : embedding_weights(std::move(embedding_weights)),
+        up_weights(std::move(up_weights)),
+        down_weights(std::move(down_weights)) {
+    // Populate attrs so NNModuleNode::NamedParameters() discovers these
+    // parameters and the exporter adds them as function arguments.
+    attrs.Set("embedding_weights", ffi::Any(this->embedding_weights));
+    attrs.Set("up_weights", ffi::Any(this->up_weights));
+    attrs.Set("down_weights", ffi::Any(this->down_weights));
+  }
+
+  Var Forward(Var state) const {
+    static const ffi::Function op_silu =
+        ffi::Function::GetGlobal("relax.frontend.nn.op.silu").value();
+    static const ffi::Function op_matmul =
+        ffi::Function::GetGlobal("relax.frontend.nn.op.matmul").value();
+    ffi::Any s1 = op_matmul(state, embedding_weights->expr, ffi::Optional<ffi::String>(),
+                            ffi::String("state"));
+    ffi::Any s2 = op_matmul(s1.cast<Var>(), up_weights->expr, ffi::Optional<ffi::String>(),
+                            ffi::String("state"));
+    ffi::Any s3 = op_silu(s2.cast<Var>(), ffi::String("state"));
+    ffi::Any s4 = op_matmul(s3.cast<Var>(), down_weights->expr, ffi::Optional<ffi::String>(),
+                            ffi::String("state"));
+    return s4.cast<Var>();
+  }
+
+  static void RegisterReflection() {
+    namespace refl = tvm::ffi::reflection;
+    refl::ObjectDef<DuplicateNamesModuleNode>()
+        .def(refl::init<NNParameter, NNParameter, NNParameter>())
+        .def_ro("embedding_weights", &DuplicateNamesModuleNode::embedding_weights)
+        .def_ro("up_weights", &DuplicateNamesModuleNode::up_weights)
+        .def_ro("down_weights", &DuplicateNamesModuleNode::down_weights)
+        .def("_forward", &DuplicateNamesModuleNode::Forward);
+  }
+  static constexpr bool _type_mutable = false;
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.frontend.nn.testing.DuplicateNames",
+                                    DuplicateNamesModuleNode, NNModuleNode);
+};
+class DuplicateNamesModule : public runtime::ObjectRef {
+ public:
+  explicit DuplicateNamesModule(NNParameter embedding_weights, NNParameter up_weights,
+                                NNParameter down_weights) {
+    data_ = ffi::make_object<DuplicateNamesModuleNode>(
+        std::move(embedding_weights), std::move(up_weights), std::move(down_weights));
+  }
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(DuplicateNamesModule, runtime::ObjectRef,
+                                                DuplicateNamesModuleNode);
+};
+TVM_FFI_STATIC_INIT_BLOCK() { DuplicateNamesModuleNode::RegisterReflection(); }
+
 TEST(NNExporter, TestSimple) {
   // 1. Create the module
   ReLUModule mod;
@@ -321,50 +476,29 @@ TEST(NNExporter, TestDynamicShape) {
 //       "forward_silu": {"x": nn.spec.Tensor((tir.Var("batch_size","int64"), 8), "float32")},
 //   }, debug=False)
 //
-// The same symbolic name "batch_size" in two separate MethodSpecs produces
-// two independent tir::Vars (one per function), which is the correct behaviour.
-//
-// This test uses custom ffi::Function lambdas (the module has two distinct
-// methods that are not registered as "_forward" on a single type) and
-// assembles ModuleSpec via its low-level constructor.
+// Uses BeforeModule whose node registers "forward_relu" and "forward_silu".
+// DeriveMethodFunction looks them up verbatim (only "forward" is special-cased
+// to "_forward").
 // ===========================================================================
 TEST(NNExporter, TestDynamicShapeInMultipleFunctions) {
-  static const ffi::Function op_relu =
-      ffi::Function::GetGlobal("relax.frontend.nn.op.relu").value();
-  static const ffi::Function op_silu =
-      ffi::Function::GetGlobal("relax.frontend.nn.op.silu").value();
-
-  // Custom forward lambdas: each receives named_args and calls the
-  // corresponding op directly.  No NNModule object is held.
-  ffi::TypedFunction<ffi::Any(ffi::Map<ffi::String, ffi::Any>)> relu_fn =
-      [](ffi::Map<ffi::String, ffi::Any> args) -> ffi::Any {
-    NNTensor x = args.at("x").cast<NNTensor>();
-    return op_relu(x->expr, ffi::String("relu"));
-  };
-  ffi::TypedFunction<ffi::Any(ffi::Map<ffi::String, ffi::Any>)> silu_fn =
-      [](ffi::Map<ffi::String, ffi::Any> args) -> ffi::Any {
-    NNTensor x = args.at("x").cast<NNTensor>();
-    return op_silu(x->expr, ffi::String("silu"));
-  };
+  BeforeModule mod;
 
   ffi::Array<ffi::Any> spec_shape;
   spec_shape.push_back(ffi::Any(ffi::String("batch_size")));
   spec_shape.push_back(ffi::Any(int64_t(8)));
   SpecTensor x_spec(spec_shape, "float32");
 
-  // Build MethodSpec objects using the primary (ffi::Function) constructor:
-  // MethodSpec never holds an NNModule — it only receives the derived function.
-  MethodSpec ms_relu(relu_fn.packed(), {"x"}, {ffi::Any(x_spec)}, "plain", "none");
-  MethodSpec ms_silu(silu_fn.packed(), {"x"}, {ffi::Any(x_spec)}, "plain", "none");
+  ffi::Map<ffi::String, ffi::Any> relu_arg_spec;
+  relu_arg_spec.Set("x", ffi::Any(x_spec));
+  ffi::Map<ffi::String, ffi::Any> silu_arg_spec;
+  silu_arg_spec.Set("x", ffi::Any(x_spec));
 
-  // Assemble ModuleSpec via the low-level constructor.
-  ModuleSpec mod_spec(ffi::Array<ffi::String>{"forward_relu", "forward_silu"},
-                      ffi::Array<ffi::Any>{ffi::Any(ms_relu), ffi::Any(ms_silu)},
-                      /*named_params=*/{}, /*named_effects=*/{});
+  ffi::Map<ffi::String, ffi::Map<ffi::String, ffi::Any>> spec;
+  spec.Set("forward_relu", relu_arg_spec);
+  spec.Set("forward_silu", silu_arg_spec);
 
-  // A bare NNModule is used only as the ExportTVM entry-point;
-  // it holds no parameters and no module-specific logic.
-  NNModule mod;
+  ModuleSpec mod_spec(mod, spec, /*debug=*/false);
+
   ffi::Array<ffi::Any> result = mod->ExportTVM(mod_spec, /*debug=*/false, /*allow_extern=*/false);
   IRModule actual = result[0].cast<IRModule>();
 
@@ -403,14 +537,8 @@ TEST(NNExporter, TestDynamicShapeInMultipleFunctions) {
 // hidden_size=4096, intermediate_size=11008
 // Input spec: (tir.Var("batch_size","int64"), 4096), float16
 //
-// Expected function signature (debug=False, param_mode="plain"):
-//   forward(x, gate_proj_weight, up_proj_weight, down_proj_weight)
-//   num_input = 1
-//
-// This test uses a custom forward lambda that composes three Linear sub-modules.
-// ModuleSpec is assembled via its low-level constructor because the forward
-// function is not a simple "_forward" dispatch on a single module type.
-// MethodSpec receives the derived ffi::Function directly — no NNModule held.
+// Uses LlamaMLPModule whose node owns the three Linear sub-modules and
+// implements _forward via the module-aware ModuleSpec constructor.
 // ===========================================================================
 TEST(NNExporter, TestExportNestedModule) {
   const int64_t H = 4096;
@@ -423,48 +551,20 @@ TEST(NNExporter, TestExportNestedModule) {
   LinearModule down_proj = MakeLinear(ffi::Any(I), ffi::Any(H), false,
                                       ffi::Optional<ffi::String>("float16"), std::nullopt);
 
-  // Collect named parameters from each sub-module with their dotted prefixes.
-  ffi::Map<ffi::String, NNParameter> named_params;
-  for (const auto& [k, v] : gate_proj.get()->NamedParameters("gate_proj")) named_params.Set(k, v);
-  for (const auto& [k, v] : up_proj.get()->NamedParameters("up_proj")) named_params.Set(k, v);
-  for (const auto& [k, v] : down_proj.get()->NamedParameters("down_proj")) named_params.Set(k, v);
-
-  static const ffi::Function op_silu =
-      ffi::Function::GetGlobal("relax.frontend.nn.op.silu").value();
-  static const ffi::Function op_mul =
-      ffi::Function::GetGlobal("relax.frontend.nn.op.multiply").value();
-
-  // Custom forward lambda: composes gate_proj, up_proj, down_proj.
-  // ModuleSpec derives this ffi::Function and passes it to MethodSpec;
-  // MethodSpec never holds a reference to any NNModule.
-  ffi::TypedFunction<ffi::Any(ffi::Map<ffi::String, ffi::Any>)> forward_fn =
-      [gate_proj, up_proj, down_proj](ffi::Map<ffi::String, ffi::Any> args) -> ffi::Any {
-    NNTensor x = args.at("x").cast<NNTensor>();
-    NNTensor gate = NNTensor(gate_proj.get()->Forward(x->expr));
-    NNTensor up = NNTensor(up_proj.get()->Forward(x->expr));
-    ffi::Any silu_gate = op_silu(gate->expr, ffi::String("silu"));
-    ffi::Any mul_out = op_mul(silu_gate.cast<Var>(), up->expr, ffi::String("mul"));
-    NNTensor mul_tensor(mul_out.cast<Var>());
-    NNTensor out = NNTensor(down_proj.get()->Forward(mul_tensor->expr));
-    return ffi::Any(out);
-  };
+  LlamaMLPModule mod(gate_proj, up_proj, down_proj);
 
   ffi::Array<ffi::Any> spec_shape;
   spec_shape.push_back(ffi::Any(ffi::String("batch_size")));
   spec_shape.push_back(ffi::Any(H));
   SpecTensor x_spec(spec_shape, "float16");
 
-  // Build MethodSpec with the primary (ffi::Function) constructor.
-  // MethodSpec does not hold or receive an NNModule object.
-  MethodSpec ms(forward_fn.packed(), {"x"}, {ffi::Any(x_spec)}, "plain", "none");
+  ffi::Map<ffi::String, ffi::Any> forward_spec;
+  forward_spec.Set("x", ffi::Any(x_spec));
+  ffi::Map<ffi::String, ffi::Map<ffi::String, ffi::Any>> spec;
+  spec.Set("forward", forward_spec);
 
-  // Assemble ModuleSpec via the low-level constructor, supplying the
-  // pre-collected named_params from the three sub-modules.
-  ModuleSpec mod_spec(ffi::Array<ffi::String>{"forward"}, ffi::Array<ffi::Any>{ffi::Any(ms)},
-                      named_params, /*named_effects=*/{});
+  ModuleSpec mod_spec(mod, spec, /*debug=*/false);
 
-  // A bare NNModule is used only as the ExportTVM entry-point.
-  NNModule mod;
   ffi::Array<ffi::Any> result = mod->ExportTVM(mod_spec, /*debug=*/false, /*allow_extern=*/false);
   IRModule actual = result[0].cast<IRModule>();
 
@@ -484,13 +584,13 @@ TEST(NNExporter, TestExportNestedModule) {
     bb->BeginDataflowBlock();
 
     Var pd_gate = bb->Emit(relax::permute_dims(gate_proj_weight, std::nullopt), "permute_dims");
-    Var gate = bb->Emit(relax::matmul(x, pd_gate, std::nullopt), "linear");
+    Var gate = bb->Emit(relax::matmul(x, pd_gate, std::nullopt), "matmul");
     Var pd_up = bb->Emit(relax::permute_dims(up_proj_weight, std::nullopt), "permute_dims1");
-    Var up = bb->Emit(relax::matmul(x, pd_up, std::nullopt), "linear1");
+    Var up = bb->Emit(relax::matmul(x, pd_up, std::nullopt), "matmul1");
     Var silu_g = bb->Emit(relax::silu(gate), "silu");
     Var mul_out = bb->Emit(relax::multiply(silu_g, up), "mul");
     Var pd_down = bb->Emit(relax::permute_dims(down_proj_weight, std::nullopt), "permute_dims2");
-    Var down = bb->Emit(relax::matmul(mul_out, pd_down, std::nullopt), "linear2");
+    Var down = bb->Emit(relax::matmul(mul_out, pd_down, std::nullopt), "matmul2");
 
     Var gv = bb->EmitOutput(down, "gv");
     BindingBlock df = bb->EndBlock();
@@ -553,7 +653,7 @@ TEST(NNExporter, TestLinearDynamicShape) {
     bb->BeginDataflowBlock();
     Var perm = bb->Emit(relax::permute_dims(weight, std::nullopt), "permute_dims");
     Var mm = bb->Emit(relax::matmul(x, perm, std::nullopt), "matmul");
-    Var add = bb->Emit(relax::add(mm, bias), "add");
+    Var add = bb->Emit(relax::add(mm, bias), "linear");
     Var gv1 = EmitDebugOutput(bb, add, io);
     BindingBlock df = bb->EndBlock();
     Expr body = bb->Normalize(SeqExpr({df}, gv1));
@@ -581,68 +681,30 @@ TEST(NNExporter, TestLinearDynamicShape) {
 // where hs / is_ are the tir::Var objects supplied by the caller.
 // ===========================================================================
 static IRModule ExportDuplicateNamesModel(tir::Var hs, tir::Var is_) {
-  static const ffi::Function op_silu =
-      ffi::Function::GetGlobal("relax.frontend.nn.op.silu").value();
-  static const ffi::Function op_matmul =
-      ffi::Function::GetGlobal("relax.frontend.nn.op.matmul").value();
-
   DataType f32 = DataType::Float(32);
   auto I64 = [](int64_t v) { return IntImm(DataType::Int(64), v); };
 
-  // Build NNParameter objects by constructing a Var with the right TensorStructInfo.
-  // embedding: (hs, 1024)
   NNParameter emb_w(Var("embedding_weights",
                         TensorStructInfo(ShapeExpr(ffi::Array<PrimExpr>{hs, I64(1024)}), f32)));
-
-  // up: (is_, hs)
   NNParameter up_w(
       Var("up_weights", TensorStructInfo(ShapeExpr(ffi::Array<PrimExpr>{is_, hs}), f32)));
-
-  // down: (hs, is_)
   NNParameter down_w(
       Var("down_weights", TensorStructInfo(ShapeExpr(ffi::Array<PrimExpr>{hs, is_}), f32)));
 
-  ffi::Map<ffi::String, NNParameter> named_params;
-  named_params.Set("embedding_weights", emb_w);
-  named_params.Set("up_weights", up_w);
-  named_params.Set("down_weights", down_w);
-
-  // The forward lambda accesses parameters via their NNParameter::expr,
-  // which the exporter sets to the emitted Var before calling the lambda.
-  ffi::TypedFunction<ffi::Any(ffi::Map<ffi::String, ffi::Any>)> forward_fn =
-      [emb_w, up_w, down_w](ffi::Map<ffi::String, ffi::Any> args) -> ffi::Any {
-    NNTensor state = args.at("state").cast<NNTensor>();
-    Var emb_var = emb_w->expr;
-    Var up_var = up_w->expr;
-    Var down_var = down_w->expr;
-    ffi::Any s1 =
-        op_matmul(state->expr, emb_var, ffi::Optional<ffi::String>(), ffi::String("state"));
-    ffi::Any s2 =
-        op_matmul(s1.cast<Var>(), up_var, ffi::Optional<ffi::String>(), ffi::String("state"));
-    ffi::Any s3 = op_silu(s2.cast<Var>(), ffi::String("state"));
-    ffi::Any s4 =
-        op_matmul(s3.cast<Var>(), down_var, ffi::Optional<ffi::String>(), ffi::String("state"));
-    return s4;
-  };
+  DuplicateNamesModule mod(emb_w, up_w, down_w);
 
   ffi::Array<ffi::Any> spec_shape;
   spec_shape.push_back(ffi::Any(ffi::String("batch_size")));
   spec_shape.push_back(ffi::Any(int64_t(1024)));
   SpecTensor state_spec(spec_shape, "float32");
 
-  // arg_specs covers only the user input "state"; named params are injected
-  // automatically by the exporter from named_params.
-  // Build MethodSpec with the primary (ffi::Function) constructor:
-  // MethodSpec does not hold or receive an NNModule object.
-  MethodSpec ms(forward_fn.packed(), {"state"}, {ffi::Any(state_spec)}, "plain", "none");
+  ffi::Map<ffi::String, ffi::Any> forward_arg_spec;
+  forward_arg_spec.Set("state", ffi::Any(state_spec));
+  ffi::Map<ffi::String, ffi::Map<ffi::String, ffi::Any>> spec;
+  spec.Set("forward", forward_arg_spec);
 
-  // Assemble ModuleSpec via the low-level constructor, supplying the
-  // pre-built named_params (which carry the tir::Var shapes).
-  ModuleSpec mod_spec(ffi::Array<ffi::String>{"forward"}, ffi::Array<ffi::Any>{ffi::Any(ms)},
-                      named_params, /*named_effects=*/{});
+  ModuleSpec mod_spec(mod, spec, /*debug=*/false);
 
-  // A bare NNModule is used only as the ExportTVM entry-point.
-  NNModule mod;
   ffi::Array<ffi::Any> result = mod->ExportTVM(mod_spec, /*debug=*/false, /*allow_extern=*/false);
   return result[0].cast<IRModule>();
 }

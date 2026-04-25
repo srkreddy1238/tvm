@@ -153,8 +153,15 @@ ffi::Function DeriveMethodFunction(runtime::ObjectRef mod_ref, ffi::String metho
     call_args.push_back(ffi::AnyView(mod_ref));
     for (const ffi::String& name : arg_names) {
       ffi::Any val = named_args.at(name);
-      NNTensor t = val.cast<NNTensor>();
-      call_args.push_back(ffi::AnyView(t->expr));
+      // For SpecTensor args the exporter wraps the value as NNTensor; unwrap
+      // to the underlying Var so the _forward method receives a relax::Var.
+      // For SpecTuple args the exporter passes ffi::Array<ffi::Any>; pass
+      // it through directly — the _forward method receives the array.
+      if (auto opt = val.try_cast<NNTensor>()) {
+        call_args.push_back(ffi::AnyView(opt.value()->expr));
+      } else {
+        call_args.push_back(ffi::AnyView(val));
+      }
     }
     for (const ffi::Any& ea : extra_args) call_args.push_back(ffi::AnyView(ea));
 

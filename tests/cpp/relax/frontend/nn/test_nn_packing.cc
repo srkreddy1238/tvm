@@ -100,6 +100,56 @@ static void AssertStructEqual(const IRModule& actual, const IRModule& expected) 
 }
 
 // ===========================================================================
+// PackingTestModuleNode / PackingTestModule
+//
+// Test-only module for TestNNExportToRelax.
+// Mirrors:
+//   class TestModule(nn.Module):
+//       def __init__(self, in_features, out_features):
+//           self.linear_1 = nn.Linear(in_features, out_features, bias=False)
+//           self.linear_2 = nn.Linear(in_features, out_features, bias=False)
+//       def forward(self, x):
+//           return self.linear_1(x) + self.linear_2(x)
+// ===========================================================================
+class PackingTestModuleNode : public NNModuleNode {
+ public:
+  LinearModule linear_1;
+  LinearModule linear_2;
+
+  PackingTestModuleNode(LinearModule linear_1, LinearModule linear_2)
+      : linear_1(std::move(linear_1)), linear_2(std::move(linear_2)) {}
+
+  Var Forward(Var x) const {
+    static const ffi::Function op_add =
+        ffi::Function::GetGlobal("relax.frontend.nn.op.add").value();
+    NNTensor x1 = NNTensor(linear_1.get()->Forward(x));
+    NNTensor x2 = NNTensor(linear_2.get()->Forward(x));
+    return op_add(x1->expr, x2->expr, ffi::String("add")).cast<Var>();
+  }
+
+  static void RegisterReflection() {
+    namespace refl = tvm::ffi::reflection;
+    refl::ObjectDef<PackingTestModuleNode>()
+        .def(refl::init<LinearModule, LinearModule>())
+        .def_ro("linear_1", &PackingTestModuleNode::linear_1)
+        .def_ro("linear_2", &PackingTestModuleNode::linear_2)
+        .def("_forward", &PackingTestModuleNode::Forward);
+  }
+  static constexpr bool _type_mutable = false;
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.frontend.nn.testing.PackingTest", PackingTestModuleNode,
+                                    NNModuleNode);
+};
+class PackingTestModule : public runtime::ObjectRef {
+ public:
+  explicit PackingTestModule(LinearModule linear_1, LinearModule linear_2) {
+    data_ = ffi::make_object<PackingTestModuleNode>(std::move(linear_1), std::move(linear_2));
+  }
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(PackingTestModule, runtime::ObjectRef,
+                                                PackingTestModuleNode);
+};
+TVM_FFI_STATIC_INIT_BLOCK() { PackingTestModuleNode::RegisterReflection(); }
+
+// ===========================================================================
 // TestNNExportToRelax
 //
 // Python equivalent:
@@ -128,38 +178,32 @@ TEST(NNPacking, TestNNExportToRelax) {
   const int64_t IN = 10;
   const int64_t OUT = 20;
 
-  // Build two Linear sub-modules (no bias, float32).
   LinearModule linear_1 =
       MakeLinear(ffi::Any(IN), ffi::Any(OUT), false, std::nullopt, std::nullopt);
   LinearModule linear_2 =
       MakeLinear(ffi::Any(IN), ffi::Any(OUT), false, std::nullopt, std::nullopt);
-
-  // Collect named params in order: linear_1.weight, linear_2.weight.
-  ffi::Map<ffi::String, NNParameter> named_params;
-  for (const auto& [k, v] : linear_1.get()->NamedParameters("linear_1")) named_params.Set(k, v);
-  for (const auto& [k, v] : linear_2.get()->NamedParameters("linear_2")) named_params.Set(k, v);
-
-  static const ffi::Function op_add = ffi::Function::GetGlobal("relax.frontend.nn.op.add").value();
-
-  ffi::TypedFunction<ffi::Any(ffi::Map<ffi::String, ffi::Any>)> forward_fn =
-      [linear_1, linear_2](ffi::Map<ffi::String, ffi::Any> args) -> ffi::Any {
-    NNTensor x = args.at("x").cast<NNTensor>();
-    NNTensor x1 = NNTensor(linear_1.get()->Forward(x->expr));
-    NNTensor x2 = NNTensor(linear_2.get()->Forward(x->expr));
-    return op_add(x1->expr, x2->expr, ffi::String("add"));
-  };
+  PackingTestModule mod(linear_1, linear_2);
 
   ffi::Array<ffi::Any> spec_shape;
   spec_shape.push_back(ffi::Any(int64_t(1)));
   spec_shape.push_back(ffi::Any(IN));
   SpecTensor x_spec(spec_shape, "float32");
 
-  // param_mode="packed", effect_mode="none"
-  MethodSpec ms(forward_fn, {"x"}, {ffi::Any(x_spec)}, "packed", "none");
-  ModuleSpec mod_spec({"forward"}, {ffi::Any(ms)}, named_params, {});
+  ffi::Map<ffi::String, ffi::Any> forward_arg_spec;
+  forward_arg_spec.Set("x", ffi::Any(x_spec));
+  ffi::Map<ffi::String, ffi::Map<ffi::String, ffi::Any>> spec;
+  spec.Set("forward", forward_arg_spec);
 
-  // Create a minimal NNModule wrapper and use ExportTVM
-  NNModule mod;
+  // Build ModuleSpec via the module-aware constructor, then override
+  // param_mode to "packed" by rebuilding with the low-level constructor.
+  ModuleSpec mod_spec_plain(mod, spec, /*debug=*/false);
+  // Extract the derived MethodSpec and rebuild with param_mode="packed".
+  MethodSpec ms_plain = mod_spec_plain->method_specs[0].cast<MethodSpec>();
+  MethodSpec ms_packed(ms_plain->forward, ms_plain->arg_names, ms_plain->arg_specs,
+                       /*param_mode=*/"packed", /*effect_mode=*/"none");
+  ModuleSpec mod_spec(mod_spec_plain->method_names, ffi::Array<ffi::Any>{ffi::Any(ms_packed)},
+                      mod_spec_plain->named_params, mod_spec_plain->named_effects);
+
   ffi::Array<ffi::Any> result = mod->ExportTVM(mod_spec, /*debug=*/false, /*allow_extern=*/false);
   IRModule actual = result[0].cast<IRModule>();
 
