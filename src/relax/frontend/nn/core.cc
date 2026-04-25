@@ -39,6 +39,7 @@
 // Include their headers here (after core.h to avoid circular dependency).
 #include "cpp_module.h"
 #include "exporter.h"
+#include "modules.h"
 #include "spec.h"
 
 namespace tvm {
@@ -281,8 +282,10 @@ static void CollectParameters(const ffi::Any& val, const std::string& prefix,
     return;
   }
 
-  // Case 3: NNModuleNode (or any subclass) — recurse into its attrs map
+  // Case 3: NNModuleNode (or any subclass) — recurse into its attrs map.
+  // Skip EffectNode subclasses: effects have no trainable parameters.
   if (const auto* mod = obj.as<NNModuleNode>()) {
+    if (obj.as<EffectNode>()) return;  // Effects carry no parameters
     for (const auto& [fname, fval] : mod->attrs) {
       std::string child = prefix.empty() ? std::string(fname) : prefix + "." + std::string(fname);
       CollectParameters(fval, child, out);

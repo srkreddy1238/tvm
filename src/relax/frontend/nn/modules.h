@@ -580,43 +580,77 @@ class IdentityModule : public runtime::ObjectRef {
 };
 
 // ---------------------------------------------------------------------------
+// EffectNode  —  abstract base for side-effecting objects
+//
+// Mirrors Python's Effect abstract class in core.py.
+// Concrete subclasses: IOEffectModuleNode, KVCacheModuleNode.
+//
+// Inheriting from NNModuleNode means Effects can be stored in attrs, passed
+// through ModuleSpec as runtime::ObjectRef, and traversed by NamedParameters
+// (which skips them — Effects have no trainable parameters).
+//
+// The exporter uses IsInstance<EffectNode>() to detect effects and calls
+// the four virtual protocol methods directly instead of string-scanning
+// the TVMFFITypeInfo method table.
+// ---------------------------------------------------------------------------
+
+class EffectNode : public NNModuleNode {
+ public:
+  /*! \brief Emit the initialisation expression into bb; return the state Vars. */
+  virtual ffi::Array<Var> EmitInit(ffi::String name_hint, BlockBuilder bb) const = 0;
+  /*! \brief Create placeholder state Vars; store them internally. */
+  virtual ffi::Array<Var> Create(ffi::String name_hint) = 0;
+  /*! \brief Restore internal state from previously created Vars. */
+  virtual void SetState(ffi::Array<Var> state_vars) = 0;
+  /*! \brief Return the current state Vars and clear internal state. */
+  virtual ffi::Array<Var> Finalize() = 0;
+
+  static void RegisterReflection() {
+    namespace refl = tvm::ffi::reflection;
+    refl::ObjectDef<EffectNode>()
+        .def("_cpp_emit_init", &EffectNode::EmitInit)
+        .def("_cpp_create", &EffectNode::Create)
+        .def("_cpp_set_state", &EffectNode::SetState)
+        .def("_cpp_finalize", &EffectNode::Finalize);
+  }
+  static constexpr bool _type_mutable = true;
+  TVM_FFI_DECLARE_OBJECT_INFO("relax.frontend.nn.Effect", EffectNode, NNModuleNode);
+};
+// Note: no Effect handle class — EffectNode is abstract and is always
+// held via IOEffectModule / KVCacheModule (or as runtime::ObjectRef).
+
+// ---------------------------------------------------------------------------
 // IOEffect
 // ---------------------------------------------------------------------------
 
 /*!
  * \brief Native C++ IOEffect: models the IO side-effect token (_io).
  *
- * Holds a single relax::Var (the current _io token).  The four Effect
- * protocol methods are exposed as FFI methods so Python can call them.
+ * Inherits the four Effect protocol methods from EffectNode and overrides
+ * them concretely.
  */
-class IOEffectModuleNode : public NNModuleNode {
+class IOEffectModuleNode : public EffectNode {
  public:
   /*! \brief The current _io Var, or undefined when not active. */
   ffi::Optional<Var> effect;
 
   IOEffectModuleNode() = default;
 
-  /*! \brief emit_init: emit null_value() into bb, return [io_var]. */
-  ffi::Array<Var> EmitInit(ffi::String name_hint, BlockBuilder bb) const;
-  /*! \brief create: create a placeholder Var for the _io token. */
-  ffi::Array<Var> Create(ffi::String name_hint);
-  /*! \brief set_state: update the stored _io Var from state_vars[0]. */
-  void SetState(ffi::Array<Var> state_vars);
-  /*! \brief finalize: return [effect] and clear it. */
-  ffi::Array<Var> Finalize();
+  ffi::Array<Var> EmitInit(ffi::String name_hint, BlockBuilder bb) const override;
+  ffi::Array<Var> Create(ffi::String name_hint) override;
+  void SetState(ffi::Array<Var> state_vars) override;
+  ffi::Array<Var> Finalize() override;
 
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
     refl::ObjectDef<IOEffectModuleNode>()
         .def(refl::init<>())
-        .def_rw("effect", &IOEffectModuleNode::effect)
-        .def("_cpp_emit_init", &IOEffectModuleNode::EmitInit)
-        .def("_cpp_create", &IOEffectModuleNode::Create)
-        .def("_cpp_set_state", &IOEffectModuleNode::SetState)
-        .def("_cpp_finalize", &IOEffectModuleNode::Finalize);
+        .def_rw("effect", &IOEffectModuleNode::effect);
+    // _cpp_emit_init / _cpp_create / _cpp_set_state / _cpp_finalize
+    // are inherited from EffectNode::RegisterReflection().
   }
   static constexpr bool _type_mutable = true;
-  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.frontend.nn.IOEffect", IOEffectModuleNode, NNModuleNode);
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.frontend.nn.IOEffect", IOEffectModuleNode, EffectNode);
 };
 class IOEffectModule : public runtime::ObjectRef {
  public:
@@ -633,10 +667,11 @@ class IOEffectModule : public runtime::ObjectRef {
  * \brief Native C++ KVCache effect module.
  *
  * Mirrors Python KVCache: holds init_seq_len, unit_shape, dtype, and the
- * current cache Var.  Provides emit_init / create / set_state / finalize
- * (Effect protocol) plus view() and append().
+ * current cache Var.  Inherits the four Effect protocol methods from
+ * EffectNode and overrides them concretely.  Also provides view() and
+ * append() for use inside forward().
  */
-class KVCacheModuleNode : public NNModuleNode {
+class KVCacheModuleNode : public EffectNode {
  public:
   int64_t init_seq_len;
   ffi::Array<Integer> unit_shape;  //!< per-token shape dims
@@ -646,10 +681,10 @@ class KVCacheModuleNode : public NNModuleNode {
   KVCacheModuleNode(int64_t init_seq_len, ffi::Array<Integer> unit_shape, ffi::String dtype)
       : init_seq_len(init_seq_len), unit_shape(std::move(unit_shape)), dtype(std::move(dtype)) {}
 
-  ffi::Array<Var> EmitInit(ffi::String name_hint, BlockBuilder bb) const;
-  ffi::Array<Var> Create(ffi::String name_hint);
-  void SetState(ffi::Array<Var> state_vars);
-  ffi::Array<Var> Finalize();
+  ffi::Array<Var> EmitInit(ffi::String name_hint, BlockBuilder bb) const override;
+  ffi::Array<Var> Create(ffi::String name_hint) override;
+  void SetState(ffi::Array<Var> state_vars) override;
+  ffi::Array<Var> Finalize() override;
   void To(ffi::String new_dtype);
   NNTensor View(PrimExpr seq_len) const;
   void Append(NNTensor new_element);
@@ -662,16 +697,14 @@ class KVCacheModuleNode : public NNModuleNode {
         .def_ro("unit_shape", &KVCacheModuleNode::unit_shape)
         .def_rw("dtype", &KVCacheModuleNode::dtype)
         .def_rw("cache", &KVCacheModuleNode::cache)
-        .def("_cpp_emit_init", &KVCacheModuleNode::EmitInit)
-        .def("_cpp_create", &KVCacheModuleNode::Create)
-        .def("_cpp_set_state", &KVCacheModuleNode::SetState)
-        .def("_cpp_finalize", &KVCacheModuleNode::Finalize)
         .def("_cpp_to", &KVCacheModuleNode::To)
         .def("_view", &KVCacheModuleNode::View)
         .def("_append", &KVCacheModuleNode::Append);
+    // _cpp_emit_init / _cpp_create / _cpp_set_state / _cpp_finalize
+    // are inherited from EffectNode::RegisterReflection().
   }
   static constexpr bool _type_mutable = true;
-  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.frontend.nn.KVCache", KVCacheModuleNode, NNModuleNode);
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.frontend.nn.KVCache", KVCacheModuleNode, EffectNode);
 };
 class KVCacheModule : public runtime::ObjectRef {
  public:

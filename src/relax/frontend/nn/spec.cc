@@ -28,6 +28,8 @@
 #include <sstream>
 #include <string>
 
+#include "modules.h"
+
 namespace tvm {
 namespace relax {
 namespace frontend {
@@ -119,6 +121,26 @@ MethodSpec::MethodSpec(ffi::Function forward, ffi::Array<ffi::String> arg_names,
 ModuleSpec::ModuleSpec(ffi::Array<ffi::String> method_names, ffi::Array<ffi::Any> method_specs,
                        ffi::Map<ffi::String, NNParameter> named_params,
                        ffi::Map<ffi::String, runtime::ObjectRef> named_effects) {
+  // If named_effects is non-empty, ensure every MethodSpec has effect_mode="plain".
+  // This handles the case where the caller builds a ModuleSpec with no effects first
+  // (effect_mode="none") and then injects effects via this low-level constructor.
+  if (!named_effects.empty()) {
+    ffi::Array<ffi::Any> patched_specs;
+    for (const ffi::Any& ms_any : method_specs) {
+      if (auto opt = ms_any.try_cast<MethodSpec>()) {
+        const MethodSpecNode* ms = opt.value().get();
+        if (std::string(ms->effect_mode) == "none") {
+          // Rebuild with effect_mode="plain"
+          MethodSpec patched(ms->forward, ms->arg_names, ms->arg_specs, ms->param_mode,
+                             ffi::String("plain"));
+          patched_specs.push_back(ffi::Any(patched));
+          continue;
+        }
+      }
+      patched_specs.push_back(ms_any);
+    }
+    method_specs = patched_specs;
+  }
   data_ = ffi::make_object<ModuleSpecNode>(std::move(method_names), std::move(method_specs),
                                            std::move(named_params), std::move(named_effects));
 }
@@ -182,7 +204,21 @@ ModuleSpec::ModuleSpec(runtime::ObjectRef mod,
 
   const NNModuleNode* mod_node = mod.as<NNModuleNode>();
   ffi::Map<ffi::String, NNParameter> named_params = mod_node->NamedParameters("");
-  ffi::String effect_mode = debug ? ffi::String("plain") : ffi::String("none");
+
+  // Discover named_effects by scanning attrs for EffectNode subclasses.
+  ffi::Map<ffi::String, runtime::ObjectRef> named_effects;
+  for (const auto& [attr_name, attr_val] : mod_node->attrs) {
+    if (auto opt = attr_val.try_cast<runtime::ObjectRef>()) {
+      if (opt.value().defined() && opt.value()->IsInstance<EffectNode>()) {
+        named_effects.Set(attr_name, opt.value());
+      }
+    }
+  }
+
+  // effect_mode: "plain" whenever there are effects OR debug=true;
+  // "none" only when there are no effects and debug=false.
+  bool has_effects = !named_effects.empty();
+  ffi::String effect_mode = (debug || has_effects) ? ffi::String("plain") : ffi::String("none");
 
   ffi::Array<ffi::String> method_names;
   ffi::Array<ffi::Any> method_specs;
@@ -208,8 +244,7 @@ ModuleSpec::ModuleSpec(runtime::ObjectRef mod,
   }
 
   data_ = ffi::make_object<ModuleSpecNode>(std::move(method_names), std::move(method_specs),
-                                           std::move(named_params),
-                                           ffi::Map<ffi::String, runtime::ObjectRef>{});
+                                           std::move(named_params), std::move(named_effects));
 }
 
 // ---------------------------------------------------------------------------

@@ -799,6 +799,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   Conv3DModuleNode::RegisterReflection();
   ConvTranspose1DModuleNode::RegisterReflection();
   IdentityModuleNode::RegisterReflection();
+  EffectNode::RegisterReflection();
   IOEffectModuleNode::RegisterReflection();
   KVCacheModuleNode::RegisterReflection();
   TimestepsModuleNode::RegisterReflection();

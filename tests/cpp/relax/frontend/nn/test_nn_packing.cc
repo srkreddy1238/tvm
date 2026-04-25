@@ -117,7 +117,12 @@ class PackingTestModuleNode : public NNModuleNode {
   LinearModule linear_2;
 
   PackingTestModuleNode(LinearModule linear_1, LinearModule linear_2)
-      : linear_1(std::move(linear_1)), linear_2(std::move(linear_2)) {}
+      : linear_1(std::move(linear_1)), linear_2(std::move(linear_2)) {
+    // Populate attrs so NNModuleNode::NamedParameters() can traverse sub-modules
+    // and produce "linear_1.weight", "linear_2.weight" for the packed_params tuple.
+    attrs.Set("linear_1", ffi::Any(this->linear_1));
+    attrs.Set("linear_2", ffi::Any(this->linear_2));
+  }
 
   Var Forward(Var x) const {
     static const ffi::Function op_add =

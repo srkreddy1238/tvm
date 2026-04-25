@@ -40,7 +40,7 @@
 #include <vector>
 
 #include "core.h"
-#include "spec.h"
+#include "modules.h"
 
 namespace tvm {
 namespace relax {
@@ -214,46 +214,13 @@ static void EmitInitializeEffect(BlockBuilder& bb,
     effect_vars.push_back(io);
   }
 
-  // Then call emit_init() on each Effect in named_effects
+  // Call EmitInit() on each Effect via direct virtual dispatch.
   for (const auto& [name, effect_obj] : named_effects) {
-    // Call effect._cpp_emit_init(name, bb) via the registered method.
-    // Methods registered with .def("_cpp_emit_init", &Class::Method) are
-    // callable via ffi::Function::GetMethod.
-    std::string type_key = effect_obj->GetTypeKey();
-
-    // Get the method function from the type's method table
-    auto type_index = effect_obj->type_index();
-    const TVMFFITypeInfo* type_info = TVMFFIGetTypeInfo(type_index);
-    if (!type_info || !type_info->methods) {
-      TVM_FFI_THROW(TypeError) << "Effect object has no type info: " << type_key;
-      TVM_FFI_UNREACHABLE();
-    }
-
-    // Find the "_cpp_emit_init" method in the methods array
-    const TVMFFIMethodInfo* method_info = nullptr;
-    for (int32_t i = 0; i < type_info->num_methods; ++i) {
-      const TVMFFIMethodInfo* m = &type_info->methods[i];
-      if (std::string(m->name.data, m->name.size) == "_cpp_emit_init") {
-        method_info = m;
-        break;
-      }
-    }
-
-    if (!method_info) {
-      TVM_FFI_THROW(TypeError) << "Effect object has no _cpp_emit_init method: " << type_key;
-      TVM_FFI_UNREACHABLE();
-    }
-
-    // Call the method: _cpp_emit_init(effect_obj, name, bb) -> Array<Var>
-    // method_info->method is a TVMFFIAny containing the ffi::Function
-    ffi::AnyView method_any = ffi::AnyView::CopyFromTVMFFIAny(method_info->method);
-    auto method_func_opt = method_any.try_cast<ffi::Function>();
-    TVM_FFI_ICHECK(method_func_opt.has_value()) << "Method is not an ffi::Function";
-    ffi::Function method_func = method_func_opt.value();
-    ffi::Any result = method_func(effect_obj, ffi::Any(name), ffi::Any(bb));
-    auto vars_opt = result.try_cast<ffi::Array<Var>>();
-    TVM_FFI_ICHECK(vars_opt.has_value()) << "Effect._cpp_emit_init must return Array<Var>";
-    for (const Var& v : vars_opt.value()) effect_vars.push_back(v);
+    EffectNode* effect = const_cast<EffectNode*>(effect_obj.as<EffectNode>());
+    TVM_FFI_ICHECK(effect) << "EmitInitializeEffect: named_effects entry is not an EffectNode: "
+                           << effect_obj->GetTypeKey();
+    ffi::Array<Var> vars = effect->EmitInit(name, bb);
+    for (const Var& v : vars) effect_vars.push_back(v);
   }
 
   Var lv = bb->Emit(relax::Tuple(effect_vars), "lv");
@@ -422,36 +389,11 @@ static void EmitMethod(BlockBuilder& bb, const ffi::String& method_name, const M
   for (const auto& [name, effect_obj] : named_effects) {
     effects_vec.emplace_back(name, effect_obj);
 
-    // Call effect._cpp_create(name) -> Array<Var>
-    auto type_index = effect_obj->type_index();
-    const TVMFFITypeInfo* type_info = TVMFFIGetTypeInfo(type_index);
-    if (!type_info || !type_info->methods) {
-      TVM_FFI_THROW(TypeError) << "Effect has no type info: " << effect_obj->GetTypeKey();
-      TVM_FFI_UNREACHABLE();
-    }
-
-    // Find _cpp_create method
-    const TVMFFIMethodInfo* create_method = nullptr;
-    for (int32_t i = 0; i < type_info->num_methods; ++i) {
-      const TVMFFIMethodInfo* m = &type_info->methods[i];
-      if (std::string(m->name.data, m->name.size) == "_cpp_create") {
-        create_method = m;
-        break;
-      }
-    }
-    if (!create_method) {
-      TVM_FFI_THROW(TypeError) << "Effect has no _cpp_create method: " << effect_obj->GetTypeKey();
-      TVM_FFI_UNREACHABLE();
-    }
-
-    ffi::AnyView create_any = ffi::AnyView::CopyFromTVMFFIAny(create_method->method);
-    auto create_func_opt = create_any.try_cast<ffi::Function>();
-    TVM_FFI_ICHECK(create_func_opt.has_value());
-    ffi::Function create_func = create_func_opt.value();
-    ffi::Any create_result = create_func(effect_obj, ffi::Any(name));
-    auto state_vars_opt = create_result.try_cast<ffi::Array<Var>>();
-    TVM_FFI_ICHECK(state_vars_opt.has_value()) << "Effect._cpp_create must return Array<Var>";
-    ffi::Array<Var> state_vars = state_vars_opt.value();
+    // Call effect.Create(name) via direct virtual dispatch through EffectNode.
+    EffectNode* effect = const_cast<EffectNode*>(effect_obj.as<EffectNode>());
+    TVM_FFI_ICHECK(effect) << "EmitMethod: named_effects entry is not an EffectNode: "
+                           << effect_obj->GetTypeKey();
+    ffi::Array<Var> state_vars = effect->Create(name);
     effect_state_vars.push_back(state_vars);
     for (const Var& v : state_vars) all_effect_vars.push_back(v);
   }
@@ -565,32 +507,14 @@ static void EmitMethod(BlockBuilder& bb, const ffi::String& method_name, const M
   if (!all_effect_vars.empty()) io_var_for_debug = all_effect_vars[0];
   IOVarScope io_scope(io_var_for_debug);
 
-  // Call effect._cpp_set_state(state_vars) for each Effect
+  // Call SetState(state_vars) for each Effect via direct virtual dispatch.
   for (size_t ei = 0; ei < effects_vec.size(); ++ei) {
     const auto& [name, effect_obj] = effects_vec[ei];
     const ffi::Array<Var>& state_vars = effect_state_vars[ei];
-
-    auto type_index = effect_obj->type_index();
-    const TVMFFITypeInfo* type_info = TVMFFIGetTypeInfo(type_index);
-    const TVMFFIMethodInfo* set_state_method = nullptr;
-    for (int32_t i = 0; i < type_info->num_methods; ++i) {
-      const TVMFFIMethodInfo* m = &type_info->methods[i];
-      if (std::string(m->name.data, m->name.size) == "_cpp_set_state") {
-        set_state_method = m;
-        break;
-      }
-    }
-    if (!set_state_method) {
-      TVM_FFI_THROW(TypeError) << "Effect has no _cpp_set_state method: "
-                               << effect_obj->GetTypeKey();
-      TVM_FFI_UNREACHABLE();
-    }
-
-    ffi::AnyView set_state_any = ffi::AnyView::CopyFromTVMFFIAny(set_state_method->method);
-    auto set_state_func_opt = set_state_any.try_cast<ffi::Function>();
-    TVM_FFI_ICHECK(set_state_func_opt.has_value());
-    ffi::Function set_state_func = set_state_func_opt.value();
-    set_state_func(effect_obj, ffi::Any(state_vars));
+    EffectNode* effect = const_cast<EffectNode*>(effect_obj.as<EffectNode>());
+    TVM_FFI_ICHECK(effect) << "EmitMethod: named_effects entry is not an EffectNode: "
+                           << effect_obj->GetTypeKey();
+    effect->SetState(state_vars);
   }
 
   // For packed params: emit TupleGetItem bindings now that we are in the dataflow block
@@ -657,32 +581,13 @@ static void EmitMethod(BlockBuilder& bb, const ffi::String& method_name, const M
     effect_output_vars.push_back(final_io);
   }
 
-  // Call finalize() for each Effect
+  // Call Finalize() for each Effect via direct virtual dispatch.
   for (const auto& [name, effect_obj] : effects_vec) {
-    auto type_index = effect_obj->type_index();
-    const TVMFFITypeInfo* type_info = TVMFFIGetTypeInfo(type_index);
-    const TVMFFIMethodInfo* finalize_method = nullptr;
-    for (int32_t i = 0; i < type_info->num_methods; ++i) {
-      const TVMFFIMethodInfo* m = &type_info->methods[i];
-      if (std::string(m->name.data, m->name.size) == "_cpp_finalize") {
-        finalize_method = m;
-        break;
-      }
-    }
-    if (!finalize_method) {
-      TVM_FFI_THROW(TypeError) << "Effect has no _cpp_finalize method: "
-                               << effect_obj->GetTypeKey();
-      TVM_FFI_UNREACHABLE();
-    }
-
-    ffi::AnyView finalize_any = ffi::AnyView::CopyFromTVMFFIAny(finalize_method->method);
-    auto finalize_func_opt = finalize_any.try_cast<ffi::Function>();
-    TVM_FFI_ICHECK(finalize_func_opt.has_value());
-    ffi::Function finalize_func = finalize_func_opt.value();
-    ffi::Any finalize_result = finalize_func(effect_obj);
-    auto finalized_vars_opt = finalize_result.try_cast<ffi::Array<Var>>();
-    TVM_FFI_ICHECK(finalized_vars_opt.has_value()) << "Effect._cpp_finalize must return Array<Var>";
-    for (const Var& v : finalized_vars_opt.value()) effect_output_vars.push_back(v);
+    EffectNode* effect = const_cast<EffectNode*>(effect_obj.as<EffectNode>());
+    TVM_FFI_ICHECK(effect) << "EmitMethod: named_effects entry is not an EffectNode: "
+                           << effect_obj->GetTypeKey();
+    ffi::Array<Var> finalized_vars = effect->Finalize();
+    for (const Var& v : finalized_vars) effect_output_vars.push_back(v);
   }
 
   // Wrap effect outputs if effect_mode != "none" and we have effects
