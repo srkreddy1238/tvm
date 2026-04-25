@@ -69,10 +69,25 @@ namespace frontend {
 namespace nn {
 
 // ---------------------------------------------------------------------------
-// Internal helper: emit expr and return bound Var (or Array for tuples)
+// Internal helpers: emit expr and return bound Var (or Array for tuples)
 // ---------------------------------------------------------------------------
 
-static ffi::Any WrapNested(Expr expr, const std::string& name) {
+// Emit a tensor-producing Expr and return the bound Var directly.
+// Callers that need ffi::Any for FFI registration receive it via implicit
+// Var -> ffi::Any coercion at the call site.
+static Var EmitTensor(Expr expr, const std::string& name) {
+  BlockBuilder bb = BlockBuilder_Current();
+  TVM_FFI_ICHECK(bb.defined()) << "nn op called outside of a BlockBuilder scope";
+  return bb->Emit(expr, name);
+}
+
+// Emit an Expr whose output may be a single tensor or a tuple of tensors.
+// - Single tensor → emits and returns ffi::Any(Var).
+// - Tuple         → emits, extracts each element with TupleGetItem, and
+//                   returns ffi::Any(Array<Any>) of the element Vars.
+// Used by ops whose output arity is determined at runtime (tensor_expr_op,
+// tensor_ir_op, tensor_ir_inplace_op, extern).
+static ffi::Any EmitTensorOrTuple(Expr expr, const std::string& name) {
   BlockBuilder bb = BlockBuilder_Current();
   TVM_FFI_ICHECK(bb.defined()) << "nn op called outside of a BlockBuilder scope";
   Var v = bb->Emit(expr, name);
@@ -80,34 +95,48 @@ static ffi::Any WrapNested(Expr expr, const std::string& name) {
   if (sinfo->IsInstance<TensorStructInfoNode>()) {
     return ffi::Any(v);
   }
-  if (const auto* ts = sinfo.as<TupleStructInfoNode>()) {
-    ffi::Array<ffi::Any> results;
-    for (int i = 0; i < static_cast<int>(ts->fields.size()); ++i) {
-      Var vi = bb->Emit(TupleGetItem(v, i), name + "." + std::to_string(i));
-      results.push_back(ffi::Any(vi));
-    }
-    return ffi::Any(results);
+  const auto* ts = sinfo.as<TupleStructInfoNode>();
+  TVM_FFI_ICHECK(ts) << "EmitTensorOrTuple: unsupported struct_info: " << sinfo->GetTypeKey();
+  ffi::Array<ffi::Any> results;
+  for (int i = 0; i < static_cast<int>(ts->fields.size()); ++i) {
+    Var vi = bb->Emit(TupleGetItem(v, i), name + "." + std::to_string(i));
+    results.push_back(ffi::Any(vi));
   }
-  TVM_FFI_THROW(TypeError) << "WrapNested: unsupported struct_info: " << sinfo->GetTypeKey();
-  TVM_FFI_UNREACHABLE();
+  return ffi::Any(results);
+}
+
+// Emit a tuple-producing Expr, extract each element with TupleGetItem, and
+// return an Array<Any> of the element Vars.  Used by ops that always produce
+// tuples (split, chunk, topk).
+static ffi::Any EmitTuple(Expr expr, const std::string& name) {
+  BlockBuilder bb = BlockBuilder_Current();
+  TVM_FFI_ICHECK(bb.defined()) << "nn op called outside of a BlockBuilder scope";
+  Var v = bb->Emit(expr, name);
+  const auto* ts = GetStructInfo(v).as<TupleStructInfoNode>();
+  TVM_FFI_ICHECK(ts) << "EmitTuple: expected TupleStructInfo, got "
+                     << GetStructInfo(v)->GetTypeKey();
+  ffi::Array<ffi::Any> results;
+  for (int i = 0; i < static_cast<int>(ts->fields.size()); ++i) {
+    Var vi = bb->Emit(TupleGetItem(v, i), name + "." + std::to_string(i));
+    results.push_back(ffi::Any(vi));
+  }
+  return ffi::Any(results);
 }
 
 // ---------------------------------------------------------------------------
 // Unary element-wise ops
 // ---------------------------------------------------------------------------
 
-#define NN_UNARY_OP(func_name, relax_op)               \
-  static ffi::Any func_name(Var x, ffi::String name) { \
-    return WrapNested(relax_op(x), std::string(name)); \
-  }
+#define NN_UNARY_OP(func_name, relax_op) \
+  Var func_name(Var x, ffi::String name) { return EmitTensor(relax_op(x), std::string(name)); }
 
 NN_UNARY_OP(NNRelu, relax::relu)
 
-static ffi::Any NNRelu6(Var x, ffi::String name) {
+Var NNRelu6(Var x, ffi::String name) {
   // relu6 = clip(x, 0, 6) -- matches relax.op.nn.relu6 Python implementation
   PrimValue zero = PrimValue(IntImm(DataType::Int(64), 0));
   PrimValue six = PrimValue(IntImm(DataType::Int(64), 6));
-  return WrapNested(relax::clip(x, zero, six), std::string(name));
+  return EmitTensor(relax::clip(x, zero, six), std::string(name));
 }
 
 NN_UNARY_OP(NNSilu, relax::silu)
@@ -126,39 +155,39 @@ NN_UNARY_OP(NNNegative, relax::negative)
 // GeLU
 // ---------------------------------------------------------------------------
 
-static ffi::Any NNGelu(Var x, ffi::Optional<ffi::String> approximate, ffi::String name) {
+Var NNGelu(Var x, ffi::Optional<ffi::String> approximate, ffi::String name) {
   Expr out;
   if (approximate.has_value() && approximate.value() == "tanh") {
     out = relax::gelu_tanh(x);
   } else {
     out = relax::gelu(x);
   }
-  return WrapNested(out, std::string(name));
+  return EmitTensor(out, std::string(name));
 }
 
 // ---------------------------------------------------------------------------
 // Softmax / Softplus / PReLU
 // ---------------------------------------------------------------------------
 
-static ffi::Any NNSoftmax(Var x, int axis, ffi::String name) {
-  return WrapNested(relax::softmax(x, axis), std::string(name));
+Var NNSoftmax(Var x, int axis, ffi::String name) {
+  return EmitTensor(relax::softmax(x, axis), std::string(name));
 }
 
-static ffi::Any NNSoftplus(Var x, double beta, double threshold, ffi::String name) {
-  return WrapNested(relax::softplus(x, beta, threshold), std::string(name));
+Var NNSoftplus(Var x, double beta, double threshold, ffi::String name) {
+  return EmitTensor(relax::softplus(x, beta, threshold), std::string(name));
 }
 
-static ffi::Any NNPrelu(Var x, Var alpha, ffi::String name) {
-  return WrapNested(relax::prelu(x, alpha, 1), std::string(name));
+Var NNPrelu(Var x, Var alpha, ffi::String name) {
+  return EmitTensor(relax::prelu(x, alpha, 1), std::string(name));
 }
 
 // ---------------------------------------------------------------------------
 // Binary element-wise ops
 // ---------------------------------------------------------------------------
 
-#define NN_BINARY_OP(func_name, relax_op)                       \
-  static ffi::Any func_name(Expr a, Expr b, ffi::String name) { \
-    return WrapNested(relax_op(a, b), std::string(name));       \
+#define NN_BINARY_OP(func_name, relax_op)                 \
+  Var func_name(Expr a, Expr b, ffi::String name) {       \
+    return EmitTensor(relax_op(a, b), std::string(name)); \
   }
 
 NN_BINARY_OP(NNAdd, relax::add)
@@ -180,25 +209,25 @@ NN_BINARY_OP(NNNotEqual, relax::not_equal)
 // Ternary
 // ---------------------------------------------------------------------------
 
-static ffi::Any NNWhere(Var condition, Var x1, Var x2, ffi::String name) {
+Var NNWhere(Var condition, Var x1, Var x2, ffi::String name) {
   Expr cond_bool = relax::astype(condition, DataType::Bool());
-  return WrapNested(relax::where(cond_bool, x1, x2), std::string(name));
+  return EmitTensor(relax::where(cond_bool, x1, x2), std::string(name));
 }
 
 // ---------------------------------------------------------------------------
 // Shape manipulation
 // ---------------------------------------------------------------------------
 
-static ffi::Any NNUnsqueeze(Var x, int dim, ffi::String name) {
-  return WrapNested(relax::expand_dims(x, {dim}), std::string(name));
+Var NNUnsqueeze(Var x, int dim, ffi::String name) {
+  return EmitTensor(relax::expand_dims(x, {dim}), std::string(name));
 }
 
-static ffi::Any NNSqueeze(Var x, int axis, ffi::String name) {
-  return WrapNested(relax::squeeze(x, ffi::Optional<ffi::Array<Integer>>({Integer(axis)})),
+Var NNSqueeze(Var x, int axis, ffi::String name) {
+  return EmitTensor(relax::squeeze(x, ffi::Optional<ffi::Array<Integer>>({Integer(axis)})),
                     std::string(name));
 }
 
-static ffi::Any NNReshape(Var x, ffi::Array<ffi::Any> shape, ffi::String name) {
+Var NNReshape(Var x, ffi::Array<ffi::Any> shape, ffi::String name) {
   ffi::Array<PrimExpr> new_shape;
   for (const ffi::Any& s : shape) {
     if (auto opt = s.try_cast<int64_t>()) {
@@ -210,7 +239,7 @@ static ffi::Any NNReshape(Var x, ffi::Array<ffi::Any> shape, ffi::String name) {
       TVM_FFI_UNREACHABLE();
     }
   }
-  return WrapNested(relax::reshape(x, ShapeExpr(new_shape)), std::string(name));
+  return EmitTensor(relax::reshape(x, ShapeExpr(new_shape)), std::string(name));
 }
 
 // Derive the permute_dims binding name from the input var's name_hint,
@@ -228,13 +257,12 @@ static std::string DerivePdName(const Var& x) {
   return "permute_dims";
 }
 
-static ffi::Any NNPermuteDims(Var x, ffi::Optional<ffi::Array<Integer>> axes,
-                              ffi::Optional<ffi::String> name) {
+Var NNPermuteDims(Var x, ffi::Optional<ffi::Array<Integer>> axes, ffi::Optional<ffi::String> name) {
   std::string resolved_name = name.has_value() ? std::string(name.value()) : DerivePdName(x);
-  return WrapNested(relax::permute_dims(x, axes), resolved_name);
+  return EmitTensor(relax::permute_dims(x, axes), resolved_name);
 }
 
-static ffi::Any NNBroadcastTo(Var x, ffi::Array<ffi::Any> shape, ffi::String name) {
+Var NNBroadcastTo(Var x, ffi::Array<ffi::Any> shape, ffi::String name) {
   ffi::Array<PrimExpr> new_shape;
   for (const ffi::Any& s : shape) {
     if (auto opt = s.try_cast<int64_t>()) {
@@ -246,43 +274,43 @@ static ffi::Any NNBroadcastTo(Var x, ffi::Array<ffi::Any> shape, ffi::String nam
       TVM_FFI_UNREACHABLE();
     }
   }
-  return WrapNested(relax::broadcast_to(x, ShapeExpr(new_shape)), std::string(name));
+  return EmitTensor(relax::broadcast_to(x, ShapeExpr(new_shape)), std::string(name));
 }
 
-static ffi::Any NNRepeat(Var x, int repeats, ffi::Optional<Integer> axis, ffi::String name) {
+Var NNRepeat(Var x, int repeats, ffi::Optional<Integer> axis, ffi::String name) {
   ffi::Optional<int64_t> ax =
       axis.has_value() ? ffi::Optional<int64_t>(axis.value()->value) : std::nullopt;
-  return WrapNested(relax::repeat(x, repeats, ax), std::string(name));
+  return EmitTensor(relax::repeat(x, repeats, ax), std::string(name));
 }
 
-static ffi::Any NNConcat(ffi::Array<Var> tensors, int dim, ffi::String name) {
+Var NNConcat(ffi::Array<Var> tensors, int dim, ffi::String name) {
   ffi::Array<Expr> exprs;
   for (const Var& v : tensors) exprs.push_back(v);
-  return WrapNested(relax::concat(Tuple(exprs), ffi::Optional<int64_t>(dim)), std::string(name));
+  return EmitTensor(relax::concat(Tuple(exprs), ffi::Optional<int64_t>(dim)), std::string(name));
 }
 
-static ffi::Any NNSplit(Var x, ffi::Any indices_or_sections, int axis, ffi::String name) {
+ffi::Any NNSplit(Var x, ffi::Any indices_or_sections, int axis, ffi::String name) {
   if (auto opt = indices_or_sections.try_cast<int64_t>()) {
-    return WrapNested(relax::split(x, IntImm(DataType::Int(64), opt.value()), axis),
-                      std::string(name));
+    return EmitTuple(relax::split(x, IntImm(DataType::Int(64), opt.value()), axis),
+                     std::string(name));
   }
   if (auto opt = indices_or_sections.try_cast<ffi::Array<ffi::Any>>()) {
     ffi::Array<IntImm> indices;
     for (const ffi::Any& idx : opt.value()) {
       indices.push_back(IntImm(DataType::Int(64), idx.cast<int64_t>()));
     }
-    return WrapNested(relax::split(x, indices, axis), std::string(name));
+    return EmitTuple(relax::split(x, indices, axis), std::string(name));
   }
   TVM_FFI_THROW(TypeError) << "NNSplit: indices_or_sections must be int or Array[int]";
   TVM_FFI_UNREACHABLE();
 }
 
-static ffi::Any NNChunk(Var x, int chunks, int dim, ffi::String name) {
-  return WrapNested(relax::split(x, IntImm(DataType::Int(64), chunks), dim), std::string(name));
+ffi::Any NNChunk(Var x, int chunks, int dim, ffi::String name) {
+  return EmitTuple(relax::split(x, IntImm(DataType::Int(64), chunks), dim), std::string(name));
 }
 
-static ffi::Any NNTriu(Var x, int diagonal, ffi::String name) {
-  return WrapNested(relax::triu(x, diagonal), std::string(name));
+Var NNTriu(Var x, int diagonal, ffi::String name) {
+  return EmitTensor(relax::triu(x, diagonal), std::string(name));
 }
 
 // ---------------------------------------------------------------------------
@@ -294,73 +322,70 @@ static ffi::Optional<ffi::Array<Integer>> NormalizeAxis(ffi::Optional<ffi::Array
   return axis;
 }
 
-static ffi::Any NNSum(Var x, ffi::Optional<ffi::Array<Integer>> axis, bool keepdims,
-                      ffi::String name) {
-  return WrapNested(relax::sum(x, NormalizeAxis(axis), keepdims), std::string(name));
+Var NNSum(Var x, ffi::Optional<ffi::Array<Integer>> axis, bool keepdims, ffi::String name) {
+  return EmitTensor(relax::sum(x, NormalizeAxis(axis), keepdims), std::string(name));
 }
 
-static ffi::Any NNMax(Var x, ffi::Optional<ffi::Array<Integer>> axis, bool keepdims,
-                      ffi::String name) {
-  return WrapNested(relax::max(x, NormalizeAxis(axis), keepdims), std::string(name));
+Var NNMax(Var x, ffi::Optional<ffi::Array<Integer>> axis, bool keepdims, ffi::String name) {
+  return EmitTensor(relax::max(x, NormalizeAxis(axis), keepdims), std::string(name));
 }
 
-static ffi::Any NNMin(Var x, ffi::Optional<ffi::Array<Integer>> axis, bool keepdims,
-                      ffi::String name) {
-  return WrapNested(relax::min(x, NormalizeAxis(axis), keepdims), std::string(name));
+Var NNMin(Var x, ffi::Optional<ffi::Array<Integer>> axis, bool keepdims, ffi::String name) {
+  return EmitTensor(relax::min(x, NormalizeAxis(axis), keepdims), std::string(name));
 }
 
-static ffi::Any NNCumsum(Var x, ffi::Optional<Integer> axis, ffi::Optional<ffi::String> dtype,
-                         ffi::Optional<Bool> exclusive, ffi::String name) {
+Var NNCumsum(Var x, ffi::Optional<Integer> axis, ffi::Optional<ffi::String> dtype,
+             ffi::Optional<Bool> exclusive, ffi::String name) {
   ffi::Optional<int64_t> ax =
       axis.has_value() ? ffi::Optional<int64_t>(axis.value()->value) : std::nullopt;
   ffi::Optional<DataType> dt =
       dtype.has_value() ? ffi::Optional<DataType>(DataType(ffi::StringToDLDataType(dtype.value())))
                         : std::nullopt;
   Bool excl = exclusive.has_value() ? exclusive.value() : Bool(false);
-  return WrapNested(relax::cumsum(x, ax, dt, excl), std::string(name));
+  return EmitTensor(relax::cumsum(x, ax, dt, excl), std::string(name));
 }
 
 // ---------------------------------------------------------------------------
 // Linear algebra
 // ---------------------------------------------------------------------------
 
-static ffi::Any NNMatmul(Var a, Var b, ffi::Optional<ffi::String> out_dtype, ffi::String name) {
+Var NNMatmul(Var a, Var b, ffi::Optional<ffi::String> out_dtype, ffi::String name) {
   ffi::Optional<DataType> dt =
       out_dtype.has_value()
           ? ffi::Optional<DataType>(DataType(ffi::StringToDLDataType(out_dtype.value())))
           : std::nullopt;
-  return WrapNested(relax::matmul(a, b, dt), std::string(name));
+  return EmitTensor(relax::matmul(a, b, dt), std::string(name));
 }
 
 // ---------------------------------------------------------------------------
 // Type casting
 // ---------------------------------------------------------------------------
 
-static ffi::Any NNAstype(Var x, ffi::String dtype, ffi::String name) {
+Var NNAstype(Var x, ffi::String dtype, ffi::String name) {
   DataType target_dtype = DataType(ffi::StringToDLDataType(dtype));
   const auto* sinfo = x->struct_info_.as<TensorStructInfoNode>();
   if (sinfo && sinfo->dtype == target_dtype) {
-    return ffi::Any(x);
+    return x;
   }
-  return WrapNested(relax::astype(x, target_dtype), std::string(name));
+  return EmitTensor(relax::astype(x, target_dtype), std::string(name));
 }
 
 // ---------------------------------------------------------------------------
 // Indexing
 // ---------------------------------------------------------------------------
 
-static ffi::Any NNTake(Var x, Var indices, ffi::Optional<Integer> axis, ffi::String name) {
+Var NNTake(Var x, Var indices, ffi::Optional<Integer> axis, ffi::String name) {
   ffi::Optional<int64_t> ax =
       axis.has_value() ? ffi::Optional<int64_t>(axis.value()->value) : std::nullopt;
-  return WrapNested(relax::take(x, indices, ax), std::string(name));
+  return EmitTensor(relax::take(x, indices, ax), std::string(name));
 }
 
 // ---------------------------------------------------------------------------
 // Creation ops
 // ---------------------------------------------------------------------------
 
-static ffi::Any NNArange(ffi::Any start, ffi::Any end, ffi::Any step,
-                         ffi::Optional<ffi::String> dtype, ffi::String name) {
+Var NNArange(ffi::Any start, ffi::Any end, ffi::Any step, ffi::Optional<ffi::String> dtype,
+             ffi::String name) {
   auto to_prim_val = [](const ffi::Any& v) -> PrimValue {
     if (auto opt = v.try_cast<int64_t>()) return PrimValue(IntImm(DataType::Int(64), opt.value()));
     if (auto opt = v.try_cast<double>())
@@ -375,11 +400,10 @@ static ffi::Any NNArange(ffi::Any start, ffi::Any end, ffi::Any step,
   PrimValue e = end_is_null ? to_prim_val(start) : to_prim_val(end);
   PrimValue st = end_is_null ? PrimValue(IntImm(DataType::Int(64), 1)) : to_prim_val(step);
   DataType dt = DataType(ffi::StringToDLDataType(dtype.value_or("float32")));
-  return WrapNested(relax::arange(s, e, st, dt), std::string(name));
+  return EmitTensor(relax::arange(s, e, st, dt), std::string(name));
 }
 
-static ffi::Any NNFull(ffi::Array<ffi::Any> shape, Expr fill_value, ffi::String dtype,
-                       ffi::String name) {
+Var NNFull(ffi::Array<ffi::Any> shape, Expr fill_value, ffi::String dtype, ffi::String name) {
   ffi::Array<PrimExpr> new_shape;
   for (const ffi::Any& s : shape) {
     if (auto opt = s.try_cast<int64_t>())
@@ -392,10 +416,10 @@ static ffi::Any NNFull(ffi::Array<ffi::Any> shape, Expr fill_value, ffi::String 
     }
   }
   DataType dt = DataType(ffi::StringToDLDataType(dtype));
-  return WrapNested(relax::full(ShapeExpr(new_shape), fill_value, dt), std::string(name));
+  return EmitTensor(relax::full(ShapeExpr(new_shape), fill_value, dt), std::string(name));
 }
 
-static ffi::Any NNZeros(ffi::Array<ffi::Any> shape, ffi::String dtype, ffi::String name) {
+Var NNZeros(ffi::Array<ffi::Any> shape, ffi::String dtype, ffi::String name) {
   ffi::Array<PrimExpr> new_shape;
   for (const ffi::Any& s : shape) {
     if (auto opt = s.try_cast<int64_t>())
@@ -408,10 +432,10 @@ static ffi::Any NNZeros(ffi::Array<ffi::Any> shape, ffi::String dtype, ffi::Stri
     }
   }
   DataType dt = DataType(ffi::StringToDLDataType(dtype));
-  return WrapNested(relax::zeros(ShapeExpr(new_shape), dt), std::string(name));
+  return EmitTensor(relax::zeros(ShapeExpr(new_shape), dt), std::string(name));
 }
 
-static ffi::Any NNOnes(ffi::Array<ffi::Any> shape, ffi::String dtype, ffi::String name) {
+Var NNOnes(ffi::Array<ffi::Any> shape, ffi::String dtype, ffi::String name) {
   ffi::Array<PrimExpr> new_shape;
   for (const ffi::Any& s : shape) {
     if (auto opt = s.try_cast<int64_t>())
@@ -424,31 +448,29 @@ static ffi::Any NNOnes(ffi::Array<ffi::Any> shape, ffi::String dtype, ffi::Strin
     }
   }
   DataType dt = DataType(ffi::StringToDLDataType(dtype));
-  return WrapNested(relax::ones(ShapeExpr(new_shape), dt), std::string(name));
+  return EmitTensor(relax::ones(ShapeExpr(new_shape), dt), std::string(name));
 }
 
 // ---------------------------------------------------------------------------
 // Normalization ops
 // ---------------------------------------------------------------------------
 
-static ffi::Any NNLayerNorm(Var x, ffi::Array<Integer> axes, Expr gamma, Expr beta, double epsilon,
-                            ffi::String name) {
-  return WrapNested(
+Var NNLayerNorm(Var x, ffi::Array<Integer> axes, Expr gamma, Expr beta, double epsilon,
+                ffi::String name) {
+  return EmitTensor(
       relax::layer_norm(x, gamma, beta, axes, epsilon, /*center=*/true, /*scale=*/true),
       std::string(name));
 }
 
-static ffi::Any NNRmsNorm(Var x, Var weight, ffi::Array<Integer> axes, double epsilon,
-                          ffi::String name) {
-  return WrapNested(relax::rms_norm(x, weight, axes, epsilon), std::string(name));
+Var NNRmsNorm(Var x, Var weight, ffi::Array<Integer> axes, double epsilon, ffi::String name) {
+  return EmitTensor(relax::rms_norm(x, weight, axes, epsilon), std::string(name));
 }
 
-static ffi::Any NNGroupNorm(Var x, ffi::Optional<Var> weight, ffi::Optional<Var> bias,
-                            int num_groups, int channel_axis, ffi::Array<Integer> axes,
-                            double epsilon, ffi::String name) {
+Var NNGroupNorm(Var x, ffi::Optional<Var> weight, ffi::Optional<Var> bias, int num_groups,
+                int channel_axis, ffi::Array<Integer> axes, double epsilon, ffi::String name) {
   TVM_FFI_ICHECK(weight.defined() && bias.defined())
       << "NNGroupNorm: weight and bias must be provided";
-  return WrapNested(
+  return EmitTensor(
       relax::group_norm(x, weight.value(), bias.value(), num_groups, channel_axis, axes, epsilon,
                         /*center=*/true, /*scale=*/true),
       std::string(name));
@@ -458,8 +480,8 @@ static ffi::Any NNGroupNorm(Var x, ffi::Optional<Var> weight, ffi::Optional<Var>
 // Convolution ops
 // ---------------------------------------------------------------------------
 
-static ffi::Any NNConv1d(Var x, Var weight, ffi::Optional<Var> bias, ffi::Any strides,
-                         ffi::Any padding, ffi::Any dilation, int groups, ffi::String name) {
+Var NNConv1d(Var x, Var weight, ffi::Optional<Var> bias, ffi::Any strides, ffi::Any padding,
+             ffi::Any dilation, int groups, ffi::String name) {
   auto to_arr = [](const ffi::Any& v) -> ffi::Array<int64_t> {
     if (auto opt = v.try_cast<int64_t>()) return ffi::Array<int64_t>{opt.value()};
     if (auto opt = v.try_cast<ffi::Array<ffi::Any>>()) {
@@ -479,12 +501,11 @@ static ffi::Any NNConv1d(Var x, Var weight, ffi::Optional<Var> bias, ffi::Any st
                                        IntImm(DataType::Int(64), 1)}));
     out = relax::add(out, b);
   }
-  return WrapNested(out, std::string(name));
+  return EmitTensor(out, std::string(name));
 }
 
-static ffi::Any NNConv2d(Var x, Var weight, ffi::Optional<Var> bias, ffi::Any strides,
-                         ffi::Any padding, ffi::Any dilation, int groups, ffi::String data_layout,
-                         ffi::String name) {
+Var NNConv2d(Var x, Var weight, ffi::Optional<Var> bias, ffi::Any strides, ffi::Any padding,
+             ffi::Any dilation, int groups, ffi::String data_layout, ffi::String name) {
   auto to_arr = [](const ffi::Any& v) -> ffi::Array<int64_t> {
     if (auto opt = v.try_cast<int64_t>()) return ffi::Array<int64_t>{opt.value()};
     if (auto opt = v.try_cast<ffi::Array<ffi::Any>>()) {
@@ -514,12 +535,11 @@ static ffi::Any NNConv2d(Var x, Var weight, ffi::Optional<Var> bias, ffi::Any st
     }
     out = relax::add(out, b);
   }
-  return WrapNested(out, std::string(name));
+  return EmitTensor(out, std::string(name));
 }
 
-static ffi::Any NNConv3d(Var x, Var weight, ffi::Optional<Var> bias, ffi::Any strides,
-                         ffi::Any padding, ffi::Any dilation, int groups, ffi::String data_layout,
-                         ffi::String name) {
+Var NNConv3d(Var x, Var weight, ffi::Optional<Var> bias, ffi::Any strides, ffi::Any padding,
+             ffi::Any dilation, int groups, ffi::String data_layout, ffi::String name) {
   auto to_arr = [](const ffi::Any& v) -> ffi::Array<int64_t> {
     if (auto opt = v.try_cast<int64_t>()) return ffi::Array<int64_t>{opt.value()};
     if (auto opt = v.try_cast<ffi::Array<ffi::Any>>()) {
@@ -550,12 +570,12 @@ static ffi::Any NNConv3d(Var x, Var weight, ffi::Optional<Var> bias, ffi::Any st
     }
     out = relax::add(out, b);
   }
-  return WrapNested(out, std::string(name));
+  return EmitTensor(out, std::string(name));
 }
 
-static ffi::Any NNConv1dTranspose(Var x, Var weight, ffi::Optional<Var> bias, ffi::Any strides,
-                                  ffi::Any padding, ffi::Any output_padding, ffi::Any dilation,
-                                  int groups, ffi::String name) {
+Var NNConv1dTranspose(Var x, Var weight, ffi::Optional<Var> bias, ffi::Any strides,
+                      ffi::Any padding, ffi::Any output_padding, ffi::Any dilation, int groups,
+                      ffi::String name) {
   auto to_arr = [](const ffi::Any& v) -> ffi::Array<int64_t> {
     if (auto opt = v.try_cast<int64_t>()) return ffi::Array<int64_t>{opt.value()};
     if (auto opt = v.try_cast<ffi::Array<ffi::Any>>()) {
@@ -576,34 +596,33 @@ static ffi::Any NNConv1dTranspose(Var x, Var weight, ffi::Optional<Var> bias, ff
                                        IntImm(DataType::Int(64), 1)}));
     out = relax::add(out, b);
   }
-  return WrapNested(out, std::string(name));
+  return EmitTensor(out, std::string(name));
 }
 
 // ---------------------------------------------------------------------------
 // Padding
 // ---------------------------------------------------------------------------
 
-static ffi::Any NNPad(Var x, ffi::Array<Integer> pad_width, ffi::String mode, double value,
-                      ffi::String name) {
+Var NNPad(Var x, ffi::Array<Integer> pad_width, ffi::String mode, double value, ffi::String name) {
   static const Op& pad_op = Op::Get("relax.nn.pad");
   auto attrs = ffi::make_object<tvm::relax::PadAttrs>();
   attrs->pad_width = pad_width;
   attrs->pad_mode = std::string(mode);
   attrs->pad_value = value;
-  return WrapNested(Call(pad_op, {x}, Attrs(attrs), {}), std::string(name));
+  return EmitTensor(Call(pad_op, {x}, Attrs(attrs), {}), std::string(name));
 }
 
 // ---------------------------------------------------------------------------
 // Attention
 // ---------------------------------------------------------------------------
 
-static ffi::Any NNScaledDotProductAttention(Var query, Var key, Var value,
-                                            ffi::Optional<ffi::String> causal_mask,
-                                            ffi::Optional<double> scale, ffi::String name) {
+Var NNScaledDotProductAttention(Var query, Var key, Var value,
+                                ffi::Optional<ffi::String> causal_mask, ffi::Optional<double> scale,
+                                ffi::String name) {
   ffi::Optional<FloatImm> scale_imm =
       scale.has_value() ? ffi::Optional<FloatImm>(FloatImm(DataType::Float(64), scale.value()))
                         : std::nullopt;
-  return WrapNested(
+  return EmitTensor(
       relax::attention(query, key, value, std::nullopt, scale_imm, causal_mask, std::nullopt),
       std::string(name));
 }
@@ -612,18 +631,18 @@ static ffi::Any NNScaledDotProductAttention(Var query, Var key, Var value,
 // Sorting / searching
 // ---------------------------------------------------------------------------
 
-static ffi::Any NNSort(Var x, int axis, bool descending, ffi::String name) {
-  return WrapNested(relax::sort(x, axis, descending), std::string(name));
+Var NNSort(Var x, int axis, bool descending, ffi::String name) {
+  return EmitTensor(relax::sort(x, axis, descending), std::string(name));
 }
 
-static ffi::Any NNArgsort(Var x, int axis, bool descending, ffi::String dtype, ffi::String name) {
-  return WrapNested(relax::argsort(x, axis, descending, DataType(ffi::StringToDLDataType(dtype))),
+Var NNArgsort(Var x, int axis, bool descending, ffi::String dtype, ffi::String name) {
+  return EmitTensor(relax::argsort(x, axis, descending, DataType(ffi::StringToDLDataType(dtype))),
                     std::string(name));
 }
 
-static ffi::Any NNTopk(Var x, int k, int axis, ffi::String ret_type, bool largest,
-                       ffi::String dtype, ffi::String name) {
-  return WrapNested(
+ffi::Any NNTopk(Var x, int k, int axis, ffi::String ret_type, bool largest, ffi::String dtype,
+                ffi::String name) {
+  return EmitTuple(
       relax::topk(x, k, axis, ret_type, largest, DataType(ffi::StringToDLDataType(dtype))),
       std::string(name));
 }
@@ -632,25 +651,25 @@ static ffi::Any NNTopk(Var x, int k, int axis, ffi::String ret_type, bool larges
 // CCL ops
 // ---------------------------------------------------------------------------
 
-static ffi::Any NNCclAllreduce(Var x, ffi::String op_type, bool in_group, ffi::String name) {
-  return WrapNested(relax::allreduce(x, op_type, in_group), std::string(name));
+Var NNCclAllreduce(Var x, ffi::String op_type, bool in_group, ffi::String name) {
+  return EmitTensor(relax::allreduce(x, op_type, in_group), std::string(name));
 }
 
-static ffi::Any NNCclAllgather(Var x, int num_workers, ffi::String name) {
-  return WrapNested(relax::allgather(x, num_workers, /*in_group=*/true), std::string(name));
+Var NNCclAllgather(Var x, int num_workers, ffi::String name) {
+  return EmitTensor(relax::allgather(x, num_workers, /*in_group=*/true), std::string(name));
 }
 
-static ffi::Any NNCclBroadcastFromWorker0(Var x, ffi::String name) {
-  return WrapNested(relax::broadcast_from_worker0(x), std::string(name));
+Var NNCclBroadcastFromWorker0(Var x, ffi::String name) {
+  return EmitTensor(relax::broadcast_from_worker0(x), std::string(name));
 }
 
 // ---------------------------------------------------------------------------
 // Multinomial sampling
 // ---------------------------------------------------------------------------
 
-static ffi::Any NNMultinomialFromUniform(Var prob, Var uniform_sample, Var sample_indices,
-                                         ffi::String dtype, ffi::String name) {
-  return WrapNested(relax::multinomial_from_uniform(prob, uniform_sample, sample_indices,
+Var NNMultinomialFromUniform(Var prob, Var uniform_sample, Var sample_indices, ffi::String dtype,
+                             ffi::String name) {
+  return EmitTensor(relax::multinomial_from_uniform(prob, uniform_sample, sample_indices,
                                                     DataType(ffi::StringToDLDataType(dtype))),
                     std::string(name));
 }
@@ -659,7 +678,7 @@ static ffi::Any NNMultinomialFromUniform(Var prob, Var uniform_sample, Var sampl
 // Clip
 // ---------------------------------------------------------------------------
 
-static ffi::Any NNClip(Var x, double min_val, double max_val, ffi::String name) {
+Var NNClip(Var x, double min_val, double max_val, ffi::String name) {
   const auto* sinfo = x->struct_info_.as<TensorStructInfoNode>();
   DataType dtype = sinfo ? sinfo->dtype : DataType::Float(32);
   Expr mn, mx;
@@ -670,16 +689,16 @@ static ffi::Any NNClip(Var x, double min_val, double max_val, ffi::String name) 
     mn = PrimValue(IntImm(dtype, static_cast<int64_t>(min_val)));
     mx = PrimValue(IntImm(dtype, static_cast<int64_t>(max_val)));
   }
-  return WrapNested(relax::clip(x, mn, mx), std::string(name));
+  return EmitTensor(relax::clip(x, mn, mx), std::string(name));
 }
 
 // ---------------------------------------------------------------------------
 // tensor_expr_op
 // ---------------------------------------------------------------------------
 
-static ffi::Any NNTensorExprOp(ffi::Function tensor_expr_func, ffi::String name_hint,
-                               ffi::Array<Expr> args,
-                               ffi::Optional<ffi::Map<ffi::String, ffi::Any>> primfunc_attrs) {
+ffi::Any NNTensorExprOp(ffi::Function tensor_expr_func, ffi::String name_hint,
+                        ffi::Array<Expr> args,
+                        ffi::Optional<ffi::Map<ffi::String, ffi::Any>> primfunc_attrs) {
   BlockBuilder bb = BlockBuilder_Current();
   TVM_FFI_ICHECK(bb.defined()) << "tensor_expr_op called outside of a BlockBuilder scope";
 
@@ -715,15 +734,15 @@ static ffi::Any NNTensorExprOp(ffi::Function tensor_expr_func, ffi::String name_
                                                       : StructInfo(TupleStructInfo(out_sinfo_list));
 
   Expr call = Call(call_tir_op, {gv, relax::Tuple(args)}, tvm::Attrs(), {out_sinfo});
-  return WrapNested(call, std::string(name_hint));
+  return EmitTensorOrTuple(call, std::string(name_hint));
 }
 
 // ---------------------------------------------------------------------------
 // tensor_ir_op
 // ---------------------------------------------------------------------------
 
-static ffi::Any NNTensorIrOp(tir::PrimFunc func, ffi::String name_hint, ffi::Array<Expr> args,
-                             ffi::Array<ffi::Any> out) {
+ffi::Any NNTensorIrOp(tir::PrimFunc func, ffi::String name_hint, ffi::Array<Expr> args,
+                      ffi::Array<ffi::Any> out) {
   BlockBuilder bb = BlockBuilder_Current();
   TVM_FFI_ICHECK(bb.defined()) << "tensor_ir_op called outside of a BlockBuilder scope";
 
@@ -761,16 +780,15 @@ static ffi::Any NNTensorIrOp(tir::PrimFunc func, ffi::String name_hint, ffi::Arr
   if (!tir_vars.empty()) call_args.push_back(ShapeExpr(tir_vars));
 
   Expr call = Call(call_tir_op, call_args, tvm::Attrs(), {out_sinfo});
-  return WrapNested(call, std::string(name_hint));
+  return EmitTensorOrTuple(call, std::string(name_hint));
 }
 
 // ---------------------------------------------------------------------------
 // tensor_ir_inplace_op
 // ---------------------------------------------------------------------------
 
-static ffi::Any NNTensorIrInplaceOp(tir::PrimFunc func, ffi::String name_hint,
-                                    ffi::Array<Expr> args, ffi::Array<Integer> inplace_indices,
-                                    ffi::Array<ffi::Any> out) {
+ffi::Any NNTensorIrInplaceOp(tir::PrimFunc func, ffi::String name_hint, ffi::Array<Expr> args,
+                             ffi::Array<Integer> inplace_indices, ffi::Array<ffi::Any> out) {
   BlockBuilder bb = BlockBuilder_Current();
   TVM_FFI_ICHECK(bb.defined()) << "tensor_ir_inplace_op called outside of a BlockBuilder scope";
 
@@ -811,7 +829,7 @@ static ffi::Any NNTensorIrInplaceOp(tir::PrimFunc func, ffi::String name_hint,
   if (!tir_vars.empty()) call_args.push_back(ShapeExpr(tir_vars));
 
   Expr call = Call(call_tir_inplace_op, call_args, tvm::Attrs(attrs), {out_sinfo});
-  return WrapNested(call, std::string(name_hint));
+  return EmitTensorOrTuple(call, std::string(name_hint));
 }
 
 // ---------------------------------------------------------------------------
@@ -830,7 +848,7 @@ static Expr ConvertExternArg(const ffi::Any& arg) {
   TVM_FFI_UNREACHABLE();
 }
 
-static ffi::Any NNExtern(ffi::String name, ffi::Array<ffi::Any> args, ffi::Array<ffi::Any> out) {
+ffi::Any NNExtern(ffi::String name, ffi::Array<ffi::Any> args, ffi::Array<ffi::Any> out) {
   BlockBuilder bb = BlockBuilder_Current();
   TVM_FFI_ICHECK(bb.defined()) << "extern called outside of a BlockBuilder scope";
 
@@ -852,15 +870,14 @@ static ffi::Any NNExtern(ffi::String name, ffi::Array<ffi::Any> args, ffi::Array
   static const Op& call_dps_op = Op::Get("relax.call_dps_packed");
   Expr call =
       Call(call_dps_op, {ExternFunc(name), relax::Tuple(rx_args)}, tvm::Attrs(), {out_sinfo});
-  return WrapNested(call, std::string(name));
+  return EmitTensorOrTuple(call, std::string(name));
 }
 
 // ---------------------------------------------------------------------------
 // debug_func
 // ---------------------------------------------------------------------------
 
-static Var NNDebugFunc(ffi::String name, ffi::Array<ffi::Any> args, Var io_effect,
-                       ffi::String line_info) {
+Var NNDebugFunc(ffi::String name, ffi::Array<ffi::Any> args, Var io_effect, ffi::String line_info) {
   BlockBuilder bb = BlockBuilder_Current();
   TVM_FFI_ICHECK(bb.defined()) << "debug_func called outside of a BlockBuilder scope";
 
@@ -886,10 +903,9 @@ static Var NNDebugFunc(ffi::String name, ffi::Array<ffi::Any> args, Var io_effec
 // get_timestep_embedding
 // ---------------------------------------------------------------------------
 
-static ffi::Any NNGetTimestepEmbedding(Var x, int64_t embedding_dim, bool flip_sin_to_cos,
-                                       double downscale_freq_shift, double scale,
-                                       int64_t max_period, ffi::String out_dtype,
-                                       ffi::String name) {
+Var NNGetTimestepEmbedding(Var x, int64_t embedding_dim, bool flip_sin_to_cos,
+                           double downscale_freq_shift, double scale, int64_t max_period,
+                           ffi::String out_dtype, ffi::String name) {
   BlockBuilder bb = BlockBuilder_Current();
   TVM_FFI_ICHECK(bb.defined()) << "get_timestep_embedding called outside of a BlockBuilder scope";
 
@@ -946,8 +962,7 @@ static ffi::Any NNGetTimestepEmbedding(Var x, int64_t embedding_dim, bool flip_s
   }
 
   DataType target_dt = DataType(ffi::StringToDLDataType(out_dtype));
-  Expr final_emb = relax::astype(emb5, target_dt);
-  return WrapNested(final_emb, std::string(name));
+  return EmitTensor(relax::astype(emb5, target_dt), std::string(name));
 }
 
 // ---------------------------------------------------------------------------
@@ -1430,7 +1445,7 @@ static Var EmitTensorIrOp(BlockBuilder& bb, const tir::PrimFunc& func, const std
  * \param top_k       2-D tensor (batch, 1) top-k count.
  * \return Filtered and renormalized probability tensor, same shape as prob.
  */
-static ffi::Any NNRenormalizeTopPTopKProb(Var prob, Var sorted_prob, Var top_p, Var top_k) {
+ffi::Any NNRenormalizeTopPTopKProb(Var prob, Var sorted_prob, Var top_p, Var top_k) {
   BlockBuilder bb = BlockBuilder_Current();
   TVM_FFI_ICHECK(bb.defined())
       << "renormalize_top_p_top_k_prob called outside of a BlockBuilder scope";
@@ -1502,7 +1517,7 @@ static ffi::Any NNRenormalizeTopPTopKProb(Var prob, Var sorted_prob, Var top_p, 
   Var sum_filtered = bb->Emit(
       relax::sum(filtered_prob, ffi::Array<Integer>{Integer(1)}, /*keepdims=*/true), "sum");
   Expr renorm_prob_expr = relax::divide(filtered_prob, sum_filtered);
-  return WrapNested(renorm_prob_expr, std::string("renorm_prob"));
+  return EmitTensor(renorm_prob_expr, std::string("renorm_prob"));
 }
 
 // ---------------------------------------------------------------------------
@@ -1528,9 +1543,8 @@ static ffi::Any NNRenormalizeTopPTopKProb(Var prob, Var sorted_prob, Var top_p, 
  *                        defaults to arange(n) reshaped to (n, 1).
  * \return 2-D (n, 1) selected token indices.
  */
-static ffi::Any NNSampleTopPTopKFromSortedProb(Var sorted_prob, Var sorted_index, Var top_p,
-                                               Var top_k, Var uniform_sample,
-                                               ffi::Optional<Var> sample_indices_opt) {
+ffi::Any NNSampleTopPTopKFromSortedProb(Var sorted_prob, Var sorted_index, Var top_p, Var top_k,
+                                        Var uniform_sample, ffi::Optional<Var> sample_indices_opt) {
   BlockBuilder bb = BlockBuilder_Current();
   TVM_FFI_ICHECK(bb.defined())
       << "sample_top_p_top_k_from_sorted_prob called outside of a BlockBuilder scope";
@@ -1601,20 +1615,20 @@ static ffi::Any NNSampleTopPTopKFromSortedProb(Var sorted_prob, Var sorted_index
 // interpolate / resize2d
 // ---------------------------------------------------------------------------
 
-static ffi::Any NNResize2d(Var x, ffi::Array<Integer> size, ffi::String layout, ffi::String method,
-                           ffi::String coord_trans, ffi::String name) {
+Var NNResize2d(Var x, ffi::Array<Integer> size, ffi::String layout, ffi::String method,
+               ffi::String coord_trans, ffi::String name) {
   ffi::Array<PrimExpr> size_prim;
   for (const Integer& s : size) size_prim.push_back(s);
   ffi::Array<FloatImm> roi = {
       FloatImm(DataType::Float(32), 0.0), FloatImm(DataType::Float(32), 0.0),
       FloatImm(DataType::Float(32), 0.0), FloatImm(DataType::Float(32), 0.0)};
-  return WrapNested(relax::resize2d(x, ShapeExpr(size_prim), roi, layout, method, coord_trans,
+  return EmitTensor(relax::resize2d(x, ShapeExpr(size_prim), roi, layout, method, coord_trans,
                                     "round", -0.75, 0, 0.0, std::nullopt),
                     std::string(name));
 }
 
-static ffi::Any NNInterpolate(Var x, ffi::Array<Integer> size, ffi::String data_layout,
-                              ffi::String method, ffi::String coord_trans, ffi::String name) {
+Var NNInterpolate(Var x, ffi::Array<Integer> size, ffi::String data_layout, ffi::String method,
+                  ffi::String coord_trans, ffi::String name) {
   return NNResize2d(x, size, data_layout, method, coord_trans, name);
 }
 
