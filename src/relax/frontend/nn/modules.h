@@ -769,10 +769,6 @@ TimestepEmbeddingModule MakeTimestepEmbedding(int64_t in_channels, int64_t time_
                                               ffi::Optional<ffi::String> post_act_fn,
                                               ffi::Optional<int64_t> cond_proj_dim);
 
-// ---------------------------------------------------------------------------
-// Attention
-// ---------------------------------------------------------------------------
-
 class AttentionModuleNode : public NNModuleNode {
  public:
   int64_t heads;

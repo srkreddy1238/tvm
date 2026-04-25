@@ -1242,6 +1242,58 @@ TEST(NNModules, TestEmbedding1D) {
 }
 
 // ===========================================================================
+// ===========================================================================
+// TestKVCacheModuleNode / TestKVCacheModule
+//
+// Test-only NNModule that wraps a KVCacheModule, mirroring the Python
+// KVCacheTest fixture:
+//   class KVCacheTest(modules.Module):
+//       def __init__(self):
+//           self.cache = modules.KVCache(8, [2, 4])
+//       def forward(self, x: core.Tensor) -> core.Tensor:
+//           self.cache.append(x)
+//           return self.cache.view(4)
+//
+// Defined here (not in modules.h/modules.cc) because it is test-only.
+// RegisterReflection() is called via a local TVM_FFI_STATIC_INIT_BLOCK so
+// that DeriveMethodFunction can look up "_forward" by type key at runtime.
+// ===========================================================================
+class TestKVCacheModuleNode : public NNModuleNode {
+ public:
+  KVCacheModule cache;
+
+  explicit TestKVCacheModuleNode(KVCacheModule cache) : cache(std::move(cache)) {}
+
+  /*! \brief Append x to cache, return view of seq_len=4. */
+  Var Forward(Var x) {
+    NNTensor x_tensor(x);
+    cache.get()->Append(x_tensor);
+    NNTensor view = cache.get()->View(IntImm(DataType::Int(64), 4));
+    return view->expr;
+  }
+
+  static void RegisterReflection() {
+    namespace refl = tvm::ffi::reflection;
+    refl::ObjectDef<TestKVCacheModuleNode>()
+        .def(refl::init<KVCacheModule>())
+        .def_ro("cache", &TestKVCacheModuleNode::cache)
+        .def("_forward", &TestKVCacheModuleNode::Forward);
+  }
+  static constexpr bool _type_mutable = true;
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.frontend.nn.testing.TestKVCache", TestKVCacheModuleNode,
+                                    NNModuleNode);
+};
+class TestKVCacheModule : public runtime::ObjectRef {
+ public:
+  explicit TestKVCacheModule(KVCacheModule cache) {
+    data_ = ffi::make_object<TestKVCacheModuleNode>(std::move(cache));
+  }
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(TestKVCacheModule, runtime::ObjectRef,
+                                                TestKVCacheModuleNode);
+};
+TVM_FFI_STATIC_INIT_BLOCK() { TestKVCacheModuleNode::RegisterReflection(); }
+
+// ===========================================================================
 // TestKVCache
 //
 // Python equivalent:
@@ -1258,6 +1310,10 @@ TEST(NNModules, TestEmbedding1D) {
 // Module internals:
 //   KVCacheModule(init_seq_len=8, unit_shape=[2,4], dtype="float32")
 //   No trainable parameters.  One named effect: "cache".
+//
+// TestKVCacheModule wraps KVCacheModule and implements _forward(Var x),
+// mirroring the Python KVCacheTest class.  ModuleSpec is built via the
+// module-aware constructor; ExportTVM is called on the same object.
 //
 // Expected _initialize_effect:
 //   def _initialize_effect() -> R.Tuple(R.Object, R.Object):
@@ -1277,107 +1333,60 @@ TEST(NNModules, TestEmbedding1D) {
 //       -> R.Tuple(R.Tensor((4,2,4),"float32"), R.Tuple(R.Object, R.Object)):
 //     R.func_attr({"num_input": 3})
 //     with R.dataflow():
-//       kv_cache_append: R.Object = R.call_inplace_packed(
-//           "vm.builtin.attention_kv_cache_append",
-//           cache, x, inplace_indices=[0], sinfo_args=[R.Object()])
-//       kv_cache_view: R.Tensor((4,2,4),"float32") = R.call_pure_packed(
-//           "vm.builtin.attention_kv_cache_view",
-//           kv_cache_append, R.shape([4, 2, 4]),
-//           sinfo_args=(R.Tensor((4,2,4),"float32"),))
+//       kv_cache_append: R.Object = R.call_inplace_packed(...)
+//       kv_cache_view:   R.Tensor((4,2,4),"float32") = R.call_pure_packed(...)
 //       gv1 = kv_cache_view, (_io, kv_cache_append)
 //     return gv1
-//
-// NOTE on binding names vs Python IR:
-//   Python IR uses lv2/lv3 (sequential auto-naming).
-//   C++ BlockBuilder uses the hint strings from KVCacheModuleNode:
-//     Append → hint "kv_cache_append"  → binding "kv_cache_append"
-//     View   → hint "kv_cache_view"    → binding "kv_cache_view"
-//   The expected IR is built to match the C++ exporter output exactly.
 // ===========================================================================
 TEST(NNModules, TestKVCache) {
-  // Create the KVCache effect: KVCache(init_seq_len=8, unit_shape=[2,4])
-  // Python default dtype = get_default_dtype() = "float32"
+  // 1. Create TestKVCacheModule — owns the KVCacheModule and implements
+  //    _forward(Var x): append x to cache, return view of seq_len=4.
   KVCacheModule kv(/*init_seq_len=*/8,
                    /*unit_shape=*/ffi::Array<Integer>{Integer(2), Integer(4)},
                    /*dtype=*/"float32");
+  TestKVCacheModule mod(kv);
 
-  // ---------------------------------------------------------------------------
-  // Build the ModuleSpec.
-  //
-  // The forward lambda captures the KVCacheModule by value.  Inside the
-  // lambda (which runs inside a BlockBuilder dataflow scope):
-  //   1. kv->Append(x_tensor)  — emits call_inplace_packed, updates kv->cache
-  //   2. kv->View(4)           — emits call_pure_packed, returns NNTensor
-  //
-  // The lambda receives named_args = {"x": NNTensor(x_var)}.
-  // ---------------------------------------------------------------------------
-  // kv is a reference-counted ObjectRef: capturing it by value shares the
-  // underlying KVCacheModuleNode.  kv.get() returns a non-const pointer to
-  // the node, so Append() (which writes kv->cache) works without mutable.
-  ffi::TypedFunction<ffi::Any(ffi::Map<ffi::String, ffi::Any>)> forward_fn =
-      [kv](ffi::Map<ffi::String, ffi::Any> named_args) -> ffi::Any {
-    NNTensor x_tensor = named_args.at("x").cast<NNTensor>();
-    // Append x to the cache (emits call_inplace_packed, updates kv->cache)
-    kv.get()->Append(x_tensor);
-    // View the cache with seq_len=4 (emits call_pure_packed)
-    NNTensor view = kv.get()->View(IntImm(DataType::Int(64), 4));
-    return ffi::Any(view);
-  };
+  // 2. Build the per-method argument spec.
+  ffi::Map<ffi::String, ffi::Any> forward_spec;
+  forward_spec.Set("x", ffi::Any(MakeSpecTensor({2, 4}, "float32")));
+  ffi::Map<ffi::String, ffi::Map<ffi::String, ffi::Any>> spec;
+  spec.Set("forward", forward_spec);
 
-  ffi::Array<ffi::String> arg_names{"x"};
-  ffi::Array<ffi::Any> arg_specs{ffi::Any(MakeSpecTensor({2, 4}, "float32"))};
-
-  MethodSpec ms(forward_fn.packed(), arg_names, arg_specs, "plain", "plain");
-
-  // named_effects: {"cache": kv}
+  // 3. Build ModuleSpec via the module-aware constructor.
+  //    DeriveMethodFunction resolves "forward" -> "_forward" via reflection.
+  //    named_params is empty (no trainable weights).
+  //    named_effects must be supplied via the low-level override because
+  //    the module-aware constructor does not auto-collect effects.
+  ModuleSpec mod_spec(mod, spec, /*debug=*/true);
+  // Override to inject the named_effect "cache" -> kv.
   ffi::Map<ffi::String, runtime::ObjectRef> named_effects;
   named_effects.Set("cache", kv);
+  mod_spec = ModuleSpec(mod_spec->method_names, mod_spec->method_specs, mod_spec->named_params,
+                        named_effects);
 
-  ModuleSpec mod_spec(ffi::Array<ffi::String>{ffi::String("forward")},
-                      ffi::Array<ffi::Any>{ffi::Any(ms)},
-                      /*named_params=*/{}, named_effects);
-
-  NNModule mod;
-  ffi::Array<ffi::Any> result = mod->ExportTVM(mod_spec, /*debug=*/true, /*allow_extern=*/false);
+  // 4. Export via the same TestKVCacheModule object.
+  ffi::Array<ffi::Any> result =
+      mod.get()->ExportTVM(mod_spec, /*debug=*/true, /*allow_extern=*/false);
   IRModule actual = result[0].cast<IRModule>();
 
   // ---------------------------------------------------------------------------
   // Build expected IRModule
-  //
-  // Two functions: _initialize_effect and forward.
   // ---------------------------------------------------------------------------
   BlockBuilder bb = BlockBuilder::Create(std::nullopt);
 
   // ---- _initialize_effect --------------------------------------------------
-  // def _initialize_effect() -> R.Tuple(R.Object, R.Object):
-  //     with R.dataflow():
-  //         _io   = R.null_value()
-  //         lv    = R.zeros(R.shape([8, 2, 4]), dtype="float32")
-  //         cache = R.call_pure_packed(
-  //                     "vm.builtin.attention_kv_cache_create",
-  //                     lv, R.shape([8, 2, 4]), R.prim_value(0),
-  //                     sinfo_args=[R.Object()])
-  //         lv1   = (_io, cache)
-  //         gv    = lv1
-  //     return gv
   {
-    ffi::Array<Var> params;  // no parameters
+    ffi::Array<Var> params;
     bb->BeginScope(params);
     bb->BeginDataflowBlock();
 
-    // _io = R.null_value()
     static const Op& null_value_op = Op::Get("relax.null_value");
     Var io = bb->Emit(Call(null_value_op, {}, {}, {}), "_io");
 
-    // lv = R.zeros(R.shape([8, 2, 4]), dtype="float32")
     ShapeExpr init_shape(ffi::Array<PrimExpr>{
         IntImm(DataType::Int(64), 8), IntImm(DataType::Int(64), 2), IntImm(DataType::Int(64), 4)});
     Var lv = bb->Emit(relax::zeros(init_shape, DataType::Float(32)), "lv");
 
-    // cache = R.call_pure_packed(
-    //     "vm.builtin.attention_kv_cache_create",
-    //     lv, R.shape([8, 2, 4]), R.prim_value(0),
-    //     sinfo_args=[R.Object()])
     static const Op& cpp_op = Op::Get("relax.call_pure_packed");
     Expr cache_call = Call(cpp_op,
                            {ExternFunc("vm.builtin.attention_kv_cache_create"), lv, init_shape,
@@ -1385,9 +1394,7 @@ TEST(NNModules, TestKVCache) {
                            {}, {ObjectStructInfo()});
     Var cache = bb->Emit(cache_call, "cache");
 
-    // lv1 = (_io, cache)
     Var lv1 = bb->Emit(relax::Tuple({io, cache}), "lv1");
-    // gv = lv1
     Var gv = bb->EmitOutput(lv1, "gv");
 
     BindingBlock df = bb->EndBlock();
@@ -1401,19 +1408,6 @@ TEST(NNModules, TestKVCache) {
   }
 
   // ---- forward -------------------------------------------------------------
-  // def forward(x: R.Tensor((2,4),"float32"), _io: R.Object, cache: R.Object)
-  //     -> R.Tuple(R.Tensor((4,2,4),"float32"), R.Tuple(R.Object, R.Object)):
-  //   R.func_attr({"num_input": 3})
-  //   with R.dataflow():
-  //     kv_cache_append: R.Object = R.call_inplace_packed(
-  //         "vm.builtin.attention_kv_cache_append",
-  //         cache, x, inplace_indices=[0], sinfo_args=[R.Object()])
-  //     kv_cache_view: R.Tensor((4,2,4),"float32") = R.call_pure_packed(
-  //         "vm.builtin.attention_kv_cache_view",
-  //         kv_cache_append, R.shape([4, 2, 4]),
-  //         sinfo_args=(R.Tensor((4,2,4),"float32"),))
-  //     gv1 = kv_cache_view, (_io, kv_cache_append)
-  //   return gv1
   {
     Var x("x", TSInfo({2, 4}, DataType::Float(32)));
     Var io("_io", ObjectStructInfo());
@@ -1422,9 +1416,6 @@ TEST(NNModules, TestKVCache) {
     bb->BeginScope(params);
     bb->BeginDataflowBlock();
 
-    // kv_cache_append = R.call_inplace_packed(
-    //     "vm.builtin.attention_kv_cache_append",
-    //     cache, x, inplace_indices=[0], sinfo_args=[R.Object()])
     ObjectPtr<CallInplacePackedAttrs> inplace_attrs = ffi::make_object<CallInplacePackedAttrs>();
     inplace_attrs->inplace_indices = {Integer(0)};
     static const Op& inplace_op = Op::Get("relax.call_inplace_packed");
@@ -1433,10 +1424,6 @@ TEST(NNModules, TestKVCache) {
              Attrs(inplace_attrs), {ObjectStructInfo()});
     Var kv_cache_append = bb->Emit(append_call, "kv_cache_append");
 
-    // kv_cache_view = R.call_pure_packed(
-    //     "vm.builtin.attention_kv_cache_view",
-    //     kv_cache_append, R.shape([4, 2, 4]),
-    //     sinfo_args=(R.Tensor((4,2,4),"float32"),))
     ShapeExpr view_shape(ffi::Array<PrimExpr>{
         IntImm(DataType::Int(64), 4), IntImm(DataType::Int(64), 2), IntImm(DataType::Int(64), 4)});
     TensorStructInfo view_sinfo = TSInfo({4, 2, 4}, DataType::Float(32));
@@ -1446,10 +1433,6 @@ TEST(NNModules, TestKVCache) {
         {}, {view_sinfo});
     Var kv_cache_view = bb->Emit(view_call, "kv_cache_view");
 
-    // gv1 = (kv_cache_view, (_io, kv_cache_append))
-    // Effect output tuple: (_io, kv_cache_append)
-    //   - _io:              legacy debug IO effect (unchanged)
-    //   - kv_cache_append:  finalized KVCache state (updated cache var)
     Var gv1 =
         bb->EmitOutput(relax::Tuple({kv_cache_view, relax::Tuple({io, kv_cache_append})}), "gv1");
 
@@ -1457,7 +1440,6 @@ TEST(NNModules, TestKVCache) {
     Expr body = bb->Normalize(SeqExpr({df}, gv1));
     bb->EndScope();
 
-    // num_input = 3: x + _io + cache
     ffi::Map<ffi::String, ffi::Any> attrs;
     attrs.Set("num_input", ffi::Any(int64_t(3)));
     attrs.Set("global_symbol", ffi::Any(ffi::String("forward")));
@@ -1467,7 +1449,6 @@ TEST(NNModules, TestKVCache) {
 
   AssertStructEqual(actual, bb->Finalize());
 }
-
 // ---------------------------------------------------------------------------
 // MakeAttentionForwardFn
 //
