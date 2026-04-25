@@ -19,25 +19,22 @@
 
 /*!
  * \file src/relax/frontend/nn/modules.h
- * \brief Native C++ Object definitions for the built-in nn.Module subclasses.
+ * \brief Built-in nn module definitions.
  *
- * Design:
- *   Every XxxModuleNode owns ALL its members natively in C++:
- *     - Trainable weights/biases are stored as NNParameter (ParameterNode*)
- *       so that Python's named_parameters() traversal can reach them via
- *       the FFI field accessors without any Python-side shadow copies.
- *     - Scalar hyper-parameters (epsilon, stride, …) are stored as their
- *       natural C++ types (double, int64_t, String).
+ * Each XxxModuleNode owns all its members natively:
+ *   - Trainable weights and biases are stored as NNParameter so that
+ *     NNModuleNode::NamedParameters() can discover them via the attrs map.
+ *   - Scalar hyper-parameters (epsilon, stride, etc.) are stored as their
+ *     natural C++ types.
  *
- *   Each node exposes:
- *     - def_ro / def_rw fields  → direct Python attribute access
- *     - refl::init<...>()       → __init_handle_by_constructor__ in Python
- *     - forward() method        → graph-building, returns relax.Var
+ * Each node exposes:
+ *   - def_ro / def_rw fields for direct attribute access.
+ *   - refl::init<...>() for construction via the FFI.
+ *   - A Forward() method that emits relax ops and returns a relax::Var.
  *
- *   A companion Make* global function per module handles all the
- *   shape-arithmetic that used to live in Python __init__ (e.g. computing
- *   kernel_shape for Conv2D) and returns the fully-constructed ObjectRef.
- *   Python __init__ is then a single FFI call.
+ * A companion Make* factory function per module handles shape arithmetic
+ * (e.g. computing the weight shape for Conv2D) and returns the fully
+ * constructed module with its attrs map populated.
  */
 
 #ifndef TVM_RELAX_FRONTEND_NN_MODULES_H_
@@ -57,28 +54,24 @@ namespace relax {
 namespace frontend {
 namespace nn {
 
-// ===========================================================================
-// Helper: build a ParameterNode from shape + dtype, return as NNParameter.
-// Used by all Make* factory functions below.
-// ===========================================================================
+/*!
+ * \brief Build an NNParameter from a shape specification and dtype string.
+ *
+ * Used by all Make* factory functions to create weight and bias parameters.
+ *
+ * \param shape  Shape specification; each element is int64, String, or PrimExpr.
+ * \param dtype  Data type string (e.g. "float32").
+ * \return       A new unbound NNParameter.
+ */
 NNParameter MakeParam(ffi::Array<ffi::Any> shape, ffi::String dtype);
-
-// ===========================================================================
-// Macro: declare a module node that inherits NNModuleNode.
-//
-// Each XxxModuleNode:
-//   - Inherits NNModuleNode (gains named_parameters, state_dict,
-//     load_state_dict, to, and the attrs map).
-//   - Stores NNParameter fields AND scalar hyper-parameters as direct C++
-//     members (for typed access in Forward()), AND mirrors every NNParameter
-//     into attrs so that NNModuleNode::NamedParameters() finds them.
-//   - The Make* factory populates attrs after construction.
-// ===========================================================================
 
 // ---------------------------------------------------------------------------
 // ReLU
 // ---------------------------------------------------------------------------
 
+/*! \brief Rectified linear unit activation. */
+
+/*! \brief Rectified linear unit activation. */
 class ReLUModuleNode : public NNModuleNode {
  public:
   Var Forward(Var x) const;
@@ -100,6 +93,7 @@ class ReLUModule : public runtime::ObjectRef {
 // SiLU
 // ---------------------------------------------------------------------------
 
+/*! \brief Sigmoid linear unit activation. */
 class SiLUModuleNode : public NNModuleNode {
  public:
   Var Forward(Var x) const;
@@ -121,9 +115,11 @@ class SiLUModule : public runtime::ObjectRef {
 // GELU
 // ---------------------------------------------------------------------------
 
+/*! \brief Gaussian error linear unit activation. */
 class GELUModuleNode : public NNModuleNode {
  public:
-  ffi::String approximate;  //!< "" (exact) or "tanh"
+  /*! \brief Approximation method: "" for exact, "tanh" for tanh approximation. */
+  ffi::String approximate;
 
   explicit GELUModuleNode(ffi::String approximate = "") : approximate(std::move(approximate)) {}
   Var Forward(Var x) const;
@@ -148,10 +144,14 @@ class GELUModule : public runtime::ObjectRef {
 // Linear
 // ---------------------------------------------------------------------------
 
+/*! \brief Fully-connected linear transformation. */
 class LinearModuleNode : public NNModuleNode {
  public:
-  NNParameter weight;               //!< shape [out_features, in_features]
-  ffi::Optional<NNParameter> bias;  //!< shape [out_features], or nullopt
+  /*! \brief Weight matrix; shape [out_features, in_features]. */
+  NNParameter weight;
+  /*! \brief Bias vector; shape [out_features], or nullopt when bias=False. */
+  ffi::Optional<NNParameter> bias;
+  /*! \brief Optional output dtype override. */
   ffi::Optional<ffi::String> out_dtype;
 
   LinearModuleNode(NNParameter weight, ffi::Optional<NNParameter> bias,
@@ -178,7 +178,16 @@ class LinearModule : public runtime::ObjectRef {
                         ffi::Optional<ffi::String> out_dtype);
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(LinearModule, runtime::ObjectRef, LinearModuleNode);
 };
-/*! \brief Factory: creates Parameters internally, returns LinearModule. */
+/*!
+ * \brief Factory: create a Linear module with the given dimensions.
+ *
+ * \param in_features   Input feature count (int64 or symbolic).
+ * \param out_features  Output feature count (int64 or symbolic).
+ * \param bias          Whether to include a bias parameter.
+ * \param dtype         Weight dtype; defaults to the current default dtype.
+ * \param out_dtype     Optional output dtype override.
+ * \return              A fully constructed LinearModule.
+ */
 LinearModule MakeLinear(ffi::Any in_features, ffi::Any out_features, bool bias,
                         ffi::Optional<ffi::String> dtype, ffi::Optional<ffi::String> out_dtype);
 
@@ -186,9 +195,11 @@ LinearModule MakeLinear(ffi::Any in_features, ffi::Any out_features, bool bias,
 // Embedding
 // ---------------------------------------------------------------------------
 
+/*! \brief Lookup-table embedding layer. */
 class EmbeddingModuleNode : public NNModuleNode {
  public:
-  NNParameter weight;  //!< shape [num_embeddings, embedding_dim]
+  /*! \brief Embedding table; shape [num_embeddings, embedding_dim]. */
+  NNParameter weight;
 
   explicit EmbeddingModuleNode(NNParameter weight) : weight(std::move(weight)) {}
   Var Forward(Var x, ffi::Array<ffi::Any> out_shape_if_nd) const;
@@ -210,18 +221,29 @@ class EmbeddingModule : public runtime::ObjectRef {
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(EmbeddingModule, runtime::ObjectRef,
                                                 EmbeddingModuleNode);
 };
-/*! \brief Factory: creates the weight Parameter internally. */
+/*!
+ * \brief Factory: create an Embedding module.
+ *
+ * \param num    Vocabulary size (int64 or symbolic).
+ * \param dim    Embedding dimension (int64 or symbolic).
+ * \param dtype  Weight dtype; defaults to the current default dtype.
+ * \return       A fully constructed EmbeddingModule.
+ */
 EmbeddingModule MakeEmbedding(ffi::Any num, ffi::Any dim, ffi::Optional<ffi::String> dtype);
 
 // ---------------------------------------------------------------------------
 // LayerNorm
 // ---------------------------------------------------------------------------
 
+/*! \brief Layer normalisation over the last N dimensions. */
 class LayerNormModuleNode : public NNModuleNode {
  public:
-  ffi::Optional<NNParameter> weight;  //!< gamma, or nullopt when !elementwise_affine
-  ffi::Optional<NNParameter> bias;    //!< beta,  or nullopt when !elementwise_affine
-  ffi::Array<Integer> axes;           //!< normalisation axes (negative)
+  /*! \brief Scale parameter (gamma); nullopt when elementwise_affine=False. */
+  ffi::Optional<NNParameter> weight;
+  /*! \brief Shift parameter (beta); nullopt when elementwise_affine=False. */
+  ffi::Optional<NNParameter> bias;
+  /*! \brief Normalisation axes (negative indices). */
+  ffi::Array<Integer> axes;
   double epsilon;
   bool elementwise_affine;
 
@@ -258,7 +280,15 @@ class LayerNormModule : public runtime::ObjectRef {
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(LayerNormModule, runtime::ObjectRef,
                                                 LayerNormModuleNode);
 };
-/*! \brief Factory: creates Parameters internally. */
+/*!
+ * \brief Factory: create a LayerNorm module.
+ *
+ * \param normalized_shape  int64 or Array<Any> of the normalised dimensions.
+ * \param eps               Epsilon for numerical stability.
+ * \param elementwise_affine  Whether to include learnable affine parameters.
+ * \param dtype             Parameter dtype; defaults to the current default dtype.
+ * \return                  A fully constructed LayerNormModule.
+ */
 LayerNormModule MakeLayerNorm(ffi::Any normalized_shape, double eps, bool elementwise_affine,
                               ffi::Optional<ffi::String> dtype);
 
@@ -266,10 +296,14 @@ LayerNormModule MakeLayerNorm(ffi::Any normalized_shape, double eps, bool elemen
 // RMSNorm
 // ---------------------------------------------------------------------------
 
+/*! \brief Root-mean-square layer normalisation. */
 class RMSNormModuleNode : public NNModuleNode {
  public:
+  /*! \brief Scale parameter. */
   NNParameter weight;
+  /*! \brief Optional bias parameter. */
   ffi::Optional<NNParameter> bias;
+  /*! \brief Normalisation axes. */
   ffi::Array<Integer> axes;
   double epsilon;
 
@@ -299,7 +333,16 @@ class RMSNormModule : public runtime::ObjectRef {
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(RMSNormModule, runtime::ObjectRef,
                                                 RMSNormModuleNode);
 };
-/*! \brief Factory: creates Parameters internally. */
+/*!
+ * \brief Factory: create an RMSNorm module.
+ *
+ * \param hidden_size  Hidden dimension size (int64 or symbolic).
+ * \param axes         Normalisation axes.
+ * \param epsilon      Epsilon for numerical stability.
+ * \param has_bias     Whether to include a bias parameter.
+ * \param dtype        Parameter dtype; defaults to the current default dtype.
+ * \return             A fully constructed RMSNormModule.
+ */
 RMSNormModule MakeRMSNorm(ffi::Any hidden_size, ffi::Array<Integer> axes, double epsilon,
                           bool has_bias, ffi::Optional<ffi::String> dtype);
 
@@ -307,10 +350,13 @@ RMSNormModule MakeRMSNorm(ffi::Any hidden_size, ffi::Array<Integer> axes, double
 // GroupNorm
 // ---------------------------------------------------------------------------
 
+/*! \brief Group normalisation. */
 class GroupNormModuleNode : public NNModuleNode {
  public:
   int64_t num_groups;
+  /*! \brief Scale parameter; nullopt when affine=False. */
   ffi::Optional<NNParameter> weight;
+  /*! \brief Bias parameter; nullopt when affine=False. */
   ffi::Optional<NNParameter> bias;
   double epsilon;
 
@@ -344,7 +390,16 @@ class GroupNormModule : public runtime::ObjectRef {
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(GroupNormModule, runtime::ObjectRef,
                                                 GroupNormModuleNode);
 };
-/*! \brief Factory: creates Parameters internally. */
+/*!
+ * \brief Factory: create a GroupNorm module.
+ *
+ * \param num_groups   Number of groups.
+ * \param num_channels Channel count (int64 or symbolic).
+ * \param eps          Epsilon for numerical stability.
+ * \param affine       Whether to include learnable affine parameters.
+ * \param dtype        Parameter dtype; defaults to the current default dtype.
+ * \return             A fully constructed GroupNormModule.
+ */
 GroupNormModule MakeGroupNorm(int64_t num_groups, ffi::Any num_channels, double eps, bool affine,
                               ffi::Optional<ffi::String> dtype);
 
@@ -352,6 +407,7 @@ GroupNormModule MakeGroupNorm(int64_t num_groups, ffi::Any num_channels, double 
 // Conv1D
 // ---------------------------------------------------------------------------
 
+/*! \brief 1-D convolution. */
 class Conv1DModuleNode : public NNModuleNode {
  public:
   NNParameter weight;
@@ -391,7 +447,7 @@ class Conv1DModule : public runtime::ObjectRef {
                         int64_t padding, int64_t dilation, int64_t groups);
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(Conv1DModule, runtime::ObjectRef, Conv1DModuleNode);
 };
-/*! \brief Factory: creates Parameters internally. */
+/*! \brief Factory: create a Conv1D module with the given dimensions. */
 Conv1DModule MakeConv1D(ffi::Any in_channels, ffi::Any out_channels, ffi::Any kernel_size,
                         int64_t stride, int64_t padding, int64_t dilation, int64_t groups,
                         bool has_bias, ffi::Optional<ffi::String> dtype);
@@ -400,6 +456,7 @@ Conv1DModule MakeConv1D(ffi::Any in_channels, ffi::Any out_channels, ffi::Any ke
 // Conv2D
 // ---------------------------------------------------------------------------
 
+/*! \brief 2-D convolution. */
 class Conv2DModuleNode : public NNModuleNode {
  public:
   NNParameter weight;
@@ -442,7 +499,7 @@ class Conv2DModule : public runtime::ObjectRef {
                         int64_t padding, int64_t dilation, int64_t groups, ffi::String data_layout);
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(Conv2DModule, runtime::ObjectRef, Conv2DModuleNode);
 };
-/*! \brief Factory: creates Parameters internally, handles kernel_size expansion. */
+/*! \brief Factory: create a Conv2D module; expands scalar kernel_size to [kH, kW]. */
 Conv2DModule MakeConv2D(ffi::Any in_channels, ffi::Any out_channels,
                         ffi::Array<Integer> kernel_size, int64_t stride, int64_t padding,
                         int64_t dilation, int64_t groups, bool has_bias,
@@ -452,6 +509,7 @@ Conv2DModule MakeConv2D(ffi::Any in_channels, ffi::Any out_channels,
 // Conv3D
 // ---------------------------------------------------------------------------
 
+/*! \brief 3-D convolution. */
 class Conv3DModuleNode : public NNModuleNode {
  public:
   NNParameter weight;
@@ -494,7 +552,7 @@ class Conv3DModule : public runtime::ObjectRef {
                         int64_t padding, int64_t dilation, int64_t groups, ffi::String data_layout);
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(Conv3DModule, runtime::ObjectRef, Conv3DModuleNode);
 };
-/*! \brief Factory: creates Parameters internally, handles kernel_size expansion. */
+/*! \brief Factory: create a Conv3D module; expands scalar kernel_size to [kD, kH, kW]. */
 Conv3DModule MakeConv3D(ffi::Any in_channels, ffi::Any out_channels,
                         ffi::Array<Integer> kernel_size, int64_t stride, int64_t padding,
                         int64_t dilation, int64_t groups, bool has_bias,
@@ -504,6 +562,7 @@ Conv3DModule MakeConv3D(ffi::Any in_channels, ffi::Any out_channels,
 // ConvTranspose1D
 // ---------------------------------------------------------------------------
 
+/*! \brief 1-D transposed convolution. */
 class ConvTranspose1DModuleNode : public NNModuleNode {
  public:
   NNParameter weight;
@@ -549,7 +608,7 @@ class ConvTranspose1DModule : public runtime::ObjectRef {
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(ConvTranspose1DModule, runtime::ObjectRef,
                                                 ConvTranspose1DModuleNode);
 };
-/*! \brief Factory: creates Parameters internally. */
+/*! \brief Factory: create a ConvTranspose1D module. */
 ConvTranspose1DModule MakeConvTranspose1D(ffi::Any in_channels, ffi::Any out_channels,
                                           ffi::Any kernel_size, int64_t stride, int64_t padding,
                                           int64_t output_padding, int64_t dilation, int64_t groups,
@@ -559,6 +618,7 @@ ConvTranspose1DModule MakeConvTranspose1D(ffi::Any in_channels, ffi::Any out_cha
 // Identity
 // ---------------------------------------------------------------------------
 
+/*! \brief Identity pass-through module. */
 class IdentityModuleNode : public NNModuleNode {
  public:
   Var Forward(Var x) const;
@@ -580,25 +640,28 @@ class IdentityModule : public runtime::ObjectRef {
 };
 
 // ---------------------------------------------------------------------------
-// EffectNode  —  abstract base for side-effecting objects
-//
-// Mirrors Python's Effect abstract class in core.py.
-// Concrete subclasses: IOEffectModuleNode, KVCacheModuleNode.
-//
-// Inheriting from NNModuleNode means Effects can be stored in attrs, passed
-// through ModuleSpec as runtime::ObjectRef, and traversed by NamedParameters
-// (which skips them — Effects have no trainable parameters).
-//
-// The exporter uses IsInstance<EffectNode>() to detect effects and calls
-// the four virtual protocol methods directly instead of string-scanning
-// the TVMFFITypeInfo method table.
+// EffectNode
 // ---------------------------------------------------------------------------
 
+/*!
+ * \brief Abstract base class for side-effecting state objects.
+ *
+ * Concrete subclasses (IOEffectModuleNode, KVCacheModuleNode) implement
+ * the four protocol methods used by the exporter to manage effect state
+ * across function boundaries.
+ *
+ * Inheriting from NNModuleNode allows effects to be stored in attrs and
+ * passed through ModuleSpec as runtime::ObjectRef.  NamedParameters()
+ * skips EffectNode subclasses since they carry no trainable parameters.
+ *
+ * The exporter detects effects via IsInstance<EffectNode>() and calls
+ * the virtual protocol methods directly.
+ */
 class EffectNode : public NNModuleNode {
  public:
-  /*! \brief Emit the initialisation expression into bb; return the state Vars. */
+  /*! \brief Emit the initialisation expression into \p bb; return the state Vars. */
   virtual ffi::Array<Var> EmitInit(ffi::String name_hint, BlockBuilder bb) const = 0;
-  /*! \brief Create placeholder state Vars; store them internally. */
+  /*! \brief Create placeholder state Vars and store them internally. */
   virtual ffi::Array<Var> Create(ffi::String name_hint) = 0;
   /*! \brief Restore internal state from previously created Vars. */
   virtual void SetState(ffi::Array<Var> state_vars) = 0;
@@ -616,22 +679,22 @@ class EffectNode : public NNModuleNode {
   static constexpr bool _type_mutable = true;
   TVM_FFI_DECLARE_OBJECT_INFO("relax.frontend.nn.Effect", EffectNode, NNModuleNode);
 };
-// Note: no Effect handle class — EffectNode is abstract and is always
-// held via IOEffectModule / KVCacheModule (or as runtime::ObjectRef).
+// EffectNode is abstract; concrete subclasses are held via IOEffectModule
+// or KVCacheModule (or as runtime::ObjectRef).
 
 // ---------------------------------------------------------------------------
 // IOEffect
 // ---------------------------------------------------------------------------
 
 /*!
- * \brief Native C++ IOEffect: models the IO side-effect token (_io).
+ * \brief Models the IO side-effect token.
  *
- * Inherits the four Effect protocol methods from EffectNode and overrides
- * them concretely.
+ * Tracks a single Var representing the IO effect state.  The exporter
+ * threads this token through every method that carries side effects.
  */
 class IOEffectModuleNode : public EffectNode {
  public:
-  /*! \brief The current _io Var, or undefined when not active. */
+  /*! \brief The current IO effect Var, or nullopt when not active. */
   ffi::Optional<Var> effect;
 
   IOEffectModuleNode() = default;
@@ -664,19 +727,20 @@ class IOEffectModule : public runtime::ObjectRef {
 // ---------------------------------------------------------------------------
 
 /*!
- * \brief Native C++ KVCache effect module.
+ * \brief Attention KV-cache effect module.
  *
- * Mirrors Python KVCache: holds init_seq_len, unit_shape, dtype, and the
- * current cache Var.  Inherits the four Effect protocol methods from
- * EffectNode and overrides them concretely.  Also provides view() and
- * append() for use inside forward().
+ * Holds the initial sequence length, per-token shape, and dtype for a
+ * single KV-cache slot.  Implements the four EffectNode protocol methods
+ * and provides View() and Append() for use inside Forward().
  */
 class KVCacheModuleNode : public EffectNode {
  public:
   int64_t init_seq_len;
-  ffi::Array<Integer> unit_shape;  //!< per-token shape dims
+  /*! \brief Per-token shape dimensions. */
+  ffi::Array<Integer> unit_shape;
   ffi::String dtype;
-  ffi::Optional<Var> cache;  //!< current cache Var (ObjectStructInfo)
+  /*! \brief Current cache Var (ObjectStructInfo), or nullopt when not active. */
+  ffi::Optional<Var> cache;
 
   KVCacheModuleNode(int64_t init_seq_len, ffi::Array<Integer> unit_shape, ffi::String dtype)
       : init_seq_len(init_seq_len), unit_shape(std::move(unit_shape)), dtype(std::move(dtype)) {}
@@ -717,6 +781,7 @@ class KVCacheModule : public runtime::ObjectRef {
 // Timesteps
 // ---------------------------------------------------------------------------
 
+/*! \brief Sinusoidal timestep embedding module. */
 class TimestepsModuleNode : public NNModuleNode {
  public:
   int64_t num_channels;
@@ -754,6 +819,7 @@ class TimestepsModule : public runtime::ObjectRef {
 // TimestepEmbedding
 // ---------------------------------------------------------------------------
 
+/*! \brief Two-layer MLP that projects timestep embeddings. */
 class TimestepEmbeddingModuleNode : public NNModuleNode {
  public:
   LinearModule linear_1;
@@ -802,6 +868,14 @@ TimestepEmbeddingModule MakeTimestepEmbedding(int64_t in_channels, int64_t time_
                                               ffi::Optional<ffi::String> post_act_fn,
                                               ffi::Optional<int64_t> cond_proj_dim);
 
+// ---------------------------------------------------------------------------
+// Attention
+// ---------------------------------------------------------------------------
+
+/*!
+ * \brief Multi-head attention module with optional cross-attention and
+ *        group-norm pre-conditioning.
+ */
 class AttentionModuleNode : public NNModuleNode {
  public:
   int64_t heads;
@@ -810,7 +884,8 @@ class AttentionModuleNode : public NNModuleNode {
   LinearModule to_k;
   LinearModule to_v;
   ffi::Optional<GroupNormModule> group_norm;
-  ModuleList to_out;  //!< [Linear(inner_dim, query_dim)]
+  /*! \brief Output projection sub-modules; to_out[0] is a Linear layer. */
+  ModuleList to_out;
 
   AttentionModuleNode(int64_t heads, int64_t inner_dim, LinearModule to_q, LinearModule to_k,
                       LinearModule to_v, ffi::Optional<GroupNormModule> group_norm,
@@ -823,7 +898,14 @@ class AttentionModuleNode : public NNModuleNode {
         group_norm(std::move(group_norm)),
         to_out(std::move(to_out)) {}
 
-  /*! \brief forward(hidden_states, encoder_hidden_states=nullopt). */
+  /*!
+   * \brief Compute attention output.
+   *
+   * \param hidden_states          Query input tensor.
+   * \param encoder_hidden_states  Key/value input for cross-attention,
+   *                               or nullopt for self-attention.
+   * \return                       Output tensor after projection.
+   */
   Var Forward(Var hidden_states, ffi::Optional<Var> encoder_hidden_states) const;
 
   static void RegisterReflection() {

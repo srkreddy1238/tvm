@@ -19,24 +19,24 @@
 
 /*!
  * \file src/relax/frontend/nn/core.h
- * \brief Native C++ Object definitions for the nn frontend core types:
- *        Tensor, Parameter, and NNObject.
+ * \brief Core object definitions for the nn module frontend.
  *
- * Design:
- *   TensorNode  – holds a relax.Var whose struct_info is TensorStructInfo.
- *                 Exposes shape, ndim, dtype as read-only fields plus
- *                 a From* family of static constructors.
+ * Defines the fundamental types used throughout the nn frontend:
  *
- *   ParameterNode – subclass of TensorNode that additionally holds an
- *                   optional concrete data buffer (runtime::Tensor) and
- *                   a string→Any attribute map.
+ *   - TensorNode     wraps a relax::Var with TensorStructInfo, exposing
+ *                    shape, ndim, and dtype as read-only properties.
  *
- *   NNObjectNode  – holds a relax.Var whose struct_info is ObjectStructInfo.
- *                   Used for non-tensor frontend components (e.g. KVCache).
+ *   - ParameterNode  extends TensorNode with an optional concrete data
+ *                    buffer (runtime::Tensor) and a string-keyed attribute
+ *                    map for quantization metadata and similar annotations.
  *
- * Python side: each class is decorated with @tvm_ffi.register_object and
- * constructed via __init_handle_by_constructor__.  All field access and
- * method calls go through the FFI with zero Python overhead.
+ *   - NNObjectNode   wraps a relax::Var with ObjectStructInfo, used for
+ *                    non-tensor handles such as KVCache.
+ *
+ *   - NNModuleNode   base class for all nn modules; owns named sub-modules
+ *                    and parameters in a string-keyed attribute map and
+ *                    provides parameter traversal, state-dict serialization,
+ *                    dtype conversion, export, and JIT compilation.
  */
 
 #ifndef TVM_RELAX_FRONTEND_NN_CORE_H_
@@ -61,23 +61,18 @@ namespace nn {
 // ---------------------------------------------------------------------------
 
 /*!
- * \brief Native C++ representation of nn.Tensor.
+ * \brief Wraps a relax::Var whose struct_info is TensorStructInfo.
  *
- * Wraps a relax.Var whose struct_info is TensorStructInfo.  All shape /
- * dtype information is derived directly from the Var's struct_info so there
- * is no duplication.
+ * All shape and dtype information is derived directly from the Var's
+ * struct_info; no duplication is maintained.
  */
 class TensorNode : public runtime::Object {
  public:
-  /*! \brief The underlying relax.Var (TensorStructInfo). */
+  /*! \brief The underlying relax::Var (TensorStructInfo). */
   Var expr;
 
-  // ---- Constructors -------------------------------------------------------
-
-  /*! \brief Construct from an existing relax.Var (must have TensorStructInfo). */
+  /*! \brief Construct from an existing relax::Var (must have TensorStructInfo). */
   explicit TensorNode(Var expr);
-
-  // ---- Accessors (exposed as read-only fields / methods) ------------------
 
   /*! \brief Return the shape as an Array of PrimExprs. */
   ffi::Array<PrimExpr> GetShape() const;
@@ -88,21 +83,25 @@ class TensorNode : public runtime::Object {
   /*! \brief Return the dtype string. */
   ffi::String GetDtype() const;
 
-  // ---- Static factory methods ---------------------------------------------
-
   /*!
    * \brief Create a placeholder Var with the given shape and dtype.
-   * Shape elements may be int64, String (symbolic name), or PrimExpr.
+   *
+   * \param shape  Shape specification; each element is int64, String (symbolic), or PrimExpr.
+   * \param dtype  Data type string (e.g. "float32").
+   * \param name   Name hint for the created Var.
+   * \return       A new TensorNode owning the placeholder Var.
    */
   static TensorNode* MakePlaceholder(ffi::Array<ffi::Any> shape, ffi::String dtype,
                                      ffi::String name);
 
   /*!
    * \brief Create a Tensor from an existing TensorStructInfo.
+   *
+   * \param sinfo  The struct info to use.
+   * \param name   Name hint for the created Var.
+   * \return       A new TensorNode owning the created Var.
    */
   static TensorNode* MakeFromStructInfo(TensorStructInfo sinfo, ffi::String name);
-
-  // ---- Reflection ---------------------------------------------------------
 
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
@@ -115,7 +114,7 @@ class TensorNode : public runtime::Object {
   }
 
   static constexpr bool _type_mutable = false;
-  // Reserve child slots for ParameterNode
+  /*! \brief Reserve child slots for ParameterNode. */
   static constexpr uint32_t _type_child_slots = 1;
   TVM_FFI_DECLARE_OBJECT_INFO("relax.frontend.nn.Tensor", TensorNode, runtime::Object);
 };
@@ -131,28 +130,32 @@ class NNTensor : public runtime::ObjectRef {
 // ---------------------------------------------------------------------------
 
 /*!
- * \brief Native C++ representation of nn.Parameter.
+ * \brief Extends TensorNode with an optional concrete data buffer and
+ *        a string-keyed attribute map.
  *
- * Extends TensorNode with:
- *   - An optional concrete data buffer (runtime::Tensor / NDArray).
- *   - A string→Any attribute dictionary.
- *   - A to(dtype) method that re-creates the placeholder with a new dtype.
+ * The data field holds the bound runtime tensor when the parameter has
+ * been loaded from a checkpoint; it is nullopt for unbound parameters.
+ * The attrs map carries user-defined annotations such as quantization
+ * metadata.
  */
 class ParameterNode : public TensorNode {
  public:
-  /*! \brief Concrete data, or nullopt when unbound. */
+  /*! \brief Concrete data buffer, or nullopt when unbound. */
   ffi::Optional<runtime::Tensor> data;
 
-  /*! \brief User-defined attributes (e.g. quantization metadata). */
+  /*! \brief User-defined attribute map (e.g. quantization metadata). */
   ffi::Map<ffi::String, ffi::Any> attrs;
 
-  /*! \brief Construct an unbound parameter with the given shape and dtype. */
+  /*! \brief Construct from a Var, optional data buffer, and attribute map. */
   ParameterNode(Var expr, ffi::Optional<runtime::Tensor> data,
                 ffi::Map<ffi::String, ffi::Any> attrs);
 
   /*!
-   * \brief Re-create the placeholder with a new dtype.
-   * Only valid when data is not bound (data == nullopt).
+   * \brief Re-create the placeholder Var with a new dtype.
+   *
+   * Only valid when data is nullopt (parameter is unbound).
+   *
+   * \param dtype  Target dtype string.
    */
   void To(ffi::String dtype);
 
@@ -169,7 +172,7 @@ class ParameterNode : public TensorNode {
         .def("to", &ParameterNode::To, "Re-create placeholder with new dtype.");
   }
 
-  // Parameters are mutable (data and attrs can be set after construction).
+  /*! \brief Parameters are mutable: data and attrs may be set after construction. */
   static constexpr bool _type_mutable = true;
   TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.frontend.nn.Parameter", ParameterNode, TensorNode);
 };
@@ -181,8 +184,7 @@ class NNParameter : public runtime::ObjectRef {
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(NNParameter, runtime::ObjectRef, ParameterNode);
 };
 
-// Forward declarations needed by NNModuleNode::ExportTVM / Jit.
-// Full definitions are in spec.h and cpp_module.h respectively.
+// Forward declarations for types used by NNModuleNode::ExportTVM and Jit.
 class ModuleSpecNode;
 class ModuleSpec;
 
@@ -191,14 +193,13 @@ class ModuleSpec;
 // ---------------------------------------------------------------------------
 
 /*!
- * \brief Native C++ representation of nn.Object.
+ * \brief Wraps a relax::Var whose struct_info is ObjectStructInfo.
  *
- * Wraps a relax.Var whose struct_info is ObjectStructInfo.
- * Used for non-tensor frontend components such as KVCache handles.
+ * Used for non-tensor handles such as KVCache objects.
  */
 class NNObjectNode : public runtime::Object {
  public:
-  /*! \brief The underlying relax.Var (ObjectStructInfo). */
+  /*! \brief The underlying relax::Var (ObjectStructInfo). */
   Var expr;
 
   explicit NNObjectNode(Var expr);
@@ -218,80 +219,71 @@ class NNObject : public runtime::ObjectRef {
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(NNObject, runtime::ObjectRef, NNObjectNode);
 };
 
-// ===========================================================================
-// NNModuleNode  -  C++ base for nn.Module
-// ===========================================================================
-
 /*!
- * \brief C++ base class for nn.Module.
+ * \brief Base class for all nn modules.
  *
- * Holds the module's named sub-modules and parameters in a string-keyed map
- * (mirroring Python's __dict__) and provides:
- *   - named_parameters() / parameters()  via recursive _attribute_finder logic
- *   - state_dict() / load_state_dict()   parameter serialization
- *   - to(dtype)                          recursive dtype conversion
- *   - __call__ / forward dispatch        via a registered FFI forward function
- *
- * export_tvm() and jit() remain Python-only because they depend on
- * VirtualMachine, Target, Exporter and other Python-only infrastructure.
+ * Owns named sub-modules and parameters in a string-keyed attribute map
+ * and provides:
+ *   - NamedParameters() / StateDict()  for parameter traversal.
+ *   - LoadStateDict()                  for checkpoint loading.
+ *   - To()                             for recursive dtype conversion.
+ *   - ExportTVM() / Jit()              for compilation.
  */
 class NNModuleNode : public runtime::Object {
  public:
-  /*! \brief Named children: sub-modules, parameters, and other attributes. */
+  /*! \brief Named children: sub-modules, parameters, and scalar hyper-parameters. */
   ffi::Map<ffi::String, ffi::Any> attrs;
 
   NNModuleNode() = default;
   explicit NNModuleNode(ffi::Map<ffi::String, ffi::Any> attrs) : attrs(std::move(attrs)) {}
 
-  // ---- parameter traversal -----------------------------------------------
-
-  /*! \brief Return all (dotted_name, NNParameter) pairs in this module. */
+  /*!
+   * \brief Return all (dotted_name, NNParameter) pairs in this module tree.
+   *
+   * \param prefix  Dotted prefix prepended to each name (pass "" at the root).
+   * \return        Map from dotted parameter name to NNParameter.
+   */
   ffi::Map<ffi::String, NNParameter> NamedParameters(ffi::String prefix) const;
 
-  // ---- state dict ---------------------------------------------------------
-
-  /*! \brief Return an ordered map of all parameters keyed by dotted name. */
+  /*!
+   * \brief Return an ordered map of all parameters keyed by dotted name.
+   *
+   * \param prefix  Dotted prefix prepended to each name (pass "" at the root).
+   * \return        Map from dotted parameter name to NNParameter.
+   */
   ffi::Map<ffi::String, NNParameter> StateDict(ffi::String prefix) const;
 
   /*!
-   * \brief Load parameters from state_dict into this module.
-   * \param state_dict  Map of dotted-name -> NNParameter with bound data.
+   * \brief Load parameters from a state dict into this module.
+   *
+   * \param state_dict  Map of dotted-name to NNParameter with bound data.
    * \param strict      If true, raise on missing or unexpected keys.
-   * \return Pair (missing_keys, unexpected_keys) as Array<String>.
+   * \return            Array of two string arrays: [missing_keys, unexpected_keys].
    */
   ffi::Array<ffi::Array<ffi::String>> LoadStateDict(ffi::Map<ffi::String, NNParameter> state_dict,
                                                     bool strict) const;
 
-  // ---- dtype conversion --------------------------------------------------
-
-  /*! \brief Recursively convert all parameters and sub-modules to dtype. */
+  /*! \brief Recursively convert all parameters and sub-modules to \p dtype. */
   void To(ffi::String dtype) const;
-
-  // ---- export / jit -------------------------------------------------------
 
   /*!
    * \brief Export this module to a TVM IRModule.
    *
-   * Mirrors Python Module.export_tvm(). The ModuleSpec must be fully
-   * constructed (forward functions, arg specs, named_params) before calling.
-   *
-   * \param spec    ModuleSpec describing methods and parameters.
-   * \param debug   If true, add IOEffect (_io) to every method signature.
+   * \param spec         ModuleSpec describing methods and parameters.
+   * \param debug        If true, add an IOEffect token to every method signature.
    * \param allow_extern If true, collect external modules via nn.add_extern.
-   * \return        Array[IRModule, named_params as Map, extern_mods as Array]
+   * \return             Array of [IRModule, named_params Map, extern_mods Array].
    */
   ffi::Array<ffi::Any> ExportTVM(ModuleSpec spec, bool debug, bool allow_extern = true) const;
 
   /*!
    * \brief JIT-compile this module to a CppModule ready for inference.
    *
-   * Mirrors Python Module.jit(): export → attach extern mods → compile → wrap.
-   *
    * \param spec      ModuleSpec describing methods and parameters.
-   * \param device    Execution device (default: CPU 0).
-   * \param pipeline  Relax pipeline name (default: "cpu_generic").
-   * \param debug     If true, add IOEffect to every method.
-   * \return          A CppModule (as ObjectRef) wrapping the compiled VM.
+   * \param device    Execution device.
+   * \param pipeline  Relax compilation pipeline name.
+   * \param debug     If true, add an IOEffect token to every method.
+   * \return          A CppModule wrapping the compiled VM.
    */
   runtime::ObjectRef Jit(ModuleSpec spec, tvm::Device device, ffi::String pipeline,
                          bool debug) const;
@@ -327,15 +319,14 @@ class NNModule : public runtime::ObjectRef {
 // ---------------------------------------------------------------------------
 
 /*!
- * \brief Native C++ representation of nn.ModuleList.
+ * \brief Holds an ordered list of sub-module objects.
  *
- * Holds an ordered list of sub-module objects as ffi::Any so that both
- * native C++ module objects and pure-Python Module instances can be stored.
- * Python wrappers provide __iter__, __getitem__, __len__, append, etc.
+ * Each element is stored as ffi::Any so that both native C++ module objects
+ * and Python Module instances can be held without a common base.
  */
 class ModuleListNode : public NNModuleNode {
  public:
-  /*! \brief The ordered list of sub-modules (each element is a Module-like object). */
+  /*! \brief Ordered list of sub-modules. */
   ffi::Array<ffi::Any> modules;
 
   explicit ModuleListNode() = default;
@@ -363,14 +354,14 @@ class ModuleList : public runtime::ObjectRef {
 // ---------------------------------------------------------------------------
 
 /*!
- * \brief Native C++ representation of nn.ModuleDict.
+ * \brief Holds a string-keyed ordered map of sub-module objects.
  *
- * Holds an ordered string-keyed map of sub-module objects as ffi::Any.
- * Python wrappers provide dict-like access (__getitem__, keys, items, etc.).
+ * Each value is stored as ffi::Any so that both native C++ module objects
+ * and Python Module instances can be held without a common base.
  */
 class ModuleDictNode : public NNModuleNode {
  public:
-  /*! \brief The ordered map of sub-modules. */
+  /*! \brief String-keyed ordered map of sub-modules. */
   ffi::Map<ffi::String, ffi::Any> modules;
 
   explicit ModuleDictNode() = default;
@@ -393,57 +384,78 @@ class ModuleDict : public runtime::ObjectRef {
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(ModuleDict, runtime::ObjectRef, ModuleDictNode);
 };
 
-/*! \ brief Get the thread-local default dtype string. */
+/*! \brief Get the thread-local default dtype string. */
 ffi::String GetDefaultDtype();
 
 /*! \brief Set the thread-local default dtype string. */
 void SetDefaultDtype(ffi::String dtype);
 
 /*!
- * \brief Return the thread-local current BlockBuilder, or a null BlockBuilder
- *        if none is active.  Installed by exporter.cc's BBScope before
- *        calling forward() so that WrapNested / Emit helpers work.
+ * \brief Return the thread-local current BlockBuilder.
+ *
+ * Returns a null BlockBuilder when no export is in progress.
+ * Installed by the exporter before calling forward() so that op helpers
+ * can emit bindings into the active dataflow block.
  */
 BlockBuilder BlockBuilder_Current();
 
-/*! \brief Install (or clear) the thread-local current BlockBuilder. */
+/*!
+ * \brief Install or clear the thread-local current BlockBuilder.
+ *
+ * \param bb  Pointer to the BlockBuilder to install, or nullptr to clear.
+ */
 void BlockBuilder_SetCurrent(BlockBuilder* bb);
 
 /*!
- * \brief Emit expr into the current BlockBuilder and return the bound Var.
- * For TupleStructInfo, recursively emits TupleGetItem and returns Array<Any>.
+ * \brief Emit \p expr into the current BlockBuilder and return the bound Var.
+ *
+ * For TupleStructInfo, recursively emits TupleGetItem bindings and returns
+ * an Array<Any> of the extracted element Vars.
+ *
+ * \param expr  The expression to emit.
+ * \param name  Name hint for the bound variable.
+ * \return      The bound Var, or Array<Any> for tuple results.
  */
 ffi::Any WrapNested(Expr expr, ffi::String name);
 
 /*!
- * \brief Return all NNParameter fields of a runtime::Object as a
- *        Map<String, NNParameter> by inspecting its registered field metadata.
+ * \brief Return all NNParameter fields of a runtime::Object.
  *
- * This is used by Python's _attribute_finder to discover parameters that
- * live inside native C++ module objects (Linear, Conv2D, etc.) without
- * requiring Python-side shadow copies.
+ * Inspects the registered field metadata of \p obj and returns every
+ * field whose value is an NNParameter, keyed by field name.
+ *
+ * \param obj  The object to inspect.
+ * \return     Map from field name to NNParameter.
  */
 ffi::Map<ffi::String, NNParameter> GetNativeParameters(runtime::ObjectRef obj);
 
 /*!
- * \brief Collect named parameters from a ModuleList or ModuleDict object.
+ * \brief Collect named parameters from a ModuleList or ModuleDict.
  *
- * Recursively walks the list/dict and returns every NNParameter found,
+ * Recursively walks the container and returns every NNParameter found,
  * keyed by its dotted path (e.g. "0.weight", "encoder.bias").
- * Used by Module.named_parameters() for native container types.
+ *
+ * \param container  A ModuleList or ModuleDict object.
+ * \param prefix     Dotted prefix prepended to each name.
+ * \return           Map from dotted name to NNParameter.
  */
 ffi::Map<ffi::String, NNParameter> GetContainerParameters(runtime::ObjectRef container,
                                                           ffi::String prefix);
 
 /*!
- * \brief Apply to(dtype) to every NNParameter inside a ModuleList or
- *        ModuleDict, recursing into nested containers.
+ * \brief Apply To(dtype) to every NNParameter inside a ModuleList or ModuleDict.
+ *
+ * Recurses into nested containers.
+ *
+ * \param container  A ModuleList or ModuleDict object.
+ * \param dtype      Target dtype string.
  */
 void ContainerApplyTo(runtime::ObjectRef container, ffi::String dtype);
 
 /*!
- * \brief Apply dtype conversion to all Parameters in a Python module's __dict__.
- * \param py_dict  Python dict (from module.__dict__) as ffi::Map<String, Any>.
+ * \brief Apply dtype conversion to all Parameters in a module attribute map.
+ *
+ * \param py_dict  Attribute map (e.g. from NNModuleNode::attrs).
  * \param dtype    Target dtype string.
  */
 void PythonModuleApplyTo(ffi::Map<ffi::String, ffi::Any> py_dict, ffi::String dtype);

@@ -66,9 +66,9 @@ namespace frontend {
 namespace nn {
 namespace testing {
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // Shared helpers
-// ===========================================================================
+// ---------------------------------------------------------------------------
 
 static TensorStructInfo TSInfo(std::initializer_list<int64_t> dims, DataType dtype) {
   ffi::Array<PrimExpr> shape_dims;
@@ -134,7 +134,7 @@ static void EmitInitEffect(BlockBuilder& bb) {
                   "_initialize_effect");
 }
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // TestTensorFromNumpy
 //
 // Python equivalent:
@@ -147,7 +147,7 @@ static void EmitInitEffect(BlockBuilder& bb) {
 //
 // In C++ Tensor.from_const is Python-only.  We test the equivalent: creating
 // a TensorNode from a relax.Constant and verifying shape/dtype/ndim.
-// ===========================================================================
+// ---------------------------------------------------------------------------
 TEST(NNTensor, TestTensorFromNumpy) {
   // Create a (1, 10) float32 tensor and wrap it in a relax.Constant.
   std::vector<float> data(10, 0.0f);
@@ -167,7 +167,7 @@ TEST(NNTensor, TestTensorFromNumpy) {
   EXPECT_EQ(runtime::DataType(ts->dtype), DataType::Float(32));
 }
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // TestTensorFromScalar
 //
 // Python equivalent:
@@ -179,7 +179,7 @@ TEST(NNTensor, TestTensorFromNumpy) {
 //   assert repr(tensor_x) == 'Tensor([], "float16")'
 //
 // In C++ we create a scalar relax.Constant and verify its struct_info.
-// ===========================================================================
+// ---------------------------------------------------------------------------
 TEST(NNTensor, TestTensorFromScalar) {
   // Create a scalar float16 constant.
   runtime::Tensor nd = runtime::Tensor::Empty(ffi::Shape{}, DLDataType{kDLFloat, 16, 1},
@@ -191,7 +191,7 @@ TEST(NNTensor, TestTensorFromScalar) {
   EXPECT_EQ(runtime::DataType(ts->dtype), DataType::Float(16));
 }
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // TestTensorOpBinaryTensorTensor
 //
 // Python equivalent:
@@ -214,7 +214,7 @@ TEST(NNTensor, TestTensorFromScalar) {
 //     num_input = 3
 //     add, mul, divide, maximum, minimum = ...
 //     gv1 = (add,mul,divide,maximum,minimum), (_io,)
-// ===========================================================================
+// ---------------------------------------------------------------------------
 TEST(NNTensor, TestTensorOpBinaryTensorTensor) {
   const ffi::Function op_add = NNOp("add");
   const ffi::Function op_mul = NNOp("multiply");
@@ -268,7 +268,7 @@ TEST(NNTensor, TestTensorOpBinaryTensorTensor) {
   AssertStructEqual(actual, bb->Finalize());
 }
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // TestTensorOpBinaryTensorScalar
 //
 // Python equivalent:
@@ -283,7 +283,7 @@ TEST(NNTensor, TestTensorOpBinaryTensorTensor) {
 //       spec={"test": {"x": spec.Tensor([1,10],"float32")}}, debug=True)
 //
 // The scalar 10 is folded into R.const(10, "float32") by the nn.op binary ops.
-// ===========================================================================
+// ---------------------------------------------------------------------------
 TEST(NNTensor, TestTensorOpBinaryTensorScalar) {
   const ffi::Function op_add = NNOp("add");
   const ffi::Function op_mul = NNOp("multiply");
@@ -346,7 +346,7 @@ TEST(NNTensor, TestTensorOpBinaryTensorScalar) {
   AssertStructEqual(actual, bb->Finalize());
 }
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // TestTensorOpDatatype
 //
 // Python equivalent:
@@ -363,7 +363,7 @@ TEST(NNTensor, TestTensorOpBinaryTensorScalar) {
 //     num_input = 2
 //     astype = R.astype(x, "float16")
 //     gv1 = astype, (_io,)
-// ===========================================================================
+// ---------------------------------------------------------------------------
 TEST(NNTensor, TestTensorOpDatatype) {
   const ffi::Function op_astype = NNOp("astype");
 
@@ -399,7 +399,7 @@ TEST(NNTensor, TestTensorOpDatatype) {
   AssertStructEqual(actual, bb->Finalize());
 }
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // TestTensorOpManipulate
 //
 // Python equivalent:
@@ -420,7 +420,7 @@ TEST(NNTensor, TestTensorOpDatatype) {
 //     permute_dims = R.permute_dims(x, axes=[2,1,0])
 //     repeat    = R.repeat(x, repeats=2, axis=1)
 //     gv1 = (reshape, permute_dims, repeat), (_io,)
-// ===========================================================================
+// ---------------------------------------------------------------------------
 TEST(NNTensor, TestTensorOpManipulate) {
   const ffi::Function op_reshape = NNOp("reshape");
   const ffi::Function op_permute = NNOp("permute_dims");

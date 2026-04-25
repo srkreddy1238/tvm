@@ -19,53 +19,19 @@
 
 /*!
  * \file src/relax/frontend/nn/spec.h
- * \brief Native C++ Object definitions for nn compilation specifications.
+ * \brief Compilation specification types for the nn module frontend.
  *
- * All six spec types are now native C++ objects:
+ * Defines the types that describe how an nn module is compiled:
  *
- *   SpecInt      – type tag for a scalar integer input (no fields)
- *   SpecTensor   – shape (Array<Any>) + dtype (String)
- *   SpecTuple    – name (String) + elements (Array<Any>, recursive) + is_tuple (bool)
- *   MethodSpec   – forward: ffi::Function(Map<String,Any>) -> Any
- *                  arg_names: Array<String>
- *                  arg_specs: Array<Any>   (each is SpecInt/SpecTensor/SpecTuple)
- *                  param_mode / effect_mode: String
- *   ModuleSpec   – method_names: Array<String>
- *                  method_specs: Array<Any>  (each is MethodSpec)
- *                  named_params: Map<String, NNParameter>
- *
- * The key design decision for MethodSpec:
- *   The forward function is stored as ffi::Function with signature
- *       ffi::Any forward(ffi::Map<ffi::String, ffi::Any> named_args)
- *   where each value in named_args is a TensorNode (nn.Tensor).
- *   The implementation casts ffi::Any to TensorNode* as needed.
- *   This eliminates inspect.signature entirely.
- *
- * ModuleSpec stores the pre-collected named_params so the C++ Exporter
- * does not need to call back into Python for parameter discovery.
- *
- * Module-aware ModuleSpec construction
- * -------------------------------------
- * The preferred C++ pattern for simple NNModule subclasses is:
- *
- *   // 1. Create the module
- *   ReLUModule mod;
- *   // 2. Build the per-method argument spec
- *   ffi::Map<ffi::String, ffi::Any> forward_spec;
- *   forward_spec.Set("x", ffi::Any(MakeSpecTensor({3, 3}, "float32")));
- *   ffi::Map<ffi::String, ffi::Map<ffi::String, ffi::Any>> spec;
- *   spec.Set("forward", forward_spec);
- *   // 3. Create ModuleSpec — derives ffi::Function for each method via
- *   //    reflection and builds MethodSpec objects internally.
- *   ModuleSpec mod_spec(mod, spec, false);  // debug=false
- *   // 4. Export
- *   ffi::Array<ffi::Any> result =
- *       mod->ExportTVM(mod_spec, false, false);  // debug=false, allow_extern=false
- *   IRModule ir = result[0].cast<IRModule>();
- *
- * This removes the need for MethodSpec to hold or receive an NNModule
- * object: ModuleSpec derives the ffi::Function for each method_name via
- * DeriveMethodFunction and passes it to MethodSpec's primary constructor.
+ *   - SpecInt     type tag for a scalar integer input argument.
+ *   - SpecTensor  shape and dtype specification for a tensor input.
+ *   - SpecTuple   named, ordered collection of nested specs (tuple or list).
+ *   - MethodSpec  specification for a single compiled method: forward
+ *                 function, argument names and specs, and parameter/effect
+ *                 handling modes.
+ *   - ModuleSpec  specification for a complete module compilation: ordered
+ *                 method names and specs, pre-collected named parameters,
+ *                 and pre-collected named effects.
  */
 
 #ifndef TVM_RELAX_FRONTEND_NN_SPEC_H_
@@ -89,6 +55,7 @@ namespace nn {
 // SpecIntNode
 // ---------------------------------------------------------------------------
 
+/*! \brief Type tag for a scalar integer input argument. */
 class SpecIntNode : public runtime::Object {
  public:
   static void RegisterReflection() {
@@ -108,9 +75,12 @@ class SpecInt : public runtime::ObjectRef {
 // SpecTensorNode
 // ---------------------------------------------------------------------------
 
+/*! \brief Shape and dtype specification for a tensor input argument. */
 class SpecTensorNode : public runtime::Object {
  public:
-  ffi::Array<ffi::Any> shape;  //!< int64 (static) or String (symbolic)
+  /*! \brief Shape specification; each element is int64 (static) or String (symbolic). */
+  ffi::Array<ffi::Any> shape;
+  /*! \brief Data type string (e.g. "float32"). */
   ffi::String dtype;
 
   SpecTensorNode(ffi::Array<ffi::Any> shape, ffi::String dtype)
@@ -140,11 +110,21 @@ class SpecTensor : public runtime::ObjectRef {
 // SpecTupleNode
 // ---------------------------------------------------------------------------
 
+/*!
+ * \brief Named, ordered collection of nested specs.
+ *
+ * Represents either a tuple (is_tuple=true) or a list (is_tuple=false)
+ * of input arguments.  Elements may be SpecInt, SpecTensor, or nested
+ * SpecTuple objects.
+ */
 class SpecTupleNode : public runtime::Object {
  public:
+  /*! \brief Name used as a prefix for extracted element variables. */
   ffi::String name;
-  ffi::Array<ffi::Any> elements;  //!< each is SpecInt/SpecTensor/SpecTuple
-  bool is_tuple;                  //!< true=tuple, false=list
+  /*! \brief Ordered elements; each is SpecInt, SpecTensor, or SpecTuple. */
+  ffi::Array<ffi::Any> elements;
+  /*! \brief True for tuple semantics, false for list semantics. */
+  bool is_tuple;
 
   SpecTupleNode(ffi::String name, ffi::Array<ffi::Any> elements, bool is_tuple)
       : name(std::move(name)), elements(std::move(elements)), is_tuple(is_tuple) {}
@@ -174,26 +154,29 @@ class SpecTuple : public runtime::ObjectRef {
 // ---------------------------------------------------------------------------
 
 /*!
- * \brief Spec for a single compiled method.
+ * \brief Specification for a single compiled method.
  *
- * forward is an ffi::Function with signature:
+ * The forward function has signature:
  *   ffi::Any forward(ffi::Map<ffi::String, ffi::Any> named_args)
+ * where each value in named_args is an NNTensor (for SpecTensor arguments)
+ * or a tir::Var (for SpecInt arguments).
  *
- * named_args maps each arg_name to its nn.Tensor (TensorNode) or tir.Var.
- * The implementation casts ffi::Any to the appropriate type.
- * No inspect.signature is needed: arg_names is provided explicitly.
+ * param_mode and effect_mode each take one of three values:
+ *   - "plain"   individual parameters/effects as separate function arguments.
+ *   - "packed"  all parameters/effects bundled into a single tuple argument.
+ *   - "none"    parameters/effects omitted from the function signature.
  */
 class MethodSpecNode : public runtime::Object {
  public:
-  /*! \brief The forward function: (Map<String,Any>) -> Any */
+  /*! \brief Forward function: (Map<String,Any>) -> Any. */
   ffi::Function forward;
-  /*! \brief Ordered argument names (matches arg_specs). */
+  /*! \brief Ordered argument names, parallel to arg_specs. */
   ffi::Array<ffi::String> arg_names;
-  /*! \brief Spec for each argument (SpecInt, SpecTensor, or SpecTuple). */
+  /*! \brief Argument specifications; each is SpecInt, SpecTensor, or SpecTuple. */
   ffi::Array<ffi::Any> arg_specs;
-  /*! \brief "plain", "packed", or "none". */
+  /*! \brief Parameter handling mode: "plain", "packed", or "none". */
   ffi::String param_mode;
-  /*! \brief "plain", "packed", or "none". */
+  /*! \brief Effect handling mode: "plain", "packed", or "none". */
   ffi::String effect_mode;
 
   MethodSpecNode(ffi::Function forward, ffi::Array<ffi::String> arg_names,
@@ -221,10 +204,17 @@ class MethodSpecNode : public runtime::Object {
 };
 class MethodSpec : public runtime::ObjectRef {
  public:
-  /*! \brief Primary constructor: caller supplies the forward ffi::Function directly.
+  /*!
+   * \brief Construct a MethodSpec.
    *
-   * Use DeriveMethodFunction() to obtain the ffi::Function from an NNModule
-   * when the method is looked up via reflection.
+   * Use DeriveMethodFunction() to obtain the forward ffi::Function from
+   * an NNModule when the method is looked up via reflection.
+   *
+   * \param forward      Forward function with signature (Map<String,Any>)->Any.
+   * \param arg_names    Ordered argument names, parallel to arg_specs.
+   * \param arg_specs    Argument specifications (SpecInt/SpecTensor/SpecTuple).
+   * \param param_mode   Parameter handling mode: "plain", "packed", or "none".
+   * \param effect_mode  Effect handling mode: "plain", "packed", or "none".
    */
   explicit MethodSpec(ffi::Function forward, ffi::Array<ffi::String> arg_names,
                       ffi::Array<ffi::Any> arg_specs, ffi::String param_mode,
@@ -238,21 +228,21 @@ class MethodSpec : public runtime::ObjectRef {
 // ---------------------------------------------------------------------------
 
 /*!
- * \brief Spec for a complete nn.Module compilation.
+ * \brief Specification for a complete module compilation.
  *
- * named_params is pre-collected by the Python Module.named_parameters()
- * call before constructing ModuleSpec, so the C++ Exporter never needs
- * to call back into Python for parameter discovery.
+ * named_params is pre-collected before constructing ModuleSpec so that
+ * the exporter never needs to call back into user code for parameter
+ * discovery during IR generation.
  */
 class ModuleSpecNode : public runtime::Object {
  public:
-  /*! \brief Ordered method names. */
+  /*! \brief Ordered method names, parallel to method_specs. */
   ffi::Array<ffi::String> method_names;
-  /*! \brief Spec for each method (each is MethodSpec). */
+  /*! \brief Method specifications; each element is a MethodSpec. */
   ffi::Array<ffi::Any> method_specs;
   /*! \brief Pre-collected named parameters: dotted_name -> NNParameter. */
   ffi::Map<ffi::String, NNParameter> named_params;
-  /*! \brief Pre-collected named effects: dotted_name -> Effect object. */
+  /*! \brief Pre-collected named effects: dotted_name -> EffectNode-derived object. */
   ffi::Map<ffi::String, runtime::ObjectRef> named_effects;
 
   ModuleSpecNode(ffi::Array<ffi::String> method_names, ffi::Array<ffi::Any> method_specs,
@@ -280,33 +270,33 @@ class ModuleSpecNode : public runtime::Object {
 };
 class ModuleSpec : public runtime::ObjectRef {
  public:
-  /*! \brief Low-level constructor: caller supplies all fields explicitly. */
+  /*!
+   * \brief Low-level constructor: caller supplies all fields explicitly.
+   *
+   * When named_effects is non-empty, any MethodSpec whose effect_mode is
+   * "none" is automatically upgraded to "plain".
+   *
+   * \param method_names   Ordered method names.
+   * \param method_specs   Method specifications (each is a MethodSpec).
+   * \param named_params   Pre-collected named parameters.
+   * \param named_effects  Pre-collected named effects.
+   */
   explicit ModuleSpec(ffi::Array<ffi::String> method_names, ffi::Array<ffi::Any> method_specs,
                       ffi::Map<ffi::String, NNParameter> named_params,
                       ffi::Map<ffi::String, runtime::ObjectRef> named_effects);
 
   /*!
-   * \brief Module-aware constructor (preferred for simple NNModule subclasses).
+   * \brief Module-aware constructor.
    *
-   * Derives an ffi::Function for every method listed in \p spec by looking
-   * up the module's "_forward" method via ffi::reflection::GetMethod, then
-   * constructs a MethodSpec for each one.  Named parameters are collected
-   * automatically from \p mod via NNModuleNode::NamedParameters("").
+   * Derives a forward ffi::Function for every method listed in \p spec by
+   * looking up the module's "_forward" method via reflection, then
+   * constructs a MethodSpec for each one.  Named parameters and effects are
+   * collected automatically from \p mod.
    *
-   * The spec dictionary maps each method name to an ordered map of
-   * argument-name → SpecTensor/SpecInt/SpecTuple:
-   *
-   *   ffi::Map<ffi::String, ffi::Any> fwd_spec;
-   *   fwd_spec.Set("x", ffi::Any(SpecTensor({3,3}, "float32")));
-   *   ffi::Map<ffi::String, ffi::Map<ffi::String,ffi::Any>> spec;
-   *   spec.Set("forward", fwd_spec);
-   *   ModuleSpec ms(mod, spec, false);  // debug=false
-   *
-   * \param mod    The NNModule whose "_forward" method is used for every
-   *               method listed in \p spec.
-   * \param spec   Map from method_name to (arg_name → arg_spec) map.
-   * \param debug  When true the effect_mode for each MethodSpec is set to
-   *               "plain"; when false it is set to "none".
+   * \param mod    The NNModule to compile.
+   * \param spec   Map from method name to (arg_name -> arg_spec) map.
+   * \param debug  When true, effect_mode is set to "plain" for every method;
+   *               when false, effect_mode is "none" unless effects are present.
    */
   explicit ModuleSpec(runtime::ObjectRef mod,
                       ffi::Map<ffi::String, ffi::Map<ffi::String, ffi::Any>> spec, bool debug);
@@ -321,33 +311,23 @@ class ModuleSpec : public runtime::ObjectRef {
 /*!
  * \brief Derive an ffi::Function for a single NNModule method.
  *
- * Resolves the reflection method name from \p method_name using the
- * following rule:
- *   - If \p method_name is "forward", the reflection lookup uses "_forward"
- *     (the C++ convention for the primary forward implementation).
- *   - Otherwise \p method_name is used directly as the reflection key.
+ * Resolves the reflection method name from \p method_name:
+ *   - "forward" maps to "_forward" (the C++ convention for the primary
+ *     forward implementation).
+ *   - All other names are used verbatim.
  *
  * Returns a closure with signature:
  *   ffi::Any fn(ffi::Map<ffi::String, ffi::Any> named_args)
  * where each value in named_args is an NNTensor whose underlying Var is
  * extracted and passed positionally to the resolved method.
  *
- * This is the same logic that was previously embedded inline at each
- * MethodSpec construction site, now factored out so that ModuleSpec and
- * ExportDebug can call it without MethodSpec needing to hold a reference
- * to the module.
- *
  * \param mod_ref      The NNModuleNode-derived object.
- * \param method_name  The exported method name (e.g. "forward",
- *                     "encode", "decode").  "forward" is mapped to
- *                     "_forward" for the reflection lookup; all other
- *                     names are used verbatim.
- * \param arg_names    Ordered argument names (must match the arg_specs
- *                     that will be passed to MethodSpec).
- * \param extra_args   Optional trailing arguments appended to the method
- *                     call after the spec-driven inputs (default: empty).
- * \return             An ffi::Function suitable for MethodSpec's primary
- *                     constructor.
+ * \param method_name  Exported method name (e.g. "forward", "encode").
+ * \param arg_names    Ordered argument names matching the arg_specs that
+ *                     will be passed to MethodSpec.
+ * \param extra_args   Optional trailing arguments appended after the
+ *                     spec-driven inputs (default: empty).
+ * \return             An ffi::Function suitable for MethodSpec's constructor.
  */
 ffi::Function DeriveMethodFunction(runtime::ObjectRef mod_ref, ffi::String method_name,
                                    ffi::Array<ffi::String> arg_names,

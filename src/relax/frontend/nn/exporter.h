@@ -19,29 +19,21 @@
 
 /*!
  * \file src/relax/frontend/nn/exporter.h
- * \brief C++ Exporter: builds a TVM IRModule from a ModuleSpec.
+ * \brief IRModule builder for the nn module frontend.
  *
- * Design
- * ------
- * ExportToIRModule(spec, debug) mirrors the Python Exporter.build() logic:
+ * ExporterNode drives the compilation of a ModuleSpec into a TVM IRModule:
  *
- *   1. If debug=true, emit an _initialize_effect function that creates the
- *      IOEffect null_value object.
+ *   1. When effects are present or debug=true, emits an _initialize_effect
+ *      function that allocates the initial effect state objects.
  *
  *   2. For each (method_name, method_spec) in the ModuleSpec:
- *      a. Build placeholder Vars for each arg_spec (SpecInt → ShapeVar,
- *         SpecTensor → TensorVar).
- *      b. Build placeholder Vars for each named_param.
- *      c. If debug, add the _io effect Var.
- *      d. Call method_spec.forward(Map<String,Any>{arg_name -> Tensor})
- *         inside a BlockBuilder dataflow scope.
- *      e. Unwrap the return value (Tensor or tuple of Tensors) to relax.Expr.
- *      f. If debug, append the effect output.
- *      g. Emit the function.
- *
- * The forward function receives a Map<String, Any> where each value is a
- * TensorNode (nn.Tensor).  The implementation casts ffi::Any to NNTensor
- * and calls ops.  No Python inspect.signature is needed.
+ *      a. Builds placeholder Vars for each arg_spec.
+ *      b. Builds parameter Vars according to param_mode.
+ *      c. Adds effect Vars according to effect_mode.
+ *      d. Calls method_spec.forward(named_args) inside a dataflow block.
+ *      e. Unwraps the return value to a relax::Expr.
+ *      f. Appends effect outputs when effect_mode is not "none".
+ *      g. Emits the completed function into the IRModule.
  */
 
 #ifndef TVM_RELAX_FRONTEND_NN_EXPORTER_H_
@@ -58,50 +50,59 @@ namespace frontend {
 namespace nn {
 
 /*!
- * \brief Get the current debug _io Var from the thread-local storage.
- * Set by EmitMethod before calling forward(), updated by NNDebugFunc.
+ * \brief Get the current debug _io Var from thread-local storage.
+ *
+ * Set by the exporter before calling forward(); updated by the debug
+ * function wrapper after each call to chain the effect token.
  */
 ffi::Optional<Var> GetCurrentIOVar();
 
 /*!
- * \brief Set the current debug _io Var in the thread-local storage.
- * Called by NNDebugFunc after emitting each debug call to chain effects.
+ * \brief Set the current debug _io Var in thread-local storage.
+ *
+ * \param v  The new _io Var, or nullopt to clear.
  */
 void SetCurrentIOVar(ffi::Optional<Var> v);
 
-// ===========================================================================
-// Exporter class - wraps ExportToIRModule with support for spec.Object
-// ===========================================================================
-
 /*!
- * \brief Exporter node that wraps ExportToIRModule functionality.
+ * \brief Builds a TVM IRModule from a ModuleSpec.
  *
- * This class provides a stateful interface for building IRModules,
- * maintaining a BlockBuilder and tracking external modules.
- * The Python Exporter class wraps this for the fast path (no spec.Object).
+ * Maintains a BlockBuilder and a list of external modules across
+ * multiple Build() calls.  The Python Exporter class delegates to this
+ * node for the common case (no spec.Object arguments).
  */
 class ExporterNode : public runtime::Object {
  public:
+  /*! \brief The BlockBuilder used to accumulate the IRModule. */
   BlockBuilder builder;
+  /*! \brief Whether to add an IOEffect token to every method signature. */
   bool debug;
-  ffi::Array<runtime::ObjectRef> extern_mods;  // Array of ExternModule objects
+  /*! \brief External modules registered via nn.add_extern. */
+  ffi::Array<runtime::ObjectRef> extern_mods;
 
-  ExporterNode(bool debug);
+  explicit ExporterNode(bool debug);
 
+  /*!
+   * \brief Register an external module with this exporter.
+   *
+   * \param extern_mod  The external module object to register.
+   */
   void AddExternalModule(runtime::ObjectRef extern_mod);
 
   /*!
-   * \brief Build the ModuleSpec to TVM IRModule.
-   * \param spec The ModuleSpec to export.
-   * \return Array[IRModule, named_params as Map, extern_mods as Array]
+   * \brief Build the ModuleSpec into a TVM IRModule.
+   *
+   * \param spec  The ModuleSpec to compile.
+   * \return      Array of [IRModule, named_params Map, extern_mods Array].
    */
   ffi::Array<ffi::Any> Build(ModuleSpec spec);
 
   /*!
-   * \brief Build a TVM IRModule from a ModuleSpec (internal implementation).
-   * \param spec    The ModuleSpec describing methods and parameters.
-   * \param debug   If true, add IOEffect (_io) to every method signature.
-   * \return        The compiled IRModule.
+   * \brief Internal implementation: compile a ModuleSpec into an IRModule.
+   *
+   * \param spec   The ModuleSpec to compile.
+   * \param debug  If true, add an IOEffect token to every method signature.
+   * \return       The compiled IRModule.
    */
   IRModule ExportToIRModule(ModuleSpec spec, bool debug);
 
@@ -119,13 +120,15 @@ class Exporter : public runtime::ObjectRef {
 
 /*!
  * \brief Get the current Exporter from thread-local storage.
- * Returns nullopt if no Exporter is active.
+ *
+ * Returns nullopt when no export is in progress.
  */
 ffi::Optional<Exporter> Exporter_Current();
 
 /*!
- * \brief Install/restore the thread-local current Exporter.
- * Pass nullptr to clear.
+ * \brief Install or clear the thread-local current Exporter.
+ *
+ * \param exporter  Pointer to the ExporterNode to install, or nullptr to clear.
  */
 void Exporter_SetCurrent(ExporterNode* exporter);
 

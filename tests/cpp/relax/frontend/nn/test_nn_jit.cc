@@ -62,9 +62,9 @@ namespace frontend {
 namespace nn {
 namespace testing {
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // Helpers
-// ===========================================================================
+// ---------------------------------------------------------------------------
 
 // Retrieve the registered nn.op FFI function by short name.
 static ffi::Function NNOp(const std::string& name) {
@@ -118,13 +118,13 @@ static bool AllClose(const std::vector<float>& a, const std::vector<float>& b, f
   return true;
 }
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // Test-only NNModule definitions for test_nn_jit.cc
 //
 // Each module mirrors the corresponding Python Layer class from
 // test_frontend_nn_jit.py and registers _forward via reflection so that
 // the module-aware ModuleSpec constructor can derive the ffi::Function.
-// ===========================================================================
+// ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
 // AddSelfModuleNode — forward(x) = add(x, x)
@@ -302,7 +302,7 @@ class TupleWithIntModule : public runtime::ObjectRef {
 };
 TVM_FFI_STATIC_INIT_BLOCK() { TupleWithIntModuleNode::RegisterReflection(); }
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // TestJit
 //
 // Python equivalent:
@@ -316,7 +316,7 @@ TVM_FFI_STATIC_INIT_BLOCK() { TupleWithIntModuleNode::RegisterReflection(); }
 //   assert torch.allclose(x + x, y)
 //
 // Parametrised over debug=True and debug=False.
-// ===========================================================================
+// ---------------------------------------------------------------------------
 class TestJit : public ::testing::TestWithParam<bool> {};
 
 TEST_P(TestJit, AddSelf) {
@@ -349,7 +349,7 @@ TEST_P(TestJit, AddSelf) {
 
 INSTANTIATE_TEST_SUITE_P(DebugModes, TestJit, ::testing::Values(true, false));
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // TestJitIntInput
 //
 // Python equivalent:
@@ -365,7 +365,7 @@ INSTANTIATE_TEST_SUITE_P(DebugModes, TestJit, ::testing::Values(true, false));
 //   assert torch.allclose(torch.reshape(x + x, (2, 5, 5)), y)
 //
 // The SpecInt argument is passed as ffi::Shape({value}) to the CppModule.
-// ===========================================================================
+// ---------------------------------------------------------------------------
 class TestJitIntInput : public ::testing::TestWithParam<bool> {};
 
 TEST_P(TestJitIntInput, AddAndReshape) {
@@ -406,7 +406,7 @@ TEST_P(TestJitIntInput, AddAndReshape) {
 
 INSTANTIATE_TEST_SUITE_P(DebugModes, TestJitIntInput, ::testing::Values(true, false));
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // TestJitWithEffect
 //
 // Python equivalent:
@@ -427,7 +427,7 @@ INSTANTIATE_TEST_SUITE_P(DebugModes, TestJitIntInput, ::testing::Values(true, fa
 //   assert allclose(concat([x0, x1], dim=0), y)
 //   x2 = rand(1, 10, 5); y = model["forward"](x2, 3)
 //   assert allclose(concat([x0, x1, x2], dim=0), y)
-// ===========================================================================
+// ---------------------------------------------------------------------------
 class TestJitWithEffect : public ::testing::TestWithParam<bool> {};
 
 TEST_P(TestJitWithEffect, KVCacheAppendView) {
@@ -496,7 +496,7 @@ TEST_P(TestJitWithEffect, KVCacheAppendView) {
 
 INSTANTIATE_TEST_SUITE_P(DebugModes, TestJitWithEffect, ::testing::Values(true, false));
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // TestJitTupleInput
 //
 // Python equivalent:
@@ -510,7 +510,7 @@ INSTANTIATE_TEST_SUITE_P(DebugModes, TestJitWithEffect, ::testing::Values(true, 
 //   y = model["forward"](x)
 //   assert allclose(x0 + x1, y[0])
 //   assert allclose(x0 - x1, y[1])
-// ===========================================================================
+// ---------------------------------------------------------------------------
 class TestJitTupleInput : public ::testing::TestWithParam<bool> {};
 
 TEST_P(TestJitTupleInput, AddSubtract) {
@@ -562,7 +562,7 @@ TEST_P(TestJitTupleInput, AddSubtract) {
 
 INSTANTIATE_TEST_SUITE_P(DebugModes, TestJitTupleInput, ::testing::Values(true, false));
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // TestJitListInput
 //
 // Python equivalent:
@@ -573,7 +573,7 @@ INSTANTIATE_TEST_SUITE_P(DebugModes, TestJitTupleInput, ::testing::Values(true, 
 //
 // Identical to TestJitTupleInput except SpecTuple is constructed with
 // is_tuple=false (list semantics).  The runtime behaviour is the same.
-// ===========================================================================
+// ---------------------------------------------------------------------------
 class TestJitListInput : public ::testing::TestWithParam<bool> {};
 
 TEST_P(TestJitListInput, AddSubtract) {
@@ -624,7 +624,7 @@ TEST_P(TestJitListInput, AddSubtract) {
 
 INSTANTIATE_TEST_SUITE_P(DebugModes, TestJitListInput, ::testing::Values(true, false));
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // TestJitTupleInputWithInt
 //
 // Python equivalent:
@@ -645,7 +645,7 @@ INSTANTIATE_TEST_SUITE_P(DebugModes, TestJitListInput, ::testing::Values(true, f
 //   assert allclose(x0 + x1, y0)
 //   assert allclose(x0 - x1, y1)
 //   assert allclose(reshape(x0, (5, 2, 5)), y2)
-// ===========================================================================
+// ---------------------------------------------------------------------------
 class TestJitTupleInputWithInt : public ::testing::TestWithParam<bool> {};
 
 TEST_P(TestJitTupleInputWithInt, AddSubtractReshape) {

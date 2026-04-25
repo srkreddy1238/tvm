@@ -76,9 +76,9 @@ namespace frontend {
 namespace nn {
 namespace testing {
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // Helpers
-// ===========================================================================
+// ---------------------------------------------------------------------------
 
 static ffi::Function NNOp(const std::string& name) {
   const std::string key = "relax.frontend.nn.op." + name;
@@ -172,9 +172,9 @@ static ShapeExpr Shape10x10() {
       ffi::Array<PrimExpr>{IntImm(DataType::Int(64), 10), IntImm(DataType::Int(64), 10)});
 }
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // TestUnary
-// ===========================================================================
+// ---------------------------------------------------------------------------
 TEST(NNOps, TestUnary) {
   static const ffi::Function op_square = NNOp("square");
   static const ffi::Function op_sqrt = NNOp("sqrt");
@@ -215,9 +215,9 @@ TEST(NNOps, TestUnary) {
   AssertStructEqual(actual, bb->Finalize());
 }
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // TestBinary
-// ===========================================================================
+// ---------------------------------------------------------------------------
 TEST(NNOps, TestBinary) {
   static const ffi::Function op_add = NNOp("add");
   static const ffi::Function op_mul = NNOp("multiply");
@@ -294,9 +294,9 @@ TEST(NNOps, TestBinary) {
   AssertStructEqual(actual, bb->Finalize());
 }
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // TestSum
-// ===========================================================================
+// ---------------------------------------------------------------------------
 TEST(NNOps, TestSum) {
   static const ffi::Function op_sum = NNOp("sum");
 
@@ -331,9 +331,9 @@ TEST(NNOps, TestSum) {
   AssertStructEqual(actual, bb->Finalize());
 }
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // TestDatatype
-// ===========================================================================
+// ---------------------------------------------------------------------------
 TEST(NNOps, TestDatatype) {
   static const ffi::Function op_astype = NNOp("astype");
 
@@ -368,9 +368,9 @@ TEST(NNOps, TestDatatype) {
   AssertStructEqual(actual, bb->Finalize());
 }
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // TestIndex
-// ===========================================================================
+// ---------------------------------------------------------------------------
 TEST(NNOps, TestIndex) {
   static const ffi::Function op_take = NNOp("take");
 
@@ -408,9 +408,9 @@ TEST(NNOps, TestIndex) {
   AssertStructEqual(actual, bb->Finalize());
 }
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // TestTensorExprOp
-// ===========================================================================
+// ---------------------------------------------------------------------------
 TEST(NNOps, TestTensorExprOp) {
   static const ffi::Function op_te_op = NNOp("tensor_expr_op");
 
@@ -482,9 +482,9 @@ TEST(NNOps, TestTensorExprOp) {
   AssertStructEqual(actual, bb->Finalize());
 }
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // TestMax
-// ===========================================================================
+// ---------------------------------------------------------------------------
 TEST(NNOps, TestMax) {
   static const ffi::Function op_max = NNOp("max");
 
@@ -519,9 +519,9 @@ TEST(NNOps, TestMax) {
   AssertStructEqual(actual, bb->Finalize());
 }
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // TestMin
-// ===========================================================================
+// ---------------------------------------------------------------------------
 TEST(NNOps, TestMin) {
   static const ffi::Function op_min = NNOp("min");
 
@@ -556,9 +556,9 @@ TEST(NNOps, TestMin) {
   AssertStructEqual(actual, bb->Finalize());
 }
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // TestManipulate
-// ===========================================================================
+// ---------------------------------------------------------------------------
 TEST(NNOps, TestManipulate) {
   static const ffi::Function op_broadcast_to = NNOp("broadcast_to");
   static const ffi::Function op_permute_dims = NNOp("permute_dims");
@@ -655,9 +655,9 @@ TEST(NNOps, TestManipulate) {
   AssertStructEqual(actual, bb->Finalize());
 }
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // TestCreate
-// ===========================================================================
+// ---------------------------------------------------------------------------
 TEST(NNOps, TestCreate) {
   static const ffi::Function op_triu = NNOp("triu");
   static const ffi::Function op_full = NNOp("full");
@@ -750,9 +750,9 @@ TEST(NNOps, TestCreate) {
   AssertStructEqual(actual, bb->Finalize());
 }
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // TestChunk
-// ===========================================================================
+// ---------------------------------------------------------------------------
 TEST(NNOps, TestChunk) {
   // NNChunk signature: (x: Var, chunks: int, dim: int, name: String) -> Any
   // It calls relax::split(x, IntImm(64, chunks), dim) which produces a
@@ -917,9 +917,9 @@ static tir::PrimFunc MakeInplaceTakePrimFunc() {
                        DictAttrs(attrs_map));
 }
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // TestNN
-// ===========================================================================
+// ---------------------------------------------------------------------------
 TEST(NNOps, TestNN) {
   // Note: relax.nn.relu6 is not registered as a C++ Op; the nn.op.relu6 FFI
   // handler implements it as clip(x, 0, 6).  We use op.clip directly here.
@@ -1017,9 +1017,9 @@ TEST(NNOps, TestNN) {
   AssertStructEqual(actual, bb->Finalize());
 }
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // TestScaledDotProductAttention
-// ===========================================================================
+// ---------------------------------------------------------------------------
 TEST(NNOps, TestScaledDotProductAttention) {
   static const ffi::Function op_sdpa = NNOp("scaled_dot_product_attention");
 
@@ -1063,9 +1063,9 @@ TEST(NNOps, TestScaledDotProductAttention) {
   AssertStructEqual(actual, bb->Finalize());
 }
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // TestSortArgsortTopk
-// ===========================================================================
+// ---------------------------------------------------------------------------
 TEST(NNOps, TestSortArgsortTopk) {
   static const ffi::Function op_sort = NNOp("sort");
   static const ffi::Function op_argsort = NNOp("argsort");
@@ -1129,9 +1129,9 @@ TEST(NNOps, TestSortArgsortTopk) {
   AssertStructEqual(actual, bb->Finalize());
 }
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // TestTensorIrOpNoTirVar
-// ===========================================================================
+// ---------------------------------------------------------------------------
 TEST(NNOps, TestTensorIrOpNoTirVar) {
   static const ffi::Function op_tensor_ir_op = NNOp("tensor_ir_op");
 
@@ -1177,9 +1177,9 @@ TEST(NNOps, TestTensorIrOpNoTirVar) {
   AssertStructEqual(actual, bb->Finalize());
 }
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // TestTensorIrOp
-// ===========================================================================
+// ---------------------------------------------------------------------------
 TEST(NNOps, TestTensorIrOp) {
   static const ffi::Function op_tensor_ir_op = NNOp("tensor_ir_op");
   tir::PrimFunc fused_rope = MakeFusedRopePrimFunc();
@@ -1243,9 +1243,9 @@ TEST(NNOps, TestTensorIrOp) {
   AssertStructEqual(actual, bb->Finalize());
 }
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // TestTensorIrInplaceOp
-// ===========================================================================
+// ---------------------------------------------------------------------------
 TEST(NNOps, TestTensorIrInplaceOp) {
   static const ffi::Function op_inplace = NNOp("tensor_ir_inplace_op");
   tir::PrimFunc inplace_take = MakeInplaceTakePrimFunc();
@@ -1332,9 +1332,9 @@ TEST(NNOps, TestTensorIrInplaceOp) {
   AssertStructEqual(actual, bb->Finalize());
 }
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // TestMultinomialFromUniform
-// ===========================================================================
+// ---------------------------------------------------------------------------
 TEST(NNOps, TestMultinomialFromUniform) {
   static const ffi::Function op_multi = NNOp("multinomial_from_uniform");
 
@@ -1377,9 +1377,9 @@ TEST(NNOps, TestMultinomialFromUniform) {
   AssertStructEqual(actual, bb->Finalize());
 }
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // TestImage (resize2d / interpolate)
-// ===========================================================================
+// ---------------------------------------------------------------------------
 TEST(NNOps, TestImage) {
   static const ffi::Function op_resize2d = NNOp("resize2d");
 
@@ -1422,9 +1422,9 @@ TEST(NNOps, TestImage) {
   AssertStructEqual(actual, bb->Finalize());
 }
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // TestTimestepEmbedding
-// ===========================================================================
+// ---------------------------------------------------------------------------
 TEST(NNOps, TestTimestepEmbedding) {
   static const ffi::Function op_tse = NNOp("get_timestep_embedding");
 
@@ -1496,9 +1496,9 @@ TEST(NNOps, TestTimestepEmbedding) {
   AssertStructEqual(actual, bb->Finalize());
 }
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // TestTensorExprOpCustom  (mirrors test_tensor_expr_op from Python)
-// ===========================================================================
+// ---------------------------------------------------------------------------
 TEST(NNOps, TestTensorExprOpCustom) {
   static const ffi::Function op_te_op = NNOp("tensor_expr_op");
 
@@ -1563,9 +1563,9 @@ TEST(NNOps, TestTensorExprOpCustom) {
   AssertStructEqual(actual, bb->Finalize());
 }
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // TestExtern  (mirrors test_extern from Python)
-// ===========================================================================
+// ---------------------------------------------------------------------------
 TEST(NNOps, TestExtern) {
   static const ffi::Function op_extern = NNOp("extern");
 
@@ -1612,9 +1612,9 @@ TEST(NNOps, TestExtern) {
   AssertStructEqual(actual, bb->Finalize());
 }
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // TestEmpty  (mirrors test_empty from Python)
-// ===========================================================================
+// ---------------------------------------------------------------------------
 TEST(NNOps, TestEmpty) {
   // A forward function that takes no tensor inputs and returns nothing
   // (just the effect tuple). The module should still have _initialize_effect.
@@ -1647,9 +1647,9 @@ TEST(NNOps, TestEmpty) {
   AssertStructEqual(actual, bb->Finalize());
 }
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // TestEmptyAssert  (mirrors test_empty_assert from Python)
-// ===========================================================================
+// ---------------------------------------------------------------------------
 TEST(NNOps, TestEmptyAssert) {
   // Same as TestEmpty — just verifies the module can be exported without error
   // when there are no tensor ops (regression for assert-on-empty-output).
@@ -1665,9 +1665,9 @@ TEST(NNOps, TestEmptyAssert) {
   });
 }
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // TestSampleTopPTopKFromSortedProb
-// ===========================================================================
+// ---------------------------------------------------------------------------
 TEST(NNOps, TestSampleTopPTopKFromSortedProb) {
   static const ffi::Function op_sample = NNOp("sample_top_p_top_k_from_sorted_prob");
 
@@ -1742,9 +1742,9 @@ TEST(NNOps, TestSampleTopPTopKFromSortedProb) {
   EXPECT_TRUE(has_index_call) << "Missing 'get_index_from_sorted1' call_tir binding";
 }
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // TestRenormalizeTopPTopKProb
-// ===========================================================================
+// ---------------------------------------------------------------------------
 TEST(NNOps, TestRenormalizeTopPTopKProb) {
   static const ffi::Function op_renorm = NNOp("renormalize_top_p_top_k_prob");
 

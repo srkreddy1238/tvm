@@ -83,9 +83,9 @@ namespace frontend {
 namespace nn {
 namespace testing {
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // Helpers
-// ===========================================================================
+// ---------------------------------------------------------------------------
 
 static TensorStructInfo TSInfo(std::initializer_list<int64_t> dims, DataType dtype) {
   ffi::Array<PrimExpr> shape_dims;
@@ -99,7 +99,7 @@ static void AssertStructEqual(const IRModule& actual, const IRModule& expected) 
                                                         << expected;
 }
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // PackingTestModuleNode / PackingTestModule
 //
 // Test-only module for TestNNExportToRelax.
@@ -110,7 +110,7 @@ static void AssertStructEqual(const IRModule& actual, const IRModule& expected) 
 //           self.linear_2 = nn.Linear(in_features, out_features, bias=False)
 //       def forward(self, x):
 //           return self.linear_1(x) + self.linear_2(x)
-// ===========================================================================
+// ---------------------------------------------------------------------------
 class PackingTestModuleNode : public NNModuleNode {
  public:
   LinearModule linear_1;
@@ -154,7 +154,7 @@ class PackingTestModule : public runtime::ObjectRef {
 };
 TVM_FFI_STATIC_INIT_BLOCK() { PackingTestModuleNode::RegisterReflection(); }
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // TestNNExportToRelax
 //
 // Python equivalent:
@@ -178,7 +178,7 @@ TVM_FFI_STATIC_INIT_BLOCK() { PackingTestModuleNode::RegisterReflection(); }
 // With param_mode="packed" the two weight tensors are bundled into a single
 // packed_params tuple argument.  The dataflow block unpacks them with
 // TupleGetItem before use.
-// ===========================================================================
+// ---------------------------------------------------------------------------
 TEST(NNPacking, TestNNExportToRelax) {
   const int64_t IN = 10;
   const int64_t OUT = 20;
@@ -212,9 +212,9 @@ TEST(NNPacking, TestNNExportToRelax) {
   ffi::Array<ffi::Any> result = mod->ExportTVM(mod_spec, /*debug=*/false, /*allow_extern=*/false);
   IRModule actual = result[0].cast<IRModule>();
 
-  // ===========================================================================
+  // ---------------------------------------------------------------------------
   // Build expected IR
-  // ===========================================================================
+  // ---------------------------------------------------------------------------
   BlockBuilder bb = BlockBuilder::Create(std::nullopt);
   {
     DataType f32 = DataType::Float(32);

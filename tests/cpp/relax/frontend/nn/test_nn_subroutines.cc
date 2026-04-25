@@ -104,9 +104,9 @@ namespace frontend {
 namespace nn {
 namespace testing {
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // Helpers
-// ===========================================================================
+// ---------------------------------------------------------------------------
 
 static TensorStructInfo TSInfo(std::initializer_list<int64_t> dims, DataType dtype) {
   ffi::Array<PrimExpr> shape_dims;
@@ -120,7 +120,7 @@ static void AssertStructEqual(const IRModule& actual, const IRModule& expected) 
                                                         << expected;
 }
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // SubroutinesTestModuleNode / SubroutinesTestModule
 //
 // Test-only module for TestLinear.
@@ -137,7 +137,7 @@ static void AssertStructEqual(const IRModule& actual, const IRModule& expected) 
 // The _forward method emits two private subroutine functions (activation,
 // layer) via BlockBuilder::AddFunction before calling them from the main
 // dataflow block, exactly as the Python define_subroutine=True path does.
-// ===========================================================================
+// ---------------------------------------------------------------------------
 class SubroutinesTestModuleNode : public NNModuleNode {
  public:
   NNParameter weights;
@@ -224,7 +224,7 @@ class SubroutinesTestModule : public runtime::ObjectRef {
 };
 TVM_FFI_STATIC_INIT_BLOCK() { SubroutinesTestModuleNode::RegisterReflection(); }
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // TestLinear
 //
 // Python equivalent:
@@ -250,7 +250,7 @@ TVM_FFI_STATIC_INIT_BLOCK() { SubroutinesTestModuleNode::RegisterReflection(); }
 // In C++ we build the subroutine functions manually inside the forward lambda
 // using BlockBuilder::AddFunction with is_public=false, then emit a call to
 // the private GlobalVar.
-// ===========================================================================
+// ---------------------------------------------------------------------------
 TEST(NNSubroutines, TestLinear) {
   DataType f32 = DataType::Float(32);
   tir::Var batch_size("batch_size", DataType::Int(64));
@@ -277,9 +277,9 @@ TEST(NNSubroutines, TestLinear) {
   ffi::Array<ffi::Any> result = mod->ExportTVM(mod_spec, /*debug=*/true, /*allow_extern=*/false);
   IRModule actual = result[0].cast<IRModule>();
 
-  // ===========================================================================
+  // ---------------------------------------------------------------------------
   // Build expected IR
-  // ===========================================================================
+  // ---------------------------------------------------------------------------
   BlockBuilder bb = BlockBuilder::Create(std::nullopt);
 
   // _initialize_effect

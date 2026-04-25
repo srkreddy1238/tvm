@@ -95,9 +95,9 @@ namespace frontend {
 namespace nn {
 namespace testing {
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // Shared helpers
-// ===========================================================================
+// ---------------------------------------------------------------------------
 
 static TensorStructInfo TSInfo(std::initializer_list<int64_t> dims, DataType dtype) {
   ffi::Array<PrimExpr> shape_dims;
@@ -138,7 +138,7 @@ static void AssertStructEqual(const IRModule& actual, const IRModule& expected) 
                                                         << expected;
 }
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // BeforeModuleNode / BeforeModule
 //
 // Test-only module for TestDynamicShapeInMultipleFunctions.
@@ -150,7 +150,7 @@ static void AssertStructEqual(const IRModule& actual, const IRModule& expected) 
 // Two methods are registered as "forward_relu" and "forward_silu" (no "_" prefix)
 // so that DeriveMethodFunction can look them up verbatim: it only maps
 // "forward" -> "_forward" as a special case; all other names are used as-is.
-// ===========================================================================
+// ---------------------------------------------------------------------------
 class BeforeModuleNode : public NNModuleNode {
  public:
   Var ForwardRelu(Var x) const { return BlockBuilder_Current()->Emit(relax::relu(x), "relu"); }
@@ -174,7 +174,7 @@ class BeforeModule : public runtime::ObjectRef {
 };
 TVM_FFI_STATIC_INIT_BLOCK() { BeforeModuleNode::RegisterReflection(); }
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // LlamaMLPModuleNode / LlamaMLPModule
 //
 // Test-only module for TestExportNestedModule.
@@ -186,7 +186,7 @@ TVM_FFI_STATIC_INIT_BLOCK() { BeforeModuleNode::RegisterReflection(); }
 //           self.down_proj = nn.Linear(intermediate_size, hidden_size, bias=False)
 //       def forward(self, x):
 //           return self.down_proj(nn.silu(self.gate_proj(x)) * self.up_proj(x))
-// ===========================================================================
+// ---------------------------------------------------------------------------
 class LlamaMLPModuleNode : public NNModuleNode {
  public:
   LinearModule gate_proj;
@@ -242,7 +242,7 @@ class LlamaMLPModule : public runtime::ObjectRef {
 };
 TVM_FFI_STATIC_INIT_BLOCK() { LlamaMLPModuleNode::RegisterReflection(); }
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // DuplicateNamesModuleNode / DuplicateNamesModule
 //
 // Test-only module for ExportDuplicateNamesModel.
@@ -253,7 +253,7 @@ TVM_FFI_STATIC_INIT_BLOCK() { LlamaMLPModuleNode::RegisterReflection(); }
 //   s3 = silu(s2)
 //   s4 = matmul(s3,    down_weights)
 //   return s4
-// ===========================================================================
+// ---------------------------------------------------------------------------
 class DuplicateNamesModuleNode : public NNModuleNode {
  public:
   NNParameter embedding_weights;
@@ -345,7 +345,7 @@ TEST(NNExporter, TestSimple) {
   AssertStructEqual(actual, bb->Finalize());
 }
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // TestDebugEffect
 //
 // Python equivalent:
@@ -366,7 +366,7 @@ TEST(NNExporter, TestSimple) {
 //
 // Uses the module-aware ModuleSpec constructor with debug=true:
 //   ModuleSpec(mod, spec, /*debug=*/true)
-// ===========================================================================
+// ---------------------------------------------------------------------------
 TEST(NNExporter, TestDebugEffect) {
   // 1. Create the module
   ReLUModule mod;
@@ -402,7 +402,7 @@ TEST(NNExporter, TestDebugEffect) {
   AssertStructEqual(actual, bb->Finalize());
 }
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // TestDynamicShape
 //
 // Python equivalent:
@@ -420,7 +420,7 @@ TEST(NNExporter, TestDebugEffect) {
 //     return relu
 //
 // Uses the module-aware ModuleSpec constructor with a symbolic SpecTensor.
-// ===========================================================================
+// ---------------------------------------------------------------------------
 TEST(NNExporter, TestDynamicShape) {
   // 1. Create the module
   ReLUModule mod;
@@ -463,7 +463,7 @@ TEST(NNExporter, TestDynamicShape) {
   AssertStructEqual(actual, bb->Finalize());
 }
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // TestDynamicShapeInMultipleFunctions
 //
 // Python equivalent:
@@ -479,7 +479,7 @@ TEST(NNExporter, TestDynamicShape) {
 // Uses BeforeModule whose node registers "forward_relu" and "forward_silu".
 // DeriveMethodFunction looks them up verbatim (only "forward" is special-cased
 // to "_forward").
-// ===========================================================================
+// ---------------------------------------------------------------------------
 TEST(NNExporter, TestDynamicShapeInMultipleFunctions) {
   BeforeModule mod;
 
@@ -528,7 +528,7 @@ TEST(NNExporter, TestDynamicShapeInMultipleFunctions) {
   AssertStructEqual(actual, bb->Finalize());
 }
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // TestExportNestedModule
 //
 // Python equivalent: LlamaMLP with gate_proj, up_proj, down_proj (all Linear,
@@ -539,7 +539,7 @@ TEST(NNExporter, TestDynamicShapeInMultipleFunctions) {
 //
 // Uses LlamaMLPModule whose node owns the three Linear sub-modules and
 // implements _forward via the module-aware ModuleSpec constructor.
-// ===========================================================================
+// ---------------------------------------------------------------------------
 TEST(NNExporter, TestExportNestedModule) {
   const int64_t H = 4096;
   const int64_t I = 11008;
@@ -604,7 +604,7 @@ TEST(NNExporter, TestExportNestedModule) {
   AssertStructEqual(actual, bb->Finalize());
 }
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // TestLinearDynamicShape
 //
 // Python equivalent:
@@ -620,7 +620,7 @@ TEST(NNExporter, TestExportNestedModule) {
 // Uses the module-aware ModuleSpec constructor with debug=true.
 // The named_params (which carry the tir::Var "n" in the weight shape) are
 // collected automatically from the module by ModuleSpec.
-// ===========================================================================
+// ---------------------------------------------------------------------------
 TEST(NNExporter, TestLinearDynamicShape) {
   // 1. Create the module with a symbolic out_features dimension
   tir::Var n("n", DataType::Int(64));
@@ -666,7 +666,7 @@ TEST(NNExporter, TestLinearDynamicShape) {
   AssertStructEqual(actual, bb->Finalize());
 }
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // Duplicate-names helpers
 //
 // The Python test_duplicate_names parametrises over how symbolic dims are
@@ -679,7 +679,7 @@ TEST(NNExporter, TestLinearDynamicShape) {
 //   up:        (is_, hs)
 //   down:      (hs, is_)
 // where hs / is_ are the tir::Var objects supplied by the caller.
-// ===========================================================================
+// ---------------------------------------------------------------------------
 static IRModule ExportDuplicateNamesModel(tir::Var hs, tir::Var is_) {
   DataType f32 = DataType::Float(32);
   auto I64 = [](int64_t v) { return IntImm(DataType::Int(64), v); };
@@ -722,12 +722,12 @@ static tir::Var GetParamShapeVar(const IRModule& mod, int param_idx, int dim_idx
   return Downcast<tir::Var>(se->values[dim_idx]);
 }
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // TestDuplicateNamesSamePythonString
 //
 // Both hs and is_ are the *same* tir::Var (same object, same name).
 // The exporter must reuse a single tir::Var for all "hidden_size" dims.
-// ===========================================================================
+// ---------------------------------------------------------------------------
 TEST(NNExporter, TestDuplicateNamesSamePythonString) {
   tir::Var hs("hidden_size", DataType::Int(64));
   IRModule actual = ExportDuplicateNamesModel(hs, hs);  // is_ == hs
@@ -748,12 +748,12 @@ TEST(NNExporter, TestDuplicateNamesSamePythonString) {
   EXPECT_TRUE(v_emb0.same_as(v_down1));
 }
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // TestDuplicateNamesDifferentPythonString
 //
 // hs and is_ are distinct tir::Vars with distinct names.
 // The exporter must keep them as two independent vars.
-// ===========================================================================
+// ---------------------------------------------------------------------------
 TEST(NNExporter, TestDuplicateNamesDifferentPythonString) {
   tir::Var hs("hidden_size", DataType::Int(64));
   tir::Var is_("intermediate_size", DataType::Int(64));
@@ -769,12 +769,12 @@ TEST(NNExporter, TestDuplicateNamesDifferentPythonString) {
   EXPECT_FALSE(v_hs.same_as(v_is));
 }
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // TestDuplicateNamesSameTirVar
 //
 // The same tir::Var object is used for both hs and is_ positions.
 // Identical to TestDuplicateNamesSamePythonString in C++ (same object).
-// ===========================================================================
+// ---------------------------------------------------------------------------
 TEST(NNExporter, TestDuplicateNamesSameTirVar) {
   tir::Var dim("hidden_size", DataType::Int(64));
   IRModule actual = ExportDuplicateNamesModel(dim, dim);
@@ -789,11 +789,11 @@ TEST(NNExporter, TestDuplicateNamesSameTirVar) {
   EXPECT_TRUE(v1.same_as(v2));
 }
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // TestDuplicateNamesDistinctTirVarsDistinctNames
 //
 // Two distinct tir::Var objects with distinct names → two independent vars.
-// ===========================================================================
+// ---------------------------------------------------------------------------
 TEST(NNExporter, TestDuplicateNamesDistinctTirVarsDistinctNames) {
   tir::Var hs("hidden_size", DataType::Int(64));
   tir::Var is_("intermediate_size", DataType::Int(64));

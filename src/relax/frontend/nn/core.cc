@@ -19,9 +19,8 @@
 
 /*!
  * \file src/relax/frontend/nn/core.cc
- * \brief Native C++ implementations for nn frontend core types (Tensor,
- *        Parameter, NNObject) and global helpers (default dtype, WrapNested,
- *        MakePlaceholder, etc.).
+ * \brief Implementations for nn frontend core types (Tensor, Parameter,
+ *        NNObject) and global helpers (default dtype, WrapNested, etc.).
  */
 
 #include "core.h"
@@ -36,7 +35,6 @@
 #include <string>
 
 // ExportTVM and Jit delegate to ExportToIRModule and nn::Jit respectively.
-// Include their headers here (after core.h to avoid circular dependency).
 #include "cpp_module.h"
 #include "exporter.h"
 #include "modules.h"
@@ -47,11 +45,12 @@ namespace relax {
 namespace frontend {
 namespace nn {
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // Thread-local BlockBuilder tracker
+//
 // Provides BlockBuilder::Current() semantics for WrapNested / Emit helpers.
-// exporter.cc installs the current BB via BBScope before calling forward().
-// ===========================================================================
+// The exporter installs the current BB via BBScope before calling forward().
+// ---------------------------------------------------------------------------
 
 static thread_local BlockBuilder* g_current_bb = nullptr;  // NOLINT(*)
 
@@ -59,18 +58,18 @@ BlockBuilder BlockBuilder_Current() { return g_current_bb ? *g_current_bb : Bloc
 
 void BlockBuilder_SetCurrent(BlockBuilder* bb) { g_current_bb = bb; }
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // Default dtype (thread-local so nested scopes can override independently)
-// ===========================================================================
+// ---------------------------------------------------------------------------
 
 static thread_local std::string g_default_dtype = "float32";  // NOLINT(*)
 
 ffi::String GetDefaultDtype() { return g_default_dtype; }
 void SetDefaultDtype(ffi::String dtype) { g_default_dtype = std::string(dtype); }
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // Helper: build a ShapeExpr from a mixed Array<Any>
-// ===========================================================================
+// ---------------------------------------------------------------------------
 
 static ShapeExpr BuildShapeExpr(const ffi::Array<ffi::Any>& shape) {
   ffi::Array<PrimExpr> dims;
@@ -97,9 +96,9 @@ static ShapeExpr BuildShapeExpr(const ffi::Array<ffi::Any>& shape) {
   return ShapeExpr(dims);
 }
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // TensorNode
-// ===========================================================================
+// ---------------------------------------------------------------------------
 
 TensorNode::TensorNode(Var expr) : expr(std::move(expr)) {
   TVM_FFI_ICHECK(this->expr->struct_info_.defined()) << "TensorNode: Var must have struct_info set";
@@ -142,9 +141,9 @@ TensorNode* TensorNode::MakeFromStructInfo(TensorStructInfo sinfo, ffi::String n
 
 NNTensor::NNTensor(Var expr) { data_ = ffi::make_object<TensorNode>(std::move(expr)); }
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // ParameterNode
-// ===========================================================================
+// ---------------------------------------------------------------------------
 
 ParameterNode::ParameterNode(Var expr, ffi::Optional<runtime::Tensor> data,
                              ffi::Map<ffi::String, ffi::Any> attrs)
@@ -167,9 +166,9 @@ NNParameter::NNParameter(Var expr, ffi::Optional<runtime::Tensor> data,
   data_ = ffi::make_object<ParameterNode>(std::move(expr), std::move(data), std::move(attrs));
 }
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // NNObjectNode
-// ===========================================================================
+// ---------------------------------------------------------------------------
 
 NNObjectNode::NNObjectNode(Var expr) : expr(std::move(expr)) {
   TVM_FFI_ICHECK(this->expr->struct_info_.defined())
@@ -181,9 +180,9 @@ NNObjectNode::NNObjectNode(Var expr) : expr(std::move(expr)) {
 
 NNObject::NNObject(Var expr) { data_ = ffi::make_object<NNObjectNode>(std::move(expr)); }
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // ModuleListNode / ModuleDictNode
-// ===========================================================================
+// ---------------------------------------------------------------------------
 
 ModuleList::ModuleList(ffi::Array<ffi::Any> modules) {
   data_ = ffi::make_object<ModuleListNode>(std::move(modules));
@@ -193,9 +192,9 @@ ModuleDict::ModuleDict(ffi::Map<ffi::String, ffi::Any> modules) {
   data_ = ffi::make_object<ModuleDictNode>(std::move(modules));
 }
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // WrapNested
-// ===========================================================================
+// ---------------------------------------------------------------------------
 
 ffi::Any WrapNested(Expr expr, ffi::String name) {
   BlockBuilder bb = BlockBuilder_Current();
@@ -224,9 +223,9 @@ ffi::Any WrapNested(Expr expr, ffi::String name) {
   TVM_FFI_UNREACHABLE();
 }
 
-// ===========================================================================
-// Global FFI helpers (MakePlaceholder, MakeTensorFromStructInfo, etc.)
-// ===========================================================================
+// ---------------------------------------------------------------------------
+// Global FFI helpers
+// ---------------------------------------------------------------------------
 
 static Var FFIMakePlaceholder(ffi::Array<ffi::Any> shape, ffi::String dtype,
                               ffi::String name = "tensor") {
@@ -246,15 +245,17 @@ static ffi::Optional<BlockBuilder> GetCurrentBlockBuilder() {
 
 // ---------------------------------------------------------------------------
 // Internal helper: recursively collect NNParameters from an ffi::Any value.
-// Mirrors Python's _attribute_finder logic:
-//   Case 1: ModuleList / ModuleDict  -> GetContainerParameters
-//   Case 2: native C++ Object        -> GetNativeParameters
-//   Case 3: NNModuleNode             -> recurse into its attrs map
-//   Case 4: NNParameter              -> yield directly
+//
+// Handles:
+//   NNParameter              -> yield directly
+//   ModuleListNode           -> iterate by index, recurse
+//   ModuleDictNode           -> iterate by key, recurse
+//   NNModuleNode (non-Effect) -> recurse into attrs map
+//   other native C++ Object  -> inspect registered fields
 // ---------------------------------------------------------------------------
 static void CollectParameters(const ffi::Any& val, const std::string& prefix,
                               ffi::Map<ffi::String, NNParameter>& out) {
-  // Case 4: direct NNParameter
+  // NNParameter: yield directly.
   if (auto opt = val.try_cast<NNParameter>()) {
     if (!prefix.empty()) out.Set(ffi::String(prefix), opt.value());
     return;
@@ -264,7 +265,7 @@ static void CollectParameters(const ffi::Any& val, const std::string& prefix,
   if (!opt_ref.has_value() || !opt_ref.value().defined()) return;
   runtime::ObjectRef obj = opt_ref.value();
 
-  // Case 1: ModuleList — iterate by index, recurse into each element
+  // ModuleList: iterate by index, recurse into each element.
   if (const auto* list = obj.as<ModuleListNode>()) {
     for (int64_t i = 0; i < static_cast<int64_t>(list->modules.size()); ++i) {
       std::string child = prefix.empty() ? std::to_string(i) : prefix + "." + std::to_string(i);
@@ -273,7 +274,7 @@ static void CollectParameters(const ffi::Any& val, const std::string& prefix,
     return;
   }
 
-  // Case 1b: ModuleDict — iterate by key, recurse into each element
+  // ModuleDict: iterate by key, recurse into each element.
   if (const auto* dict = obj.as<ModuleDictNode>()) {
     for (const auto& [k, v] : dict->modules) {
       std::string child = prefix.empty() ? std::string(k) : prefix + "." + std::string(k);
@@ -282,10 +283,10 @@ static void CollectParameters(const ffi::Any& val, const std::string& prefix,
     return;
   }
 
-  // Case 3: NNModuleNode (or any subclass) — recurse into its attrs map.
+  // NNModuleNode (or any subclass): recurse into its attrs map.
   // Skip EffectNode subclasses: effects have no trainable parameters.
   if (const auto* mod = obj.as<NNModuleNode>()) {
-    if (obj.as<EffectNode>()) return;  // Effects carry no parameters
+    if (obj.as<EffectNode>()) return;  // Effects have no trainable parameters.
     for (const auto& [fname, fval] : mod->attrs) {
       std::string child = prefix.empty() ? std::string(fname) : prefix + "." + std::string(fname);
       CollectParameters(fval, child, out);
@@ -293,7 +294,7 @@ static void CollectParameters(const ffi::Any& val, const std::string& prefix,
     return;
   }
 
-  // Case 2: any other native C++ Object — inspect its registered fields
+  // Other native C++ Object: inspect its registered fields.
   auto params = GetNativeParameters(obj);
   for (const auto& [fname, param] : params) {
     std::string full = prefix.empty() ? std::string(fname) : prefix + "." + std::string(fname);
@@ -301,16 +302,16 @@ static void CollectParameters(const ffi::Any& val, const std::string& prefix,
   }
 }
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // GetNativeParameters
-// ===========================================================================
+// ---------------------------------------------------------------------------
 
 ffi::Map<ffi::String, NNParameter> GetNativeParameters(runtime::ObjectRef obj) {
   ffi::Map<ffi::String, NNParameter> result;
   if (!obj.defined()) return result;
 
   // If the object is an NNModuleNode (or subclass), use NamedParameters
-  // which walks attrs — populated by Make* factories via PopulateAttrs.
+  // which walks attrs populated by Make* factories via PopulateAttrs.
   if (const auto* mod = obj.as<NNModuleNode>()) {
     return mod->NamedParameters(ffi::String(""));
   }
@@ -339,27 +340,24 @@ ffi::Map<ffi::String, NNParameter> GetNativeParameters(runtime::ObjectRef obj) {
   return result;
 }
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // GetContainerParameters / ContainerApplyTo
-// ===========================================================================
+// ---------------------------------------------------------------------------
 
 /*!
  * \brief Recursively collect NNParameters from a ModuleList or ModuleDict.
- * Each element is an ffi::Any that may be:
- *   - A native C++ module object  -> call GetNativeParameters
- *   - A ModuleListNode            -> recurse
- *   - A ModuleDictNode            -> recurse
- *   - Anything else               -> skip (Python-side Module handled in Python)
+ *
+ * Each element is an ffi::Any that may be a native C++ module object,
+ * a ModuleListNode, a ModuleDictNode, or any other value (skipped).
  */
 ffi::Map<ffi::String, NNParameter> GetContainerParameters(runtime::ObjectRef container,
                                                           ffi::String prefix) {
   ffi::Map<ffi::String, NNParameter> result;
   if (!container.defined()) return result;
-  // Strip trailing '.' from prefix if present (Python _attribute_finder adds it)
+  // Strip trailing '.' from prefix if present.
   std::string pfx = std::string(prefix);
   if (!pfx.empty() && pfx.back() == '.') pfx.pop_back();
-  // Delegate entirely to CollectParameters which handles ModuleListNode,
-  // ModuleDictNode, NNModuleNode subclasses, and native C++ objects uniformly.
+  // Delegate to CollectParameters which handles all container types uniformly.
   CollectParameters(ffi::Any(container), pfx, result);
   return result;
 }
@@ -377,21 +375,22 @@ void ContainerApplyTo(runtime::ObjectRef container, ffi::String dtype) {
 }
 
 /*!
- * \brief Apply dtype conversion to all Parameters in a Python module's __dict__.
- * \param py_dict  Python dict (from module.__dict__) as ffi::Map<String, Any>.
+ * \brief Apply dtype conversion to all Parameters in a module attribute map.
+ *
+ * \param py_dict  Attribute map (e.g. from NNModuleNode::attrs).
  * \param dtype    Target dtype string.
  *
- * Recursively walks the dict, calling To() on Parameters, ModuleLists, ModuleDicts,
- * and any native C++ modules.
+ * Recursively walks the map, calling To() on Parameters, ModuleLists,
+ * ModuleDicts, and any native C++ modules.
  */
 void PythonModuleApplyTo(ffi::Map<ffi::String, ffi::Any> py_dict, ffi::String dtype) {
   for (const auto& [name, val] : py_dict) {
-    // Case 1: Parameter -> call To()
+    // NNParameter: call To().
     if (auto opt = val.try_cast<NNParameter>()) {
       opt.value()->To(dtype);
       continue;
     }
-    // Case 2: ModuleList / ModuleDict -> delegate to ContainerApplyTo
+    // ModuleList / ModuleDict: delegate to ContainerApplyTo.
     auto opt_ref = val.try_cast<runtime::ObjectRef>();
     if (!opt_ref.has_value() || !opt_ref.value().defined()) continue;
     runtime::ObjectRef obj = opt_ref.value();
@@ -399,12 +398,12 @@ void PythonModuleApplyTo(ffi::Map<ffi::String, ffi::Any> py_dict, ffi::String dt
       ContainerApplyTo(obj, dtype);
       continue;
     }
-    // Case 3: NNModuleNode subclass -> call To()
+    // NNModuleNode subclass: call To().
     if (const auto* mod = obj.as<NNModuleNode>()) {
       mod->To(dtype);
       continue;
     }
-    // Case 4: nested dict (pure-Python sub-module) -> recurse
+    // Nested attribute map: recurse.
     if (auto dict_opt = val.try_cast<ffi::Map<ffi::String, ffi::Any>>()) {
       PythonModuleApplyTo(dict_opt.value(), dtype);
       continue;
@@ -412,9 +411,9 @@ void PythonModuleApplyTo(ffi::Map<ffi::String, ffi::Any> py_dict, ffi::String dt
   }
 }
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // NNModuleNode
-// ===========================================================================
+// ---------------------------------------------------------------------------
 
 ffi::Map<ffi::String, NNParameter> NNModuleNode::NamedParameters(ffi::String prefix) const {
   ffi::Map<ffi::String, NNParameter> result;
@@ -497,17 +496,16 @@ void NNModuleNode::To(ffi::String dtype) const {
   }
 }
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // NNModuleNode::ExportTVM / Jit
-// ===========================================================================
+// ---------------------------------------------------------------------------
 
 ffi::Array<ffi::Any> NNModuleNode::ExportTVM(ModuleSpec spec, bool debug, bool allow_extern) const {
   // Use the Exporter class to build the IRModule and collect extern_mods.
-  // This matches the Python implementation exactly.
   Exporter exporter(debug);
   ffi::Array<ffi::Any> result = exporter->Build(std::move(spec));
   // result = [mod, named_params, extern_mods]
-  // If allow_extern=false, return [mod, named_params, empty_array]
+  // If allow_extern=false, return [mod, named_params, empty_array].
   if (!allow_extern) {
     result.Set(2, ffi::Any(ffi::Array<runtime::ObjectRef>{}));
   }

@@ -18,6 +18,7 @@
  */
 /*!
  * \file src/relax/frontend/nn/modules.cc
+ * \brief Implementations for built-in nn module types.
  */
 
 #include "modules.h"
@@ -50,9 +51,7 @@ namespace nn {
 // NN op interface wrappers
 //
 // These call the registered C++ NN op functions (from op.cc) via their FFI
-// global names, exactly mirroring how Python op.py calls _ffi_op.*.
-// This ensures all specialisations (e.g. permute_dims naming) are applied
-// consistently whether the caller is Python or C++ modules.
+// global names so that all specialisations are applied consistently.
 // ---------------------------------------------------------------------------
 
 static ffi::Function NNOp(const char* name) {
@@ -143,7 +142,6 @@ static Var NNScaledDotProductAttention(Var q, Var k, Var v,
 
 // Build a PrimExpr dimension from a mixed ffi::Any element.
 // Accepts: int64, ffi::String (symbolic var name), tir::Var, or PrimExpr.
-// Mirrors BuildShapeExpr in core.cc so that symbolic dims like "n" work.
 static PrimExpr AnyToDim(const ffi::Any& v) {
   if (auto opt = v.try_cast<int64_t>()) return IntImm(DataType::Int(64), opt.value());
   if (auto opt = v.try_cast<ffi::String>()) return tir::Var(opt.value(), DataType::Int(64));
@@ -165,8 +163,7 @@ static PrimExpr AnyToDim(const ffi::Any& v) {
 // ---------------------------------------------------------------------------
 // Internal helper: populate NNModuleNode::attrs with NNParameter fields.
 // Called by every Make* factory after constructing the node so that
-// NNModuleNode::NamedParameters() can discover parameters without needing
-// to walk the typed C++ fields via reflection.
+// NNModuleNode::NamedParameters() can discover parameters.
 // ---------------------------------------------------------------------------
 static void PopulateAttrs(const runtime::ObjectRef& mod_ref, const ffi::String& name,
                           const NNParameter& param) {
@@ -219,10 +216,7 @@ LinearModule::LinearModule(NNParameter weight, ffi::Optional<NNParameter> bias,
 }
 
 Var LinearModuleNode::Forward(Var x) const {
-  // Delegate permute_dims naming to NNPermuteDims (op.cc), which mirrors
-  // the Python nn.op.permute_dims logic: when no name is given it derives
-  // the name from the weight var's name_hint.
-  // Both paths use hint "matmul" for the matmul, matching Python nn.modules.Linear.forward.
+  // permute_dims transposes the weight; matmul computes x @ w^T.
   // With bias the add result uses hint "linear".
   Var w = NNPermuteDims(weight->expr, std::nullopt);
   Var mm = NNMatmul(x, w, out_dtype, "matmul");
@@ -256,7 +250,7 @@ Var EmbeddingModuleNode::Forward(Var x, ffi::Array<ffi::Any> out_shape_if_nd) co
   if (out_shape_if_nd.empty()) {
     return NNTake(weight->expr, x, ffi::Optional<Integer>(Integer(0)), "embedding");
   }
-  // ND path: flatten → take → reshape to out_shape
+  // ND path: flatten -> take -> reshape to out_shape.
   Var flat = NNReshape(x, {ffi::Any(int64_t(-1))}, "reshape");
   Var taken = NNTake(weight->expr, flat, ffi::Optional<Integer>(Integer(0)), "take");
   return NNReshape(taken, out_shape_if_nd, "embedding");
@@ -386,7 +380,7 @@ Conv1DModule MakeConv1D(ffi::Any in_channels, ffi::Any out_channels, ffi::Any ke
                         int64_t stride, int64_t padding, int64_t dilation, int64_t groups,
                         bool has_bias, ffi::Optional<ffi::String> dtype) {
   ffi::String dt = dtype.value_or(ffi::String(GetDefaultDtype()));
-  // in_per_group = in_channels / groups  (PrimExpr div)
+  // in_per_group = in_channels / groups.
   PrimExpr in_per_group = arith::Analyzer().Simplify(
       tir::FloorDiv(AnyToDim(in_channels), IntImm(DataType::Int(64), groups)));
   NNParameter w = MakeParam({out_channels, ffi::Any(in_per_group), kernel_size}, dt);
@@ -545,7 +539,7 @@ KVCacheModule::KVCacheModule(int64_t init_seq_len, ffi::Array<Integer> unit_shap
 }
 
 ffi::Array<Var> KVCacheModuleNode::EmitInit(ffi::String name_hint, BlockBuilder bb) const {
-  // Build init_shape = [init_seq_len, *unit_shape]
+  // Build init_shape = [init_seq_len, *unit_shape].
   ffi::Array<PrimExpr> shape_dims;
   shape_dims.push_back(IntImm(DataType::Int(64), init_seq_len));
   for (const Integer& d : unit_shape) shape_dims.push_back(d);
@@ -554,7 +548,7 @@ ffi::Array<Var> KVCacheModuleNode::EmitInit(ffi::String name_hint, BlockBuilder 
   DataType dt = DataType(ffi::StringToDLDataType(std::string(dtype)));
   Expr zeros_val = relax::zeros(init_shape, dt);
 
-  // call_pure_packed("vm.builtin.attention_kv_cache_create", zeros, init_shape, PrimValue(0))
+  // call_pure_packed("vm.builtin.attention_kv_cache_create", zeros, init_shape, PrimValue(0)).
   static const Op& cpp_op = Op::Get("relax.call_pure_packed");
   Expr call = Call(cpp_op,
                    {ExternFunc("vm.builtin.attention_kv_cache_create"), zeros_val, init_shape,
@@ -608,7 +602,7 @@ void KVCacheModuleNode::Append(NNTensor new_element) {
   TVM_FFI_ICHECK(bb.defined()) << "KVCache::Append called outside BlockBuilder scope";
 
   // call_inplace_packed("vm.builtin.attention_kv_cache_append", cache, new_element,
-  //                     inplace_indices=[0])
+  //                     inplace_indices=[0]).
   ObjectPtr<CallInplacePackedAttrs> attrs = ffi::make_object<CallInplacePackedAttrs>();
   attrs->inplace_indices = {Integer(0)};
   static const Op& cpp_op = Op::Get("relax.call_inplace_packed");
@@ -630,7 +624,7 @@ TimestepsModule::TimestepsModule(int64_t num_channels, bool flip_sin_to_cos,
 }
 
 Var TimestepsModuleNode::Forward(Var x) const {
-  // Delegate to the existing NNGetTimestepEmbedding in op.cc via its FFI name.
+  // Delegate to the NNGetTimestepEmbedding op via its FFI name.
   static const auto& fn =
       *tvm::ffi::Function::GetGlobal("relax.frontend.nn.op.get_timestep_embedding");
   ffi::String dt = ffi::String(GetDefaultDtype());
@@ -661,10 +655,10 @@ Var TimestepEmbeddingModuleNode::Forward(Var sample, ffi::Optional<Var> conditio
     Var proj = cond_proj.value().get()->Forward(condition.value());
     s = NNAdd(s, proj, "cond_add");
   }
-  // act(linear_1(sample))
+  // act(linear_1(sample)).
   Var l1 = linear_1.get()->Forward(s);
   Var a = act.get()->Forward(l1);
-  // linear_2(act_out)
+  // linear_2(act_out).
   Var l2 = linear_2.get()->Forward(a);
   if (post_act.has_value()) {
     l2 = post_act.value().get()->Forward(l2);
@@ -692,7 +686,7 @@ TimestepEmbeddingModule MakeTimestepEmbedding(int64_t in_channels, int64_t time_
   if (post_act_fn.has_value() && post_act_fn.value() == "silu") post = SiLUModule();
 
   TimestepEmbeddingModule mod(l1, cp, act, l2, post);
-  // Populate attrs for named_parameters traversal
+  // Populate attrs for named_parameters traversal.
   auto* node = const_cast<TimestepEmbeddingModuleNode*>(mod.get());
   node->attrs.Set("linear_1", ffi::Any(l1));
   if (cp.has_value()) node->attrs.Set("cond_proj", ffi::Any(cp.value()));
@@ -716,7 +710,7 @@ Var AttentionModuleNode::Forward(Var hidden_states,
                                  ffi::Optional<Var> encoder_hidden_states) const {
   Var hs = hidden_states;
   if (group_norm.has_value()) {
-    // group_norm(hidden_states, channel_axis=2, axes=[1])
+    // group_norm(hidden_states, channel_axis=2, axes=[1]).
     hs = group_norm.value().get()->Forward(hs, 2, {Integer(1)});
   }
   Var q = to_q.get()->Forward(hs);
@@ -725,7 +719,7 @@ Var AttentionModuleNode::Forward(Var hidden_states,
   Var v = to_v.get()->Forward(enc);
 
   int64_t head_dim = inner_dim / heads;
-  // reshape to [batch, seq, heads, head_dim]
+  // reshape to [batch, seq, heads, head_dim].
   auto reshape_4d = [&](Var t, const std::string& name) -> Var {
     return NNReshape(
         t, {ffi::Any(int64_t(0)), ffi::Any(int64_t(-1)), ffi::Any(heads), ffi::Any(head_dim)},
@@ -735,14 +729,14 @@ Var AttentionModuleNode::Forward(Var hidden_states,
   k = reshape_4d(k, "k");
   v = reshape_4d(v, "v");
 
-  // scaled_dot_product_attention (no causal mask)
+  // scaled_dot_product_attention (no causal mask).
   Var out = NNScaledDotProductAttention(q, k, v, std::nullopt, std::nullopt, "attn_out");
 
-  // reshape back to [batch, seq, heads*head_dim]
+  // reshape back to [batch, seq, heads*head_dim].
   out = NNReshape(out, {ffi::Any(int64_t(0)), ffi::Any(int64_t(-1)), ffi::Any(heads * head_dim)},
                   "attn_reshape");
 
-  // to_out[0](out)
+  // to_out[0](out).
   const auto* list_node = to_out.get();
   TVM_FFI_ICHECK(!list_node->modules.empty()) << "Attention: to_out is empty";
   auto opt = list_node->modules[0].try_cast<LinearModule>();
@@ -771,7 +765,7 @@ AttentionModule MakeAttention(int64_t query_dim, ffi::Optional<int64_t> cross_at
   ModuleList to_out({ffi::Any(to_out_linear)});
 
   AttentionModule mod(heads, inner_dim, to_q, to_k, to_v, gn, to_out);
-  // Populate attrs for named_parameters traversal
+  // Populate attrs for named_parameters traversal.
   auto* node = const_cast<AttentionModuleNode*>(mod.get());
   node->attrs.Set("to_q", ffi::Any(to_q));
   node->attrs.Set("to_k", ffi::Any(to_k));
@@ -808,7 +802,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
 
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef()
-      // No-parameter constructors for activation modules
+      // No-parameter constructors for activation modules.
       .def("relax.frontend.nn.ReLU", []() { return ReLUModule(); })
       .def("relax.frontend.nn.SiLU", []() { return SiLUModule(); })
       .def("relax.frontend.nn.GELU",

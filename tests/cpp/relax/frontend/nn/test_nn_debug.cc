@@ -51,9 +51,9 @@ namespace frontend {
 namespace nn {
 namespace testing {
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // Shared helpers
-// ===========================================================================
+// ---------------------------------------------------------------------------
 
 static ffi::Function NNOp(const std::string& name) {
   const std::string key = "relax.frontend.nn.op." + name;
@@ -111,7 +111,7 @@ class TestModuleNode : public NNModuleNode {
   TVM_FFI_DECLARE_OBJECT_INFO_FINAL("testing.nn.TestModule", TestModuleNode, NNModuleNode);
 };
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // test_debug_print
 //
 // Python equivalent:
@@ -127,7 +127,7 @@ class TestModuleNode : public NNModuleNode {
 //   x = torch.rand((10, 5), dtype=torch.float32)
 //   y = model["forward"](x)
 //   assert isinstance(y, torch.Tensor)
-// ===========================================================================
+// ---------------------------------------------------------------------------
 TEST(NNDebug, test_debug_print) {
   static const ffi::Function op_debug_func = NNOp("debug_func");
 
@@ -161,7 +161,7 @@ TEST(NNDebug, test_debug_print) {
   EXPECT_EQ(y.Shape()[1], 5);
 }
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // test_debug_func
 //
 // Python equivalent:
@@ -192,7 +192,7 @@ TEST(NNDebug, test_debug_print) {
 //   x = torch.rand((10, 5), dtype=torch.float32)
 //   y = model["forward"](x, 8)
 //   assert isinstance(y, torch.Tensor)
-// ===========================================================================
+// ---------------------------------------------------------------------------
 TEST(NNDebug, test_debug_func) {
   static const ffi::Function op_debug_func = NNOp("debug_func");
 

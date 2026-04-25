@@ -19,6 +19,7 @@
 
 /*!
  * \file src/relax/frontend/nn/spec.cc
+ * \brief Implementations for nn compilation specification types.
  */
 
 #include "spec.h"
@@ -122,8 +123,8 @@ ModuleSpec::ModuleSpec(ffi::Array<ffi::String> method_names, ffi::Array<ffi::Any
                        ffi::Map<ffi::String, NNParameter> named_params,
                        ffi::Map<ffi::String, runtime::ObjectRef> named_effects) {
   // If named_effects is non-empty, ensure every MethodSpec has effect_mode="plain".
-  // This handles the case where the caller builds a ModuleSpec with no effects first
-  // (effect_mode="none") and then injects effects via this low-level constructor.
+  // This handles the case where the caller builds a ModuleSpec with effect_mode="none"
+  // and then injects effects via this low-level constructor.
   if (!named_effects.empty()) {
     ffi::Array<ffi::Any> patched_specs;
     for (const ffi::Any& ms_any : method_specs) {
@@ -158,7 +159,7 @@ ffi::Function DeriveMethodFunction(runtime::ObjectRef mod_ref, ffi::String metho
 
   // Resolve the reflection method name:
   //   "forward" -> "_forward"  (C++ convention for the primary forward impl)
-  //   anything else -> use the given name verbatim
+  //   anything else -> use the given name verbatim.
   std::string refl_method_name =
       (std::string(method_name) == "forward") ? "_forward" : std::string(method_name);
 
@@ -178,7 +179,7 @@ ffi::Function DeriveMethodFunction(runtime::ObjectRef mod_ref, ffi::String metho
       // For SpecTensor args the exporter wraps the value as NNTensor; unwrap
       // to the underlying Var so the _forward method receives a relax::Var.
       // For SpecTuple args the exporter passes ffi::Array<ffi::Any>; pass
-      // it through directly — the _forward method receives the array.
+      // it through directly.
       if (auto opt = val.try_cast<NNTensor>()) {
         call_args.push_back(ffi::AnyView(opt.value()->expr));
       } else {

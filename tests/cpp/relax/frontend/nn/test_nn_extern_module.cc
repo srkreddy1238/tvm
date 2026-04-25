@@ -83,9 +83,9 @@ namespace frontend {
 namespace nn {
 namespace testing {
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // Shared helpers
-// ===========================================================================
+// ---------------------------------------------------------------------------
 
 // Path to the shared extern module source (relative to workspace root).
 static std::filesystem::path ExternModuleSourcePath() {
@@ -106,7 +106,7 @@ static ffi::Function NNOp(const std::string& name) {
   return f.value();
 }
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // Expected IR builder
 //
 // Mirrors _check_ir_equality() from the Python test:
@@ -134,7 +134,7 @@ static ffi::Function NNOp(const std::string& name) {
 //       gv1 = ext_test_sym
 //       R.output(gv1)
 //     return gv1
-// ===========================================================================
+// ---------------------------------------------------------------------------
 static IRModule BuildExpectedIR() {
   BlockBuilder bb = BlockBuilder::Create(std::nullopt);
   DataType f32 = DataType::Float(32);
@@ -196,14 +196,14 @@ static IRModule BuildExpectedIR() {
   return bb->Finalize();
 }
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // Build the ModuleSpec for the two extern methods.
 //
 // The forward lambdas call nn.op.extern() which emits call_dps_packed nodes.
 // The "out" placeholder tensors carry the output shape/dtype inferred by the
 // shape-inference callbacks (_infer_scalar_add / _infer_test_sym in Python).
 // In C++ we compute the output shape directly.
-// ===========================================================================
+// ---------------------------------------------------------------------------
 static ModuleSpec BuildExternModuleSpec() {
   const ffi::Function op_extern = NNOp("extern");
   DataType f32 = DataType::Float(32);
@@ -264,10 +264,10 @@ static ModuleSpec BuildExternModuleSpec() {
                     ffi::Array<ffi::Any>{ffi::Any(ms_scalar), ffi::Any(ms_sym)}, {}, {});
 }
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // Compile the extern .cc file to a .o and return the path.
 // Mirrors _compile_cc() from the Python test.
-// ===========================================================================
+// ---------------------------------------------------------------------------
 static std::string CompileExternCC(const std::filesystem::path& src) {
   // Use a temp file in the system temp directory.
   auto tmp = std::filesystem::temp_directory_path() / "frontend_nn_extern_module.o";
@@ -286,10 +286,10 @@ static std::string CompileExternCC(const std::filesystem::path& src) {
   return tmp.string();
 }
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // Load and initialise a VM from a compiled VMExecutable module.
 // Mirrors LoadAndInitVM() in cpp_module.cc.
-// ===========================================================================
+// ---------------------------------------------------------------------------
 static ffi::Module LoadAndInitVM(const ffi::Module& compiled) {
   using namespace tvm::runtime;
   auto vm_ex = compiled.as<vm::VMExecutable>();
@@ -333,9 +333,9 @@ static runtime::Tensor InvokeVM(const ffi::Module& vm, const std::string& func_n
   return out_rv.cast<runtime::Tensor>();
 }
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // Run the compiled VM and verify scalar_add and test_sym results.
-// ===========================================================================
+// ---------------------------------------------------------------------------
 static void RunAndVerify(const ffi::Module& compiled) {
   ffi::Module vm = LoadAndInitVM(compiled);
   Device cpu{kDLCPU, 0};
@@ -370,14 +370,14 @@ static void RunAndVerify(const ffi::Module& compiled) {
   }
 }
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // TestExternObject
 //
 // Python equivalent: test_extern_object()
 //   - Compile frontend_nn_extern_module.cc to a .o
 //   - Wrap in nn.ObjectModule
 //   - Export, attach, compile, run
-// ===========================================================================
+// ---------------------------------------------------------------------------
 TEST(NNExternModule, TestExternObject) {
   std::filesystem::path src = ExternModuleSourcePath();
   if (!std::filesystem::exists(src)) {
@@ -431,13 +431,13 @@ TEST(NNExternModule, TestExternObject) {
   RunAndVerify(compiled);
 }
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // TestExternSource
 //
 // Python equivalent: test_extern_source()
 //   - Pass the .cc path as nn.SourceModule (source_format="cpp")
 //   - Export, attach, compile, run
-// ===========================================================================
+// ---------------------------------------------------------------------------
 TEST(NNExternModule, TestExternSource) {
   std::filesystem::path src = ExternModuleSourcePath();
   if (!std::filesystem::exists(src)) {

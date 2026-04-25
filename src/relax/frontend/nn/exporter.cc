@@ -19,12 +19,7 @@
 
 /*!
  * \file src/relax/frontend/nn/exporter.cc
- * \brief C++ implementation of ExportToIRModule.
- *
- * Uses the low-level BlockBuilder API (BeginScope/EndScope,
- * BeginDataflowBlock/EndBlock, EmitOutput, relax::Function) that is
- * already present in the codebase, matching the pattern in
- * tests/cpp-compiler/compiler_base.cc.
+ * \brief Implementation of ExportToIRModule.
  */
 
 #include "exporter.h"
@@ -47,12 +42,12 @@ namespace relax {
 namespace frontend {
 namespace nn {
 
-// ===========================================================================
-// Thread-local Exporter tracker  (mirrors BlockBuilder_Current / _SetCurrent)
+// ---------------------------------------------------------------------------
+// Thread-local Exporter tracker
+//
 // ExporterScope installs the current Exporter before calling forward() so
-// that nn.add_extern() called from Python forward() can find it via
-// Exporter_Current().
-// ===========================================================================
+// that nn.add_extern() can find it via Exporter_Current().
+// ---------------------------------------------------------------------------
 
 static thread_local ExporterNode* g_current_exporter = nullptr;  // NOLINT(*)
 
@@ -64,22 +59,22 @@ ffi::Optional<Exporter> Exporter_Current() {
 
 void Exporter_SetCurrent(ExporterNode* exporter) { g_current_exporter = exporter; }
 
-// RAII scope that installs/restores the current Exporter
+// RAII scope that installs/restores the current Exporter.
 struct ExporterScope {
   ExporterNode* prev;
   explicit ExporterScope(ExporterNode* e) : prev(g_current_exporter) { g_current_exporter = e; }
   ~ExporterScope() { g_current_exporter = prev; }
 };
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // BBScope: RAII helper that installs/restores the thread-local BlockBuilder
-// so that WrapNested / Emit helpers in core.cc and op.cc can find it.
-// ===========================================================================
+// so that WrapNested and Emit helpers in core.cc and op.cc can find it.
+// ---------------------------------------------------------------------------
 
 struct BBScope {
   ffi::Optional<BlockBuilder> prev;
   explicit BBScope(BlockBuilder& bb) {
-    // Save whatever was current and install the new one
+    // Save whatever was current and install the new one.
     BlockBuilder cur = BlockBuilder_Current();
     prev = cur.defined() ? ffi::Optional<BlockBuilder>(cur) : std::nullopt;
     BlockBuilder_SetCurrent(&bb);
@@ -98,7 +93,7 @@ struct BBScope {
 };
 
 // Thread-local storage for the current debug _io Var, set by EmitMethod
-// so that debug_func (called from Python forward()) can retrieve it.
+// so that the debug function wrapper can retrieve it.
 static thread_local ffi::Optional<Var> g_current_io_var;  // NOLINT(*)
 
 ffi::Optional<Var> GetCurrentIOVar() { return g_current_io_var; }
@@ -177,22 +172,19 @@ static Expr UnwrapReturn(const ffi::Any& val) {
   TVM_FFI_UNREACHABLE();
 }
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // EmitInitializeEffect
 //
-// Builds and adds to bb the function:
+// Builds and emits the _initialize_effect function:
 //   @R.function
 //   def _initialize_effect() -> R.Tuple(R.Object, ...):
 //       with R.dataflow():
-//           effect1 = effect1.emit_init("effect1", bb)
-//           effect2 = effect2.emit_init("effect2", bb)
+//           effect1 = effect1.EmitInit("effect1", bb)
 //           ...
-//           lv   = (effect1, effect2, ...)
-//           gv   = lv          # output
+//           lv = (effect1, ...)
+//           gv = lv
 //       return gv
-//
-// Calls emit_init() on each Effect in named_effects.
-// ===========================================================================
+// ---------------------------------------------------------------------------
 
 static void EmitInitializeEffect(BlockBuilder& bb,
                                  const ffi::Map<ffi::String, runtime::ObjectRef>& named_effects,
@@ -202,12 +194,12 @@ static void EmitInitializeEffect(BlockBuilder& bb,
   bb->BeginScope(params);
   bb->BeginDataflowBlock();
 
-  // Set current BB so that relax ops called from here can use BlockBuilder::Current()
+  // Set current BB so that relax ops called from here can use BlockBuilder::Current().
   BBScope bb_scope(bb);
 
   ffi::Array<Expr> effect_vars;
 
-  // If debug=true, always emit _io = null_value() first
+  // If debug=true, always emit _io = null_value() first.
   if (debug) {
     static const Op& null_value_op = Op::Get("relax.null_value");
     Var io = bb->Emit(Call(null_value_op, {}, {}, {}), "_io");
@@ -364,15 +356,14 @@ static void EmitMethod(BlockBuilder& bb, const ffi::String& method_name, const M
     }
   }
 
-  // ---- 4. Build effect Vars and call create/set_state -------------------
+  // ---- 4. Build effect Vars and call Create/SetState --------------------
   // For each Effect in named_effects:
-  //   1. Call effect._cpp_create(name) -> Array<Var> (effect state vars)
+  //   1. Call effect.Create(name) -> Array<Var> (effect state vars)
   //   2. Add those Vars to func_params (if effect_mode != "none")
-  //   3. Call effect._cpp_set_state(state_vars) to initialize the Effect
+  //   3. Call effect.SetState(state_vars) to initialise the Effect
   //
-  // Special case: if debug=true and effect_mode != "none", ALWAYS add a
-  // legacy _io effect var as the FIRST effect (for backward compatibility),
-  // followed by any Effects from named_effects.
+  // When debug=true and effect_mode != "none", a legacy _io effect Var is
+  // prepended as the first effect for backward compatibility.
   std::string effect_mode_str = std::string(ms->effect_mode);
   std::vector<std::pair<ffi::String, runtime::ObjectRef>> effects_vec;
   std::vector<ffi::Array<Var>> effect_state_vars;  // per-effect state vars
@@ -400,7 +391,7 @@ static void EmitMethod(BlockBuilder& bb, const ffi::String& method_name, const M
 
   // ---- 5. Build param Vars -----------------------------------------------
   // param_mode: "plain" = individual params, "packed" = single R.Tuple param,
-  //             "none"  = no params appended
+  //             "none"  = no params appended.
   std::string param_mode_str = std::string(ms->param_mode);
 
   std::vector<std::pair<ffi::String, NNParameter>> params_vec;
@@ -489,14 +480,12 @@ static void EmitMethod(BlockBuilder& bb, const ffi::String& method_name, const M
   bb->BeginScope(func_params);
   bb->BeginDataflowBlock();
 
-  // Install current BB so WrapNested / Emit helpers work
+  // Install current BB so WrapNested / Emit helpers work.
   BBScope bb_scope(bb);
-  // Also push the BlockBuilder onto the Python-side BlockBuilder._stack so
-  // that relax.BlockBuilder.current() (used by SubroutineMixin and other
-  // Python code) returns the correct builder during forward().
+  // Push the BlockBuilder onto the global stack so that relax.BlockBuilder.current()
+  // returns the correct builder during forward().
   // These symbols are only registered when Python is loaded; in a pure C++
-  // context they will be absent, so we look them up lazily and skip the call
-  // when they are not available.
+  // context they will be absent, so we look them up lazily and skip when unavailable.
   static const ffi::Optional<ffi::Function> py_bb_push =
       ffi::Function::GetGlobal("relax.frontend.nn.PushCurrentBlockBuilder");
   static const ffi::Optional<ffi::Function> py_bb_pop =
@@ -549,9 +538,8 @@ static void EmitMethod(BlockBuilder& bb, const ffi::String& method_name, const M
     named_args.Set(ms->arg_names[i], explicit_inputs[i]);
   }
 
-  // Call the forward function — if it throws, close the open BB blocks first
-  // to avoid the "BlockBuilder destroyed with remaining blocks" warning and
-  // the dangling-pointer segfault in the next test.
+  // Call the forward function.  If it throws, close the open BB blocks first
+  // to avoid a dangling-pointer segfault in the next test.
   ffi::Any raw_out;
   try {
     raw_out = ms->forward(named_args);
@@ -572,8 +560,8 @@ static void EmitMethod(BlockBuilder& bb, const ffi::String& method_name, const M
   Expr out_expr = UnwrapReturn(raw_out);
 
   // Build effect output vars:
-  // 1. If use_legacy_io: return the (possibly updated) _io var
-  // 2. Then call _cpp_finalize() for each Effect
+  //   1. If use_legacy_io: return the (possibly updated) _io var.
+  //   2. Call Finalize() for each Effect.
   ffi::Array<Expr> effect_output_vars;
   if (use_legacy_io) {
     // Legacy: return the _io var (use updated value from g_current_io_var if available)
@@ -613,13 +601,9 @@ static void EmitMethod(BlockBuilder& bb, const ffi::String& method_name, const M
   bb->AddFunction(func, std::string(method_name));
 }
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // ExportToIRModule
-// ===========================================================================
-
-// ===========================================================================
-// Exporter class - implementation
-// ===========================================================================
+// ---------------------------------------------------------------------------
 
 ExporterNode::ExporterNode(bool debug)
     : builder(BlockBuilder::Create(std::nullopt)), debug(debug) {}
@@ -631,13 +615,13 @@ void ExporterNode::AddExternalModule(runtime::ObjectRef extern_mod) {
 
 ffi::Array<ffi::Any> ExporterNode::Build(ModuleSpec spec) {
   // Install this Exporter as the thread-local current so that
-  // nn.add_extern() called from Python forward() can find it.
+  // nn.add_extern() called from forward() can find it.
   ExporterScope exporter_scope(this);
 
-  // Delegate to ExportToIRModule (now a member method)
+  // Delegate to ExportToIRModule.
   IRModule mod = this->ExportToIRModule(spec, debug);
 
-  // Return [mod, named_params, extern_mods] as Array<Any>
+  // Return [mod, named_params, extern_mods] as Array<Any>.
   ffi::Array<ffi::Any> result;
   result.push_back(ffi::Any(mod));
   result.push_back(ffi::Any(spec.get()->named_params));
@@ -658,9 +642,9 @@ void ExporterNode::RegisterReflection() {
 
 Exporter::Exporter(bool debug) { data_ = ffi::make_object<ExporterNode>(debug); }
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // ExporterNode::ExportToIRModule
-// ===========================================================================
+// ---------------------------------------------------------------------------
 
 IRModule ExporterNode::ExportToIRModule(ModuleSpec spec, bool debug) {
   const ModuleSpecNode* ms_node = spec.get();
@@ -668,7 +652,6 @@ IRModule ExporterNode::ExportToIRModule(ModuleSpec spec, bool debug) {
 
   // Emit _initialize_effect whenever there are effects OR debug=true.
   // When debug=true, _io (null_value) is prepended to the effect tuple.
-  // When debug=false but effects exist, only the real effects are initialised.
   bool has_effects = !ms_node->named_effects.empty();
   if (debug || has_effects) {
     EmitInitializeEffect(bb, ms_node->named_effects, debug);
@@ -691,9 +674,9 @@ IRModule ExporterNode::ExportToIRModule(ModuleSpec spec, bool debug) {
   return mod;
 }
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // FFI registration
-// ===========================================================================
+// ---------------------------------------------------------------------------
 
 TVM_FFI_STATIC_INIT_BLOCK() {
   ExporterNode::RegisterReflection();
@@ -705,7 +688,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def("relax.frontend.nn.SetCurrentIOVar", SetCurrentIOVar)
       .def("relax.frontend.nn.Exporter", [](bool debug) { return Exporter(debug); })
 
-      // Thread-local Exporter accessor (mirrors BlockBuilder_Current/_SetCurrent)
+      // Thread-local Exporter accessor.
       .def("relax.frontend.nn.GetCurrentExporter",
            []() -> ffi::Optional<Exporter> { return Exporter_Current(); })
       .def("relax.frontend.nn.SetCurrentExporter",
@@ -718,7 +701,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
                Exporter_SetCurrent(nullptr);
              }
            })
-      // nn.add_extern: register an ExternModule with the current Exporter
+      // nn.add_extern: register an ExternModule with the current Exporter.
       .def("relax.frontend.nn.AddExtern", [](runtime::ObjectRef extern_mod) {
         auto e = Exporter_Current();
         TVM_FFI_ICHECK(e.has_value())
