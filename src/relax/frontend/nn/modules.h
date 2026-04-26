@@ -28,9 +28,10 @@
  *     natural C++ types.
  *
  * Each node exposes:
- *   - def_ro / def_rw fields for direct attribute access.
+ *   - def_ro / def_rw fields for direct attribute access from Python.
  *   - refl::init<...>() for construction via the FFI.
- *   - A Forward() method that emits relax ops and returns a relax::Var.
+ *   - A Forward() method that emits relax ops into the current BlockBuilder
+ *     and returns the output relax::Var.
  *
  * A companion Make* factory function per module handles shape arithmetic
  * (e.g. computing the weight shape for Conv2D) and returns the fully
@@ -58,8 +59,10 @@ namespace nn {
  * \brief Build an NNParameter from a shape specification and dtype string.
  *
  * Used by all Make* factory functions to create weight and bias parameters.
+ * Each element of \p shape may be int64 (static dimension), String
+ * (symbolic variable name), or PrimExpr.
  *
- * \param shape  Shape specification; each element is int64, String, or PrimExpr.
+ * \param shape  Shape specification array.
  * \param dtype  Data type string (e.g. "float32").
  * \return       A new unbound NNParameter.
  */
@@ -69,11 +72,14 @@ NNParameter MakeParam(ffi::Array<ffi::Any> shape, ffi::String dtype);
 // ReLU
 // ---------------------------------------------------------------------------
 
-/*! \brief Rectified linear unit activation. */
-
-/*! \brief Rectified linear unit activation. */
+/*! \brief Rectified linear unit activation: output = max(0, x). */
 class ReLUModuleNode : public NNModuleNode {
  public:
+  /*!
+   * \brief Apply ReLU element-wise.
+   * \param x  Input tensor.
+   * \return   Output tensor with negative values clamped to zero.
+   */
   Var Forward(Var x) const;
 
   static void RegisterReflection() {
@@ -93,9 +99,14 @@ class ReLUModule : public runtime::ObjectRef {
 // SiLU
 // ---------------------------------------------------------------------------
 
-/*! \brief Sigmoid linear unit activation. */
+/*! \brief Sigmoid linear unit activation: output = x * sigmoid(x). */
 class SiLUModuleNode : public NNModuleNode {
  public:
+  /*!
+   * \brief Apply SiLU element-wise.
+   * \param x  Input tensor.
+   * \return   Output tensor after applying x * sigmoid(x).
+   */
   Var Forward(Var x) const;
 
   static void RegisterReflection() {
@@ -115,13 +126,25 @@ class SiLUModule : public runtime::ObjectRef {
 // GELU
 // ---------------------------------------------------------------------------
 
-/*! \brief Gaussian error linear unit activation. */
+/*!
+ * \brief Gaussian error linear unit activation.
+ *
+ * Supports two approximation modes:
+ *   - ""     (empty string): exact GELU using the error function.
+ *   - "tanh": fast tanh approximation.
+ */
 class GELUModuleNode : public NNModuleNode {
  public:
-  /*! \brief Approximation method: "" for exact, "tanh" for tanh approximation. */
+  /*! \brief Approximation method: "" for exact erf-based GELU, "tanh" for tanh approximation. */
   ffi::String approximate;
 
   explicit GELUModuleNode(ffi::String approximate = "") : approximate(std::move(approximate)) {}
+
+  /*!
+   * \brief Apply GELU element-wise.
+   * \param x  Input tensor.
+   * \return   Output tensor after applying the GELU activation.
+   */
   Var Forward(Var x) const;
 
   static void RegisterReflection() {
@@ -144,20 +167,34 @@ class GELUModule : public runtime::ObjectRef {
 // Linear
 // ---------------------------------------------------------------------------
 
-/*! \brief Fully-connected linear transformation. */
+/*!
+ * \brief Fully-connected linear transformation: output = x @ weight^T + bias.
+ *
+ * Weight shape is [out_features, in_features]; bias shape is [out_features].
+ * When out_dtype is set the matmul accumulates in that dtype.
+ */
 class LinearModuleNode : public NNModuleNode {
  public:
   /*! \brief Weight matrix; shape [out_features, in_features]. */
   NNParameter weight;
   /*! \brief Bias vector; shape [out_features], or nullopt when bias=False. */
   ffi::Optional<NNParameter> bias;
-  /*! \brief Optional output dtype override. */
+  /*! \brief Optional output dtype override for the matmul accumulator. */
   ffi::Optional<ffi::String> out_dtype;
 
   LinearModuleNode(NNParameter weight, ffi::Optional<NNParameter> bias,
                    ffi::Optional<ffi::String> out_dtype)
       : weight(std::move(weight)), bias(std::move(bias)), out_dtype(std::move(out_dtype)) {}
 
+  /*!
+   * \brief Apply the linear transformation.
+   *
+   * Emits permute_dims(weight) followed by matmul(x, w_T), then adds
+   * the bias if present.
+   *
+   * \param x  Input tensor of shape [..., in_features].
+   * \return   Output tensor of shape [..., out_features].
+   */
   Var Forward(Var x) const;
 
   static void RegisterReflection() {
@@ -181,11 +218,11 @@ class LinearModule : public runtime::ObjectRef {
 /*!
  * \brief Factory: create a Linear module with the given dimensions.
  *
- * \param in_features   Input feature count (int64 or symbolic).
- * \param out_features  Output feature count (int64 or symbolic).
+ * \param in_features   Input feature count (int64 or symbolic PrimExpr).
+ * \param out_features  Output feature count (int64 or symbolic PrimExpr).
  * \param bias          Whether to include a bias parameter.
- * \param dtype         Weight dtype; defaults to the current default dtype.
- * \param out_dtype     Optional output dtype override.
+ * \param dtype         Weight dtype; defaults to the current default dtype when nullopt.
+ * \param out_dtype     Optional output dtype override for the matmul accumulator.
  * \return              A fully constructed LinearModule.
  */
 LinearModule MakeLinear(ffi::Any in_features, ffi::Any out_features, bool bias,
@@ -195,13 +232,29 @@ LinearModule MakeLinear(ffi::Any in_features, ffi::Any out_features, bool bias,
 // Embedding
 // ---------------------------------------------------------------------------
 
-/*! \brief Lookup-table embedding layer. */
+/*!
+ * \brief Lookup-table embedding layer.
+ *
+ * Maps integer indices to dense vectors by indexing into a weight table
+ * of shape [num_embeddings, embedding_dim].
+ */
 class EmbeddingModuleNode : public NNModuleNode {
  public:
-  /*! \brief Embedding table; shape [num_embeddings, embedding_dim]. */
+  /*! \brief Embedding weight table; shape [num_embeddings, embedding_dim]. */
   NNParameter weight;
 
   explicit EmbeddingModuleNode(NNParameter weight) : weight(std::move(weight)) {}
+
+  /*!
+   * \brief Look up embeddings for the given indices.
+   *
+   * When \p out_shape_if_nd is non-empty the input is first flattened,
+   * looked up, then reshaped to \p out_shape_if_nd.
+   *
+   * \param x               Integer index tensor.
+   * \param out_shape_if_nd Target output shape for N-D inputs; empty for 1-D.
+   * \return                Embedding tensor of shape [..., embedding_dim].
+   */
   Var Forward(Var x, ffi::Array<ffi::Any> out_shape_if_nd) const;
 
   static void RegisterReflection() {
@@ -224,9 +277,9 @@ class EmbeddingModule : public runtime::ObjectRef {
 /*!
  * \brief Factory: create an Embedding module.
  *
- * \param num    Vocabulary size (int64 or symbolic).
- * \param dim    Embedding dimension (int64 or symbolic).
- * \param dtype  Weight dtype; defaults to the current default dtype.
+ * \param num    Vocabulary size (int64 or symbolic PrimExpr).
+ * \param dim    Embedding dimension (int64 or symbolic PrimExpr).
+ * \param dtype  Weight dtype; defaults to the current default dtype when nullopt.
  * \return       A fully constructed EmbeddingModule.
  */
 EmbeddingModule MakeEmbedding(ffi::Any num, ffi::Any dim, ffi::Optional<ffi::String> dtype);
@@ -235,16 +288,23 @@ EmbeddingModule MakeEmbedding(ffi::Any num, ffi::Any dim, ffi::Optional<ffi::Str
 // LayerNorm
 // ---------------------------------------------------------------------------
 
-/*! \brief Layer normalisation over the last N dimensions. */
+/*!
+ * \brief Layer normalisation over the last N dimensions.
+ *
+ * Normalises the input over the axes specified by \p axes, then applies
+ * an optional learnable affine transformation (gamma scale + beta shift).
+ */
 class LayerNormModuleNode : public NNModuleNode {
  public:
   /*! \brief Scale parameter (gamma); nullopt when elementwise_affine=False. */
   ffi::Optional<NNParameter> weight;
   /*! \brief Shift parameter (beta); nullopt when elementwise_affine=False. */
   ffi::Optional<NNParameter> bias;
-  /*! \brief Normalisation axes (negative indices). */
+  /*! \brief Normalisation axes (typically negative indices, e.g. [-1]). */
   ffi::Array<Integer> axes;
+  /*! \brief Small constant added to the denominator for numerical stability. */
   double epsilon;
+  /*! \brief Whether learnable affine parameters are included. */
   bool elementwise_affine;
 
   LayerNormModuleNode(ffi::Optional<NNParameter> weight, ffi::Optional<NNParameter> bias,
@@ -255,6 +315,11 @@ class LayerNormModuleNode : public NNModuleNode {
         epsilon(epsilon),
         elementwise_affine(elementwise_affine) {}
 
+  /*!
+   * \brief Apply layer normalisation.
+   * \param x  Input tensor.
+   * \return   Normalised (and optionally affine-transformed) output tensor.
+   */
   Var Forward(Var x) const;
 
   static void RegisterReflection() {
@@ -283,10 +348,10 @@ class LayerNormModule : public runtime::ObjectRef {
 /*!
  * \brief Factory: create a LayerNorm module.
  *
- * \param normalized_shape  int64 or Array<Any> of the normalised dimensions.
- * \param eps               Epsilon for numerical stability.
+ * \param normalized_shape  int64 scalar or Array<Any> of the normalised dimensions.
+ * \param eps               Small constant for numerical stability.
  * \param elementwise_affine  Whether to include learnable affine parameters.
- * \param dtype             Parameter dtype; defaults to the current default dtype.
+ * \param dtype             Parameter dtype; defaults to the current default dtype when nullopt.
  * \return                  A fully constructed LayerNormModule.
  */
 LayerNormModule MakeLayerNorm(ffi::Any normalized_shape, double eps, bool elementwise_affine,
@@ -296,21 +361,32 @@ LayerNormModule MakeLayerNorm(ffi::Any normalized_shape, double eps, bool elemen
 // RMSNorm
 // ---------------------------------------------------------------------------
 
-/*! \brief Root-mean-square layer normalisation. */
+/*!
+ * \brief Root-mean-square layer normalisation.
+ *
+ * Normalises the input by its RMS over the specified axes, then scales
+ * by a learnable weight.  Unlike LayerNorm there is no mean subtraction.
+ */
 class RMSNormModuleNode : public NNModuleNode {
  public:
-  /*! \brief Scale parameter. */
+  /*! \brief Learnable scale parameter. */
   NNParameter weight;
-  /*! \brief Optional bias parameter. */
+  /*! \brief Optional learnable bias parameter. */
   ffi::Optional<NNParameter> bias;
   /*! \brief Normalisation axes. */
   ffi::Array<Integer> axes;
+  /*! \brief Small constant added to the denominator for numerical stability. */
   double epsilon;
 
   RMSNormModuleNode(NNParameter weight, ffi::Optional<NNParameter> bias, ffi::Array<Integer> axes,
                     double epsilon)
       : weight(std::move(weight)), bias(std::move(bias)), axes(std::move(axes)), epsilon(epsilon) {}
 
+  /*!
+   * \brief Apply RMS normalisation.
+   * \param x  Input tensor.
+   * \return   RMS-normalised and scaled (and optionally biased) output tensor.
+   */
   Var Forward(Var x) const;
 
   static void RegisterReflection() {
@@ -336,11 +412,11 @@ class RMSNormModule : public runtime::ObjectRef {
 /*!
  * \brief Factory: create an RMSNorm module.
  *
- * \param hidden_size  Hidden dimension size (int64 or symbolic).
+ * \param hidden_size  Hidden dimension size (int64 or symbolic PrimExpr).
  * \param axes         Normalisation axes.
- * \param epsilon      Epsilon for numerical stability.
- * \param has_bias     Whether to include a bias parameter.
- * \param dtype        Parameter dtype; defaults to the current default dtype.
+ * \param epsilon      Small constant for numerical stability.
+ * \param has_bias     Whether to include a learnable bias parameter.
+ * \param dtype        Parameter dtype; defaults to the current default dtype when nullopt.
  * \return             A fully constructed RMSNormModule.
  */
 RMSNormModule MakeRMSNorm(ffi::Any hidden_size, ffi::Array<Integer> axes, double epsilon,
@@ -350,14 +426,22 @@ RMSNormModule MakeRMSNorm(ffi::Any hidden_size, ffi::Array<Integer> axes, double
 // GroupNorm
 // ---------------------------------------------------------------------------
 
-/*! \brief Group normalisation. */
+/*!
+ * \brief Group normalisation.
+ *
+ * Divides the channels into \p num_groups groups and normalises each
+ * group independently, then applies an optional learnable affine
+ * transformation.
+ */
 class GroupNormModuleNode : public NNModuleNode {
  public:
+  /*! \brief Number of channel groups. */
   int64_t num_groups;
-  /*! \brief Scale parameter; nullopt when affine=False. */
+  /*! \brief Learnable scale parameter; nullopt when affine=False. */
   ffi::Optional<NNParameter> weight;
-  /*! \brief Bias parameter; nullopt when affine=False. */
+  /*! \brief Learnable bias parameter; nullopt when affine=False. */
   ffi::Optional<NNParameter> bias;
+  /*! \brief Small constant added to the denominator for numerical stability. */
   double epsilon;
 
   GroupNormModuleNode(int64_t num_groups, ffi::Optional<NNParameter> weight,
@@ -367,6 +451,14 @@ class GroupNormModuleNode : public NNModuleNode {
         bias(std::move(bias)),
         epsilon(epsilon) {}
 
+  /*!
+   * \brief Apply group normalisation.
+   *
+   * \param x             Input tensor.
+   * \param channel_axis  Axis index of the channel dimension.
+   * \param axes          Axes over which to compute the group statistics.
+   * \return              Normalised (and optionally affine-transformed) output tensor.
+   */
   Var Forward(Var x, int64_t channel_axis, ffi::Array<Integer> axes) const;
 
   static void RegisterReflection() {
@@ -393,11 +485,11 @@ class GroupNormModule : public runtime::ObjectRef {
 /*!
  * \brief Factory: create a GroupNorm module.
  *
- * \param num_groups   Number of groups.
- * \param num_channels Channel count (int64 or symbolic).
- * \param eps          Epsilon for numerical stability.
+ * \param num_groups   Number of channel groups.
+ * \param num_channels Channel count (int64 or symbolic PrimExpr).
+ * \param eps          Small constant for numerical stability.
  * \param affine       Whether to include learnable affine parameters.
- * \param dtype        Parameter dtype; defaults to the current default dtype.
+ * \param dtype        Parameter dtype; defaults to the current default dtype when nullopt.
  * \return             A fully constructed GroupNormModule.
  */
 GroupNormModule MakeGroupNorm(int64_t num_groups, ffi::Any num_channels, double eps, bool affine,
@@ -407,12 +499,26 @@ GroupNormModule MakeGroupNorm(int64_t num_groups, ffi::Any num_channels, double 
 // Conv1D
 // ---------------------------------------------------------------------------
 
-/*! \brief 1-D convolution. */
+/*!
+ * \brief 1-D convolution over a sequence of shape [N, C_in, L].
+ *
+ * Weight shape is [C_out, C_in/groups, kW].  An optional bias of shape
+ * [C_out] is broadcast-added after the convolution.
+ */
 class Conv1DModuleNode : public NNModuleNode {
  public:
+  /*! \brief Convolution weight; shape [C_out, C_in/groups, kW]. */
   NNParameter weight;
+  /*! \brief Optional bias; shape [C_out], or nullopt when bias=False. */
   ffi::Optional<NNParameter> bias;
-  int64_t stride, padding, dilation, groups;
+  /*! \brief Stride along the length dimension. */
+  int64_t stride;
+  /*! \brief Zero-padding added to both sides of the input. */
+  int64_t padding;
+  /*! \brief Dilation factor for the kernel. */
+  int64_t dilation;
+  /*! \brief Number of blocked connections from input to output channels. */
+  int64_t groups;
 
   Conv1DModuleNode(NNParameter weight, ffi::Optional<NNParameter> bias, int64_t stride,
                    int64_t padding, int64_t dilation, int64_t groups)
@@ -423,6 +529,11 @@ class Conv1DModuleNode : public NNModuleNode {
         dilation(dilation),
         groups(groups) {}
 
+  /*!
+   * \brief Apply 1-D convolution.
+   * \param x  Input tensor of shape [N, C_in, L].
+   * \return   Output tensor of shape [N, C_out, L_out].
+   */
   Var Forward(Var x) const;
 
   static void RegisterReflection() {
@@ -447,7 +558,20 @@ class Conv1DModule : public runtime::ObjectRef {
                         int64_t padding, int64_t dilation, int64_t groups);
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(Conv1DModule, runtime::ObjectRef, Conv1DModuleNode);
 };
-/*! \brief Factory: create a Conv1D module with the given dimensions. */
+/*!
+ * \brief Factory: create a Conv1D module with the given dimensions.
+ *
+ * \param in_channels   Number of input channels (int64 or symbolic).
+ * \param out_channels  Number of output channels (int64 or symbolic).
+ * \param kernel_size   Kernel width (int64 or symbolic).
+ * \param stride        Stride along the length dimension.
+ * \param padding       Zero-padding added to both sides.
+ * \param dilation      Kernel dilation factor.
+ * \param groups        Number of blocked channel connections.
+ * \param has_bias      Whether to include a bias parameter.
+ * \param dtype         Weight dtype; defaults to the current default dtype when nullopt.
+ * \return              A fully constructed Conv1DModule.
+ */
 Conv1DModule MakeConv1D(ffi::Any in_channels, ffi::Any out_channels, ffi::Any kernel_size,
                         int64_t stride, int64_t padding, int64_t dilation, int64_t groups,
                         bool has_bias, ffi::Optional<ffi::String> dtype);
@@ -456,12 +580,28 @@ Conv1DModule MakeConv1D(ffi::Any in_channels, ffi::Any out_channels, ffi::Any ke
 // Conv2D
 // ---------------------------------------------------------------------------
 
-/*! \brief 2-D convolution. */
+/*!
+ * \brief 2-D convolution over a spatial feature map.
+ *
+ * Supports both NCHW and NHWC data layouts.  Weight shape is
+ * [C_out, C_in/groups, kH, kW] for NCHW (OIHW kernel layout) and
+ * [C_out, C_in/groups, kH, kW] for NHWC (HWIO kernel layout).
+ */
 class Conv2DModuleNode : public NNModuleNode {
  public:
+  /*! \brief Convolution weight. */
   NNParameter weight;
+  /*! \brief Optional bias; shape [C_out], or nullopt when bias=False. */
   ffi::Optional<NNParameter> bias;
-  int64_t stride, padding, dilation, groups;
+  /*! \brief Stride along the spatial dimensions. */
+  int64_t stride;
+  /*! \brief Zero-padding added to all spatial sides. */
+  int64_t padding;
+  /*! \brief Kernel dilation factor. */
+  int64_t dilation;
+  /*! \brief Number of blocked channel connections. */
+  int64_t groups;
+  /*! \brief Data layout string: "NCHW" or "NHWC". */
   ffi::String data_layout;
 
   Conv2DModuleNode(NNParameter weight, ffi::Optional<NNParameter> bias, int64_t stride,
@@ -474,6 +614,11 @@ class Conv2DModuleNode : public NNModuleNode {
         groups(groups),
         data_layout(std::move(data_layout)) {}
 
+  /*!
+   * \brief Apply 2-D convolution.
+   * \param x  Input tensor of shape [N, C_in, H, W] (NCHW) or [N, H, W, C_in] (NHWC).
+   * \return   Output tensor of shape [N, C_out, H_out, W_out] or [N, H_out, W_out, C_out].
+   */
   Var Forward(Var x) const;
 
   static void RegisterReflection() {
@@ -499,7 +644,21 @@ class Conv2DModule : public runtime::ObjectRef {
                         int64_t padding, int64_t dilation, int64_t groups, ffi::String data_layout);
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(Conv2DModule, runtime::ObjectRef, Conv2DModuleNode);
 };
-/*! \brief Factory: create a Conv2D module; expands scalar kernel_size to [kH, kW]. */
+/*!
+ * \brief Factory: create a Conv2D module; expands a scalar kernel_size to [kH, kW].
+ *
+ * \param in_channels   Number of input channels (int64 or symbolic).
+ * \param out_channels  Number of output channels (int64 or symbolic).
+ * \param kernel_size   Kernel spatial size as [kH, kW].
+ * \param stride        Stride along the spatial dimensions.
+ * \param padding       Zero-padding added to all spatial sides.
+ * \param dilation      Kernel dilation factor.
+ * \param groups        Number of blocked channel connections.
+ * \param has_bias      Whether to include a bias parameter.
+ * \param dtype         Weight dtype; defaults to the current default dtype when nullopt.
+ * \param data_layout   Data layout string: "NCHW" or "NHWC".
+ * \return              A fully constructed Conv2DModule.
+ */
 Conv2DModule MakeConv2D(ffi::Any in_channels, ffi::Any out_channels,
                         ffi::Array<Integer> kernel_size, int64_t stride, int64_t padding,
                         int64_t dilation, int64_t groups, bool has_bias,
@@ -509,12 +668,27 @@ Conv2DModule MakeConv2D(ffi::Any in_channels, ffi::Any out_channels,
 // Conv3D
 // ---------------------------------------------------------------------------
 
-/*! \brief 3-D convolution. */
+/*!
+ * \brief 3-D convolution over a volumetric feature map.
+ *
+ * Supports NCDHW and NDHWC data layouts.  Weight shape is
+ * [C_out, C_in/groups, kD, kH, kW] (OIDHW kernel layout).
+ */
 class Conv3DModuleNode : public NNModuleNode {
  public:
+  /*! \brief Convolution weight. */
   NNParameter weight;
+  /*! \brief Optional bias; shape [C_out], or nullopt when bias=False. */
   ffi::Optional<NNParameter> bias;
-  int64_t stride, padding, dilation, groups;
+  /*! \brief Stride along the volumetric dimensions. */
+  int64_t stride;
+  /*! \brief Zero-padding added to all volumetric sides. */
+  int64_t padding;
+  /*! \brief Kernel dilation factor. */
+  int64_t dilation;
+  /*! \brief Number of blocked channel connections. */
+  int64_t groups;
+  /*! \brief Data layout string: "NCDHW" or "NDHWC". */
   ffi::String data_layout;
 
   Conv3DModuleNode(NNParameter weight, ffi::Optional<NNParameter> bias, int64_t stride,
@@ -527,6 +701,11 @@ class Conv3DModuleNode : public NNModuleNode {
         groups(groups),
         data_layout(std::move(data_layout)) {}
 
+  /*!
+   * \brief Apply 3-D convolution.
+   * \param x  Input tensor of shape [N, C_in, D, H, W] (NCDHW) or [N, D, H, W, C_in] (NDHWC).
+   * \return   Output tensor of shape [N, C_out, D_out, H_out, W_out] or equivalent.
+   */
   Var Forward(Var x) const;
 
   static void RegisterReflection() {
@@ -552,7 +731,21 @@ class Conv3DModule : public runtime::ObjectRef {
                         int64_t padding, int64_t dilation, int64_t groups, ffi::String data_layout);
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(Conv3DModule, runtime::ObjectRef, Conv3DModuleNode);
 };
-/*! \brief Factory: create a Conv3D module; expands scalar kernel_size to [kD, kH, kW]. */
+/*!
+ * \brief Factory: create a Conv3D module; expands a scalar kernel_size to [kD, kH, kW].
+ *
+ * \param in_channels   Number of input channels (int64 or symbolic).
+ * \param out_channels  Number of output channels (int64 or symbolic).
+ * \param kernel_size   Kernel volumetric size as [kD, kH, kW].
+ * \param stride        Stride along the volumetric dimensions.
+ * \param padding       Zero-padding added to all volumetric sides.
+ * \param dilation      Kernel dilation factor.
+ * \param groups        Number of blocked channel connections.
+ * \param has_bias      Whether to include a bias parameter.
+ * \param dtype         Weight dtype; defaults to the current default dtype when nullopt.
+ * \param data_layout   Data layout string: "NCDHW" or "NDHWC".
+ * \return              A fully constructed Conv3DModule.
+ */
 Conv3DModule MakeConv3D(ffi::Any in_channels, ffi::Any out_channels,
                         ffi::Array<Integer> kernel_size, int64_t stride, int64_t padding,
                         int64_t dilation, int64_t groups, bool has_bias,
@@ -562,12 +755,29 @@ Conv3DModule MakeConv3D(ffi::Any in_channels, ffi::Any out_channels,
 // ConvTranspose1D
 // ---------------------------------------------------------------------------
 
-/*! \brief 1-D transposed convolution. */
+/*!
+ * \brief 1-D transposed convolution (fractionally-strided convolution).
+ *
+ * Computes the gradient of a Conv1D with respect to its input, effectively
+ * upsampling the sequence.  Weight shape is [C_in, C_out/groups, kW] (IOW
+ * kernel layout).
+ */
 class ConvTranspose1DModuleNode : public NNModuleNode {
  public:
+  /*! \brief Transposed convolution weight; shape [C_in, C_out/groups, kW]. */
   NNParameter weight;
+  /*! \brief Optional bias; shape [C_out], or nullopt when bias=False. */
   ffi::Optional<NNParameter> bias;
-  int64_t stride, padding, output_padding, dilation, groups;
+  /*! \brief Stride (upsampling factor). */
+  int64_t stride;
+  /*! \brief Input zero-padding (removed from output). */
+  int64_t padding;
+  /*! \brief Additional output padding to resolve output size ambiguity. */
+  int64_t output_padding;
+  /*! \brief Kernel dilation factor. */
+  int64_t dilation;
+  /*! \brief Number of blocked channel connections. */
+  int64_t groups;
 
   ConvTranspose1DModuleNode(NNParameter weight, ffi::Optional<NNParameter> bias, int64_t stride,
                             int64_t padding, int64_t output_padding, int64_t dilation,
@@ -580,6 +790,11 @@ class ConvTranspose1DModuleNode : public NNModuleNode {
         dilation(dilation),
         groups(groups) {}
 
+  /*!
+   * \brief Apply 1-D transposed convolution.
+   * \param x  Input tensor of shape [N, C_in, L].
+   * \return   Output tensor of shape [N, C_out, L_out].
+   */
   Var Forward(Var x) const;
 
   static void RegisterReflection() {
@@ -608,7 +823,21 @@ class ConvTranspose1DModule : public runtime::ObjectRef {
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(ConvTranspose1DModule, runtime::ObjectRef,
                                                 ConvTranspose1DModuleNode);
 };
-/*! \brief Factory: create a ConvTranspose1D module. */
+/*!
+ * \brief Factory: create a ConvTranspose1D module.
+ *
+ * \param in_channels    Number of input channels (int64 or symbolic).
+ * \param out_channels   Number of output channels (int64 or symbolic).
+ * \param kernel_size    Kernel width (int64 or symbolic).
+ * \param stride         Stride (upsampling factor).
+ * \param padding        Input zero-padding (removed from output).
+ * \param output_padding Additional output padding to resolve size ambiguity.
+ * \param dilation       Kernel dilation factor.
+ * \param groups         Number of blocked channel connections.
+ * \param has_bias       Whether to include a bias parameter.
+ * \param dtype          Weight dtype; defaults to the current default dtype when nullopt.
+ * \return               A fully constructed ConvTranspose1DModule.
+ */
 ConvTranspose1DModule MakeConvTranspose1D(ffi::Any in_channels, ffi::Any out_channels,
                                           ffi::Any kernel_size, int64_t stride, int64_t padding,
                                           int64_t output_padding, int64_t dilation, int64_t groups,
@@ -618,9 +847,14 @@ ConvTranspose1DModule MakeConvTranspose1D(ffi::Any in_channels, ffi::Any out_cha
 // Identity
 // ---------------------------------------------------------------------------
 
-/*! \brief Identity pass-through module. */
+/*! \brief Identity pass-through module: output = input, no parameters. */
 class IdentityModuleNode : public NNModuleNode {
  public:
+  /*!
+   * \brief Return the input unchanged.
+   * \param x  Input tensor.
+   * \return   The same tensor \p x.
+   */
   Var Forward(Var x) const;
 
   static void RegisterReflection() {
@@ -659,13 +893,43 @@ class IdentityModule : public runtime::ObjectRef {
  */
 class EffectNode : public NNModuleNode {
  public:
-  /*! \brief Emit the initialisation expression into \p bb; return the state Vars. */
+  /*!
+   * \brief Emit the initialisation expression into \p bb.
+   *
+   * Called once per export to create the initial effect state objects.
+   *
+   * \param name_hint  Name hint for the emitted binding.
+   * \param bb         The active BlockBuilder.
+   * \return           Array of Vars representing the initial effect state.
+   */
   virtual ffi::Array<Var> EmitInit(ffi::String name_hint, BlockBuilder bb) const = 0;
-  /*! \brief Create placeholder state Vars and store them internally. */
+
+  /*!
+   * \brief Create placeholder state Vars and store them internally.
+   *
+   * Called by the exporter to allocate function-argument Vars for the
+   * effect state before the dataflow block is opened.
+   *
+   * \param name_hint  Name hint for the created Vars.
+   * \return           Array of newly created placeholder Vars.
+   */
   virtual ffi::Array<Var> Create(ffi::String name_hint) = 0;
-  /*! \brief Restore internal state from previously created Vars. */
+
+  /*!
+   * \brief Restore internal state from previously created Vars.
+   *
+   * \param state_vars  Vars produced by a prior call to Create().
+   */
   virtual void SetState(ffi::Array<Var> state_vars) = 0;
-  /*! \brief Return the current state Vars and clear internal state. */
+
+  /*!
+   * \brief Return the current state Vars and clear internal state.
+   *
+   * Called after the dataflow block is closed to collect the final
+   * effect outputs for the function return value.
+   *
+   * \return  Array of current state Vars.
+   */
   virtual ffi::Array<Var> Finalize() = 0;
 
   static void RegisterReflection() {
@@ -781,11 +1045,20 @@ class KVCacheModule : public runtime::ObjectRef {
 // Timesteps
 // ---------------------------------------------------------------------------
 
-/*! \brief Sinusoidal timestep embedding module. */
+/*!
+ * \brief Sinusoidal timestep embedding module.
+ *
+ * Converts a scalar timestep tensor into a sinusoidal positional embedding
+ * of dimension \p num_channels, following the formulation used in DDPM and
+ * related diffusion models.
+ */
 class TimestepsModuleNode : public NNModuleNode {
  public:
+  /*! \brief Output embedding dimension (must be even unless padding is applied). */
   int64_t num_channels;
+  /*! \brief If true, concatenate [cos, sin] instead of [sin, cos]. */
   bool flip_sin_to_cos;
+  /*! \brief Frequency downscale shift applied before exponentiation. */
   double downscale_freq_shift;
 
   TimestepsModuleNode(int64_t num_channels, bool flip_sin_to_cos, double downscale_freq_shift)
@@ -793,6 +1066,11 @@ class TimestepsModuleNode : public NNModuleNode {
         flip_sin_to_cos(flip_sin_to_cos),
         downscale_freq_shift(downscale_freq_shift) {}
 
+  /*!
+   * \brief Compute the sinusoidal timestep embedding.
+   * \param x  1-D integer timestep tensor of shape [N].
+   * \return   Embedding tensor of shape [N, num_channels].
+   */
   Var Forward(Var x) const;
 
   static void RegisterReflection() {
@@ -819,13 +1097,23 @@ class TimestepsModule : public runtime::ObjectRef {
 // TimestepEmbedding
 // ---------------------------------------------------------------------------
 
-/*! \brief Two-layer MLP that projects timestep embeddings. */
+/*!
+ * \brief Two-layer MLP that projects sinusoidal timestep embeddings.
+ *
+ * Architecture: linear_1 → act → (optional cond_proj added) → linear_2 → (optional post_act).
+ * Mirrors the HuggingFace Diffusers TimestepEmbedding class.
+ */
 class TimestepEmbeddingModuleNode : public NNModuleNode {
  public:
+  /*! \brief First linear projection. */
   LinearModule linear_1;
+  /*! \brief Optional conditioning projection added after linear_1. */
   ffi::Optional<LinearModule> cond_proj;
+  /*! \brief Activation applied between the two linear layers. */
   SiLUModule act;
+  /*! \brief Second linear projection. */
   LinearModule linear_2;
+  /*! \brief Optional post-activation applied after linear_2. */
   ffi::Optional<SiLUModule> post_act;
 
   TimestepEmbeddingModuleNode(LinearModule linear_1, ffi::Optional<LinearModule> cond_proj,
@@ -837,6 +1125,13 @@ class TimestepEmbeddingModuleNode : public NNModuleNode {
         linear_2(std::move(linear_2)),
         post_act(std::move(post_act)) {}
 
+  /*!
+   * \brief Project the timestep embedding.
+   *
+   * \param sample     Input embedding tensor of shape [N, in_channels].
+   * \param condition  Optional conditioning tensor added after linear_1.
+   * \return           Output tensor of shape [N, time_embed_dim] (or out_dim if set).
+   */
   Var Forward(Var sample, ffi::Optional<Var> condition) const;
 
   static void RegisterReflection() {
@@ -863,6 +1158,17 @@ class TimestepEmbeddingModule : public runtime::ObjectRef {
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(TimestepEmbeddingModule, runtime::ObjectRef,
                                                 TimestepEmbeddingModuleNode);
 };
+/*!
+ * \brief Factory: create a TimestepEmbedding module.
+ *
+ * \param in_channels      Input embedding dimension.
+ * \param time_embed_dim   Hidden and default output dimension.
+ * \param act_fn           Activation function name (currently only "silu" is supported).
+ * \param out_dim          Optional output dimension override; defaults to time_embed_dim.
+ * \param post_act_fn      Optional post-activation function name; nullopt for none.
+ * \param cond_proj_dim    Optional conditioning projection input dimension; nullopt for none.
+ * \return                 A fully constructed TimestepEmbeddingModule.
+ */
 TimestepEmbeddingModule MakeTimestepEmbedding(int64_t in_channels, int64_t time_embed_dim,
                                               ffi::String act_fn, ffi::Optional<int64_t> out_dim,
                                               ffi::Optional<ffi::String> post_act_fn,
@@ -934,6 +1240,19 @@ class AttentionModule : public runtime::ObjectRef {
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(AttentionModule, runtime::ObjectRef,
                                                 AttentionModuleNode);
 };
+/*!
+ * \brief Factory: create an Attention module.
+ *
+ * \param query_dim            Dimension of the query input.
+ * \param cross_attention_dim  Key/value input dimension for cross-attention;
+ *                             nullopt for self-attention (uses query_dim).
+ * \param heads                Number of attention heads.
+ * \param dim_head             Dimension per attention head.
+ * \param bias                 Whether to include bias in the Q/K/V projections.
+ * \param norm_num_groups      If set, prepend a GroupNorm with this many groups.
+ * \param out_bias             Whether to include bias in the output projection.
+ * \return                     A fully constructed AttentionModule.
+ */
 AttentionModule MakeAttention(int64_t query_dim, ffi::Optional<int64_t> cross_attention_dim,
                               int64_t heads, int64_t dim_head, bool bias,
                               ffi::Optional<int64_t> norm_num_groups, bool out_bias);
