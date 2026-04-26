@@ -22,159 +22,158 @@ from . import core as nn
 
 
 class Mutator:
-    """The mutator for nn.Module transform. Users can override the `visit_*` methods
-    to apply transform in different structures, or even override the `visit` method
-    to change the logic of traversal."""
+    """The mutator for nn.Module transform. Users can override the ``visit_*``
+    methods to apply transforms in different structures, or override ``visit``
+    to change the traversal strategy entirely."""
 
     def visit_module(self, name: str, node: nn.Module) -> Any:
-        """The base visiting method for mutation of nn.Module nodes.
+        """Visit an nn.Module node.
 
         Parameters
         ----------
         name : str
-            The name of the current node in parent's attribute.
-
+            Dotted path of this node within its parent.
         node : nn.Module
-            The current node of nn.Module to mutate.
+            The module node to visit.
 
         Returns
-        ------
-        ret_node: Any
-            The new node to replace current node.
+        -------
+        ret_node : Any
+            The (possibly replaced) node.
         """
         return self.visit(name, node)
 
     def visit_effect(self, name: str, node: nn.Effect) -> Any:
-        """The base visiting method for mutation of nn.Effect nodes.
+        """Visit an nn.Effect node.
 
         Parameters
         ----------
         name : str
-            The name of the current node in parent's attribute.
-
+            Dotted path of this node within its parent.
         node : nn.Effect
-            The current node of nn.Effect to mutate.
+            The effect node to visit.
 
         Returns
-        ------
-        ret_node: Any
-            The new node to replace current node.
+        -------
+        ret_node : Any
+            The (possibly replaced) node.
         """
         return self.visit(name, node)
 
     def visit_param(self, name: str, node: nn.Parameter) -> Any:
-        """The base visiting method for mutation of nn.Parameter nodes.
+        """Visit an nn.Parameter node.
 
         Parameters
         ----------
         name : str
-            The name of the current node in parent's attribute.
-
+            Dotted path of this node within its parent.
         node : nn.Parameter
-            The current node of nn.Parameter to mutate.
+            The parameter to visit.
 
         Returns
-        ------
-        ret_node: Any
-            The new node to replace current node.
+        -------
+        ret_node : Any
+            The (possibly replaced) parameter.
         """
         return self.visit(name, node)
 
     def visit_moduledict(self, name: str, node: nn.ModuleDict) -> Any:
-        """The base visiting method for mutation of nn.ModuleDict nodes.
+        """Visit an nn.ModuleDict node.
 
         Parameters
         ----------
         name : str
-            The name of the current node in parent's attribute.
-
+            Dotted path of this node within its parent.
         node : nn.ModuleDict
-            The current node of nn.ModuleDict to mutate.
+            The ModuleDict to visit.
 
         Returns
-        ------
-        ret_node: Any
-            The new node to replace current node.
+        -------
+        ret_node : Any
+            The (possibly replaced) node.
         """
         return self.visit(name, node)
 
     def visit_modulelist(self, name: str, node: nn.ModuleList) -> Any:
-        """The base visiting method for mutation of nn.ModuleList nodes.
+        """Visit an nn.ModuleList node.
 
         Parameters
         ----------
         name : str
-            The name of the current node in parent's attribute.
-
+            Dotted path of this node within its parent.
         node : nn.ModuleList
-            The current node of nn.ModuleList to mutate.
+            The ModuleList to visit.
 
         Returns
-        ------
-        ret_node: Any
-            The new node to replace current node.
+        -------
+        ret_node : Any
+            The (possibly replaced) node.
         """
         return self.visit(name, node)
 
     def visit(self, name: str, node: Any) -> Any:
-        """The base dispatching method for visiting of all nodes.
+        """Dispatch driver: recurse into the module tree and call the
+        appropriate ``visit_*`` method for each child.
 
         Parameters
         ----------
         name : str
-            The name of the current node in parent's attribute.
-
+            Dotted path of *node* within its parent (pass ``""`` at root).
         node : Any
-            The current node to visit.
+            The node to visit.
 
         Returns
-        ------
-        ret_node: Any
-            The new node to replace current node.
+        -------
+        ret_node : Any
+            The (possibly mutated) node.
         """
 
         def _get_child_name(parent: str, child: str) -> str:
-            """Get the name of the child node/key given the parent's name."""
             if parent == "":
-                # in the top level of the module
                 return child
-            else:
-                return f"{parent}.{child}"
+            return f"{parent}.{child}"
+
+        _MODULEDICT_KEY = "relax.frontend.nn.ModuleDict"
+        _MODULELIST_KEY = "relax.frontend.nn.ModuleList"
+
+        def _type_key(value: Any) -> str | None:
+            get_key = getattr(value, "GetTypeKey", None)
+            if get_key is not None:
+                return get_key()
+            return None
+
+        def _dispatch(child_name: str, value: Any) -> Any:
+            key = _type_key(value)
+            if key == _MODULEDICT_KEY or isinstance(value, nn.ModuleDict):
+                return self.visit_moduledict(child_name, value)
+            if key == _MODULELIST_KEY or isinstance(value, nn.ModuleList):
+                return self.visit_modulelist(child_name, value)
+            if isinstance(value, nn.Effect):
+                return self.visit_effect(child_name, value)
+            if isinstance(value, nn.Parameter):
+                return self.visit_param(child_name, value)
+            if isinstance(value, nn.Module):
+                return self.visit_module(child_name, value)
+            return value
 
         if isinstance(node, nn.ModuleList):
             for i in range(len(node)):
-                if isinstance(node[i], nn.ModuleDict):
-                    node[i] = self.visit_moduledict(f"{name}.{i}", node[i])
-                elif isinstance(node[i], nn.ModuleList):
-                    node[i] = self.visit_modulelist(f"{name}.{i}", node[i])
-                elif isinstance(node[i], nn.Module):
-                    node[i] = self.visit_module(f"{name}.{i}", node[i])
-                elif isinstance(node[i], nn.Effect):
-                    node[i] = self.visit_effect(f"{name}.{i}", node[i])
-                elif isinstance(node[i], nn.Parameter):
-                    node[i] = self.visit_param(f"{name}.{i}", node[i])
+                child_name = _get_child_name(name, str(i))
+                old = node[i]
+                new = _dispatch(child_name, old)
+                if new is not old:
+                    node[i] = new
         elif isinstance(node, nn.ModuleDict):
             for k, v in node.items():
-                if isinstance(v, nn.ModuleDict):
-                    node[k] = self.visit_moduledict(_get_child_name(name, k), v)
-                elif isinstance(v, nn.ModuleList):
-                    node[k] = self.visit_modulelist(_get_child_name(name, k), v)
-                elif isinstance(v, nn.Module):
-                    node[k] = self.visit_module(_get_child_name(name, k), v)
-                elif isinstance(v, nn.Effect):
-                    node[k] = self.visit_effect(_get_child_name(name, k), v)
-                elif isinstance(v, nn.Parameter):
-                    node[k] = self.visit_param(_get_child_name(name, k), v)
-        else:
+                child_name = _get_child_name(name, k)
+                new = _dispatch(child_name, v)
+                if new is not v:
+                    node[k] = new
+        elif isinstance(node, nn.Module):
             for key, value in node.__dict__.items():
-                if isinstance(value, nn.ModuleDict):
-                    setattr(node, key, self.visit_moduledict(_get_child_name(name, key), value))
-                elif isinstance(value, nn.ModuleList):
-                    setattr(node, key, self.visit_modulelist(_get_child_name(name, key), value))
-                elif isinstance(value, nn.Module):
-                    setattr(node, key, self.visit_module(_get_child_name(name, key), value))
-                elif isinstance(value, nn.Effect):
-                    setattr(node, key, self.visit_effect(_get_child_name(name, key), value))
-                elif isinstance(value, nn.Parameter):
-                    setattr(node, key, self.visit_param(_get_child_name(name, key), value))
+                child_name = _get_child_name(name, key)
+                new = _dispatch(child_name, value)
+                if new is not value:
+                    setattr(node, key, new)
+        # Non-module values (int, str, etc.) are returned unchanged.
         return node

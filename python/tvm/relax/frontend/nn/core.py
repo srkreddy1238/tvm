@@ -622,7 +622,10 @@ class ModuleList(tvm_ffi.Object, SubroutineMixin):
         ffi_slots = []
         py_items = []
         for item in modules:
-            if isinstance(item, tvm_ffi.Object):
+            # ModuleList and ModuleDict carry Python-side state (_py_items_data /
+            # _py_modules_data) that does NOT survive an FFI round-trip.  Store
+            # them in the Python overlay even though they are tvm_ffi.Objects.
+            if isinstance(item, tvm_ffi.Object) and not isinstance(item, ModuleList | ModuleDict):
                 ffi_slots.append(item)
                 py_items.append(None)
             else:
@@ -652,7 +655,7 @@ class ModuleList(tvm_ffi.Object, SubroutineMixin):
 
     def _set(self, idx: int, module) -> None:
         py = self._py_items
-        if isinstance(module, tvm_ffi.Object):
+        if isinstance(module, tvm_ffi.Object) and not isinstance(module, ModuleList | ModuleDict):
             mods = list(self.modules)
             mods[idx] = module
             self.modules = mods
@@ -677,7 +680,7 @@ class ModuleList(tvm_ffi.Object, SubroutineMixin):
 
     def append(self, module) -> None:
         py = self._py_items
-        if isinstance(module, tvm_ffi.Object):
+        if isinstance(module, tvm_ffi.Object) and not isinstance(module, ModuleList | ModuleDict):
             mods = list(self.modules)
             mods.append(module)
             self.modules = mods
@@ -741,7 +744,9 @@ class ModuleDict(tvm_ffi.Object, SubroutineMixin):
         py_mods = OrderedDict()
         if modules:
             for k, v in modules.items():
-                if isinstance(v, tvm_ffi.Object):
+                # ModuleList and ModuleDict carry Python-side state that does NOT
+                # survive an FFI round-trip.  Store them in the Python overlay.
+                if isinstance(v, tvm_ffi.Object) and not isinstance(v, ModuleList | ModuleDict):
                     ffi_mods[k] = v
                 else:
                     py_mods[k] = v
@@ -777,7 +782,7 @@ class ModuleDict(tvm_ffi.Object, SubroutineMixin):
         return self.modules[key]
 
     def __setitem__(self, key: str, module) -> None:
-        if isinstance(module, tvm_ffi.Object):
+        if isinstance(module, tvm_ffi.Object) and not isinstance(module, ModuleList | ModuleDict):
             self._py_modules.pop(key, None)
             mods = dict(self.modules)
             mods[key] = module
