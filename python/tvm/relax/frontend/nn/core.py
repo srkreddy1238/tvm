@@ -14,24 +14,53 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-"""nn frontend core types.
+"""Core types for the nn module frontend.
 
-Native C++ objects (registered via tvm_ffi.register_object):
-  Tensor       - relax.Var wrapper with TensorStructInfo
-  Parameter    - Tensor subclass with optional data + attrs
-  Object       - relax.Var wrapper with ObjectStructInfo
-  ModuleList   - ordered list of sub-modules (ffi::Array<Any>)
-  ModuleDict   - ordered string-keyed map of sub-modules (ffi::Map<String,Any>)
+Native C++ objects (registered via ``tvm_ffi.register_object``):
 
-Pure Python (cannot be ported):
-  SubroutineMixin - uses __init_subclass__, inspect.signature, functools.wraps
-  Module          - forward() is Python-defined; export_tvm/jit use Python-only
-                    infrastructure (Exporter, spec, VirtualMachine)
-  Effect          - abstract base with Python virtual dispatch
+  Tensor
+      Wraps a ``relax.Var`` with ``TensorStructInfo``.  Exposes ``shape``,
+      ``ndim``, and ``dtype`` as read-only properties and inherits all
+      operator overloads from ``_TensorOp``.
 
-Module data-management methods (named_parameters, state_dict, load_state_dict,
-to) delegate to C++ FFI helpers that traverse both Python __dict__ and native
-C++ field metadata, so no traversal logic lives in Python.
+  Parameter
+      Extends ``Tensor`` with an optional concrete ``data`` buffer
+      (``tvm.runtime.Tensor``) and a string-keyed ``attrs`` map for
+      quantisation metadata and similar annotations.
+
+  Object
+      Wraps a ``relax.Var`` with ``ObjectStructInfo``.  Used for opaque
+      runtime handles such as KVCache.
+
+  ModuleList
+      Ordered list of sub-modules backed by a native C++ ``ffi::Array<Any>``.
+      Pure-Python items are kept in a Python-side ``_py_items`` list with
+      ``None`` sentinels in the C++ array.
+
+  ModuleDict
+      Ordered string-keyed map of sub-modules backed by a native C++
+      ``ffi::Map<String,Any>``.  Pure-Python items are kept in a Python-side
+      ``_py_modules`` ``OrderedDict``.
+
+Pure Python (cannot be ported to C++):
+
+  SubroutineMixin
+      Uses ``__init_subclass__``, ``inspect.signature``, and
+      ``functools.wraps`` — all Python-only metaprogramming.
+
+  Module
+      ``forward()`` is defined by Python subclasses and dispatched via the
+      Python MRO.  ``export_tvm`` / ``jit`` depend on ``Exporter``, ``spec``,
+      and ``VirtualMachine`` — all Python-only orchestration.
+
+  Effect
+      Abstract base with Python virtual dispatch (``emit_init``, ``create``,
+      ``set_state``, ``finalize``).
+
+Data-management methods (``named_parameters``, ``state_dict``,
+``load_state_dict``, ``to``) delegate to C++ FFI helpers that traverse both
+Python ``__dict__`` and native C++ field metadata, so no traversal logic
+lives in Python.
 """
 
 from collections import OrderedDict
@@ -72,12 +101,24 @@ from . import _ffi_api
 
 
 def get_default_dtype() -> str:
-    """Return the current default parameter dtype (default: float32)."""
+    """Return the current thread-local default parameter dtype.
+
+    Returns
+    -------
+    dtype : str
+        The current default dtype string, e.g. ``"float32"``.
+    """
     return str(_ffi_api.GetDefaultDtype())
 
 
 def set_default_dtype(dtype: str) -> None:
-    """Set the default parameter dtype."""
+    """Set the thread-local default parameter dtype.
+
+    Parameters
+    ----------
+    dtype : str
+        New default dtype string, e.g. ``"float16"``.
+    """
     _ffi_api.SetDefaultDtype(dtype)
 
 
@@ -91,10 +132,12 @@ def set_default_dtype(dtype: str) -> None:
 
 
 class _ConstTensor(_TensorOp):
-    """Python-only Tensor wrapper for relax.Constant values.
+    """Python-only ``Tensor`` wrapper for ``relax.Constant`` values.
 
-    Holds the Constant expr directly so it can be passed inline to ops
-    without being emitted as a standalone dataflow binding.
+    Holds the ``Constant`` expression directly so it can be passed inline
+    to op calls (e.g. ``R.full`` fill_value) without being emitted as a
+    separate dataflow binding.  Created by :meth:`Tensor.from_const` and
+    :meth:`Tensor.from_scalar`.
     """
 
     def __init__(self, const_expr: rx.Constant) -> None:
@@ -141,21 +184,68 @@ class _ConstTensor(_TensorOp):
 
 @tvm_ffi.register_object("relax.frontend.nn.Tensor")
 class Tensor(_TensorOp):
-    """Symbolic tensor backed by a relax.Var with TensorStructInfo."""
+    """Symbolic tensor backed by a ``relax.Var`` with ``TensorStructInfo``.
+
+    All operator overloads (``+``, ``-``, ``*``, ``/``, ``@``, indexing,
+    etc.) are inherited from :class:`_TensorOp`.  The underlying relax
+    expression is accessible via the ``_expr`` property.
+    """
 
     def __init__(self, *, _expr: rx.Var) -> None:
         self.__ffi_init__(_expr)
 
     @staticmethod
     def from_const(data) -> "Tensor":
+        """Create a constant ``Tensor`` from a numpy-compatible array.
+
+        The constant is held inline and not emitted as a dataflow binding.
+
+        Parameters
+        ----------
+        data :
+            Any value accepted by ``relax.const`` (numpy array, scalar, etc.).
+
+        Returns
+        -------
+        tensor : Tensor
+            A :class:`_ConstTensor` wrapping the constant expression.
+        """
         return _ConstTensor(rx.const(data))
 
     @staticmethod
     def from_scalar(data: int | float, dtype: str) -> "Tensor":
+        """Create a scalar constant ``Tensor``.
+
+        Parameters
+        ----------
+        data : int | float
+            The scalar value.
+        dtype : str
+            Data type string, e.g. ``"float32"``.
+
+        Returns
+        -------
+        tensor : Tensor
+            A :class:`_ConstTensor` wrapping the scalar constant.
+        """
         return _ConstTensor(rx.const(data, dtype=dtype))
 
     @staticmethod
     def from_struct_info(struct_info: rx.TensorStructInfo, name: str = "tensor") -> "Tensor":
+        """Create a placeholder ``Tensor`` from an existing ``TensorStructInfo``.
+
+        Parameters
+        ----------
+        struct_info : relax.TensorStructInfo
+            The struct info to use for the new ``relax.Var``.
+        name : str
+            Name hint for the created ``Var``.
+
+        Returns
+        -------
+        tensor : Tensor
+            A new ``Tensor`` owning the created ``Var``.
+        """
         return Tensor(_expr=_ffi_api.MakeTensorFromStructInfo(struct_info, name))
 
     @staticmethod
@@ -164,6 +254,24 @@ class Tensor(_TensorOp):
         dtype: str,
         name: str = "tensor",
     ) -> "Tensor":
+        """Create an unbound placeholder ``Tensor``.
+
+        Parameters
+        ----------
+        shape : Sequence[int | str | tir.PrimExpr]
+            Shape specification.  Each element may be an ``int`` (static
+            dimension), a ``str`` (symbolic variable name), or a
+            ``tir.PrimExpr``.
+        dtype : str
+            Data type string, e.g. ``"float32"``.
+        name : str
+            Name hint for the created ``relax.Var``.
+
+        Returns
+        -------
+        tensor : Tensor
+            A new ``Tensor`` owning the placeholder ``Var``.
+        """
         return Tensor(_expr=_ffi_api.MakePlaceholder(list(shape), dtype, name))
 
     @property
@@ -207,7 +315,13 @@ class Tensor(_TensorOp):
 
 @tvm_ffi.register_object("relax.frontend.nn.Parameter")
 class Parameter(Tensor):
-    """Trainable parameter: a Tensor optionally bound to a concrete value."""
+    """Trainable parameter: a ``Tensor`` optionally bound to a concrete value.
+
+    The ``data`` property holds the bound ``tvm.runtime.Tensor`` when the
+    parameter has been loaded from a checkpoint; it is ``None`` for unbound
+    parameters.  The ``attrs`` property exposes the C++ annotation map for
+    quantisation metadata and similar user-defined annotations.
+    """
 
     def __init__(
         self,
@@ -331,7 +445,11 @@ def _PARAMETER_TO_METHOD(self, dtype):
 
 @tvm_ffi.register_object("relax.frontend.nn.Object")
 class Object(tvm_ffi.Object):
-    """Wrapper around a relax.Var with ObjectStructInfo (e.g. KVCache handle)."""
+    """Wrapper around a ``relax.Var`` with ``ObjectStructInfo``.
+
+    Used for opaque runtime handles such as KVCache objects that are passed
+    through the IR without shape or dtype information.
+    """
 
     def __init__(self, *, _expr: rx.Expr, _name: str) -> None:
         if not isinstance(_expr, rx.Var):
@@ -349,11 +467,43 @@ class Object(tvm_ffi.Object):
 
 
 def wrap_nested(expr: rx.Expr, name: str) -> "Tensor | tuple":
+    """Emit *expr* into the current ``BlockBuilder`` and wrap the result.
+
+    For a ``TensorStructInfo`` result, emits a single binding and returns a
+    :class:`Tensor`.  For a ``TupleStructInfo`` result, emits the tuple and
+    then emits a ``TupleGetItem`` for each element, returning a ``tuple`` of
+    :class:`Tensor` objects.
+
+    Parameters
+    ----------
+    expr : relax.Expr
+        The expression to emit.
+    name : str
+        Name hint for the emitted binding.
+
+    Returns
+    -------
+    result : Tensor | tuple[Tensor, ...]
+        A single :class:`Tensor` for scalar outputs, or a ``tuple`` of
+        :class:`Tensor` objects for tuple outputs.
+    """
     result = _ffi_api.WrapNested(expr, name)
     return _unwrap_ffi_result(result)
 
 
 def _unwrap_ffi_result(result) -> "Tensor | tuple":
+    """Recursively convert a C++ FFI result to ``Tensor`` or ``tuple``.
+
+    Parameters
+    ----------
+    result :
+        A ``relax.Var`` (single tensor) or a TVM ``Array`` (tuple of results).
+
+    Returns
+    -------
+    wrapped : Tensor | tuple[Tensor, ...]
+        The wrapped result.
+    """
     if isinstance(result, rx.Var):
         return Tensor(_expr=result)
     return tuple(_unwrap_ffi_result(r) for r in result)
@@ -365,21 +515,85 @@ def _unwrap_ffi_result(result) -> "Tensor | tuple":
 
 
 class Effect:
-    """Abstract base for side-effecting operations (IO, KVCache, etc.)."""
+    """Abstract base class for side-effecting state objects.
+
+    Concrete subclasses (:class:`~tvm.relax.frontend.nn.modules.IOEffect`,
+    :class:`~tvm.relax.frontend.nn.modules.KVCache`) implement the four
+    protocol methods used by the exporter to manage effect state across
+    function boundaries.
+
+    The exporter detects effects via ``isinstance(x, Effect)`` and calls
+    the protocol methods directly.
+    """
 
     def emit_init(self, name_hint: str, builder: BlockBuilder) -> list[rx.DataflowVar]:
+        """Emit the initialisation expression into *builder*.
+
+        Called once per export to create the initial effect state objects.
+
+        Parameters
+        ----------
+        name_hint : str
+            Name hint for the emitted binding.
+        builder : BlockBuilder
+            The active ``BlockBuilder``.
+
+        Returns
+        -------
+        state_vars : list[relax.DataflowVar]
+            The emitted initial state variables.
+        """
         raise NotImplementedError
 
     def create(self, name_hint: str) -> list[rx.Var]:
+        """Create placeholder state ``Var``\s and store them internally.
+
+        Called by the exporter to allocate function-argument ``Var``\s for
+        the effect state before the dataflow block is opened.
+
+        Parameters
+        ----------
+        name_hint : str
+            Name hint for the created ``Var``\s.
+
+        Returns
+        -------
+        state_vars : list[relax.Var]
+            Newly created placeholder ``Var``\s.
+        """
         raise NotImplementedError
 
     def set_state(self, state_vars: list[rx.Var]) -> None:
+        """Restore internal state from previously created ``Var``\s.
+
+        Parameters
+        ----------
+        state_vars : list[relax.Var]
+            ``Var``\s produced by a prior call to :meth:`create`.
+        """
         raise NotImplementedError
 
     def finalize(self) -> list[rx.Var]:
+        """Return the current state ``Var``\s and clear internal state.
+
+        Called after the dataflow block is closed to collect the final
+        effect outputs for the function return value.
+
+        Returns
+        -------
+        state_vars : list[relax.Var]
+            The current state ``Var``\s.
+        """
         raise NotImplementedError
 
     def to(self, dtype: str | None = None) -> None:
+        """Recursively convert effect state to *dtype* (no-op by default).
+
+        Parameters
+        ----------
+        dtype : str | None
+            Target dtype string, e.g. ``"float16"``.
+        """
         pass
 
 
@@ -656,18 +870,52 @@ class Module(SubroutineMixin):
     # ---- parameter traversal (delegates to C++ helpers) --------------------
 
     def named_parameters(self, prefix: str = "") -> Iterator[tuple[str, Parameter]]:
-        """Yield (name, Parameter) pairs for all parameters in this module."""
+        """Yield ``(dotted_name, Parameter)`` pairs for all parameters.
+
+        Recursively walks ``__dict__``, descending into :class:`Module`,
+        :class:`ModuleList`, and :class:`ModuleDict` children.
+
+        Parameters
+        ----------
+        prefix : str
+            Dotted prefix prepended to each name.  Pass ``""`` at the root.
+
+        Yields
+        ------
+        name : str
+            Dotted parameter name relative to this module.
+        param : Parameter
+            The parameter object.
+        """
         yield from _attribute_finder(self, prefix, lambda x: isinstance(x, Parameter))
 
     def parameters(self) -> Iterator[Parameter]:
-        """Yield all Parameter values."""
+        """Yield all :class:`Parameter` values in this module tree.
+
+        Yields
+        ------
+        param : Parameter
+        """
         for _, p in self.named_parameters():
             yield p
 
     def state_dict(
         self, *, prefix: str = "", destination: dict[str, Parameter] | None = None
     ) -> dict[str, Parameter]:
-        """Return an ordered dict of all parameters keyed by dotted name."""
+        """Return an ordered dict of all parameters keyed by dotted name.
+
+        Parameters
+        ----------
+        prefix : str
+            Dotted prefix prepended to each name.
+        destination : dict[str, Parameter] | None
+            If provided, parameters are inserted into this dict in-place.
+
+        Returns
+        -------
+        state_dict : dict[str, Parameter]
+            Ordered mapping from dotted name to :class:`Parameter`.
+        """
         if destination is None:
             destination = OrderedDict()
         for name, param in _attribute_finder(self, prefix, lambda x: isinstance(x, Parameter)):
@@ -677,7 +925,23 @@ class Module(SubroutineMixin):
     def load_state_dict(
         self, state_dict: dict[str, Parameter], strict: bool = True
     ) -> tuple[list[str], list[str]]:
-        """Load parameters from state_dict into this module."""
+        """Load parameters from *state_dict* into this module.
+
+        Parameters
+        ----------
+        state_dict : dict[str, Parameter]
+            Mapping of dotted name to :class:`Parameter` with bound data.
+        strict : bool
+            If ``True``, raise :exc:`KeyError` when any key is missing or
+            unexpected.
+
+        Returns
+        -------
+        missing_keys : list[str]
+            Keys present in this module but absent from *state_dict*.
+        unexpected_keys : list[str]
+            Keys present in *state_dict* but absent from this module.
+        """
         self_sd = self.state_dict()
         missing, unexpected = [], []
         for key, value in state_dict.items():
@@ -695,7 +959,18 @@ class Module(SubroutineMixin):
     # ---- forward dispatch --------------------------------------------------
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
-        """Dispatch to forward()."""
+        """Dispatch to :meth:`forward`.
+
+        Parameters
+        ----------
+        *args, **kwargs :
+            Forwarded verbatim to :meth:`forward`.
+
+        Returns
+        -------
+        result : Any
+            The return value of :meth:`forward`.
+        """
         if not hasattr(self, "forward"):
             raise NotImplementedError(f"{type(self).__name__} has no forward()")
         return self.forward(*args, **kwargs)  # pylint: disable=no-member
@@ -703,7 +978,17 @@ class Module(SubroutineMixin):
     # ---- dtype conversion --------------------------------------------------
 
     def to(self, dtype: str | None = None) -> None:
-        """Recursively convert all parameters and sub-modules to dtype."""
+        """Recursively convert all parameters and sub-modules to *dtype*.
+
+        Delegates to the C++ helper ``PythonModuleApplyTo`` which handles
+        :class:`Parameter`, :class:`ModuleList`, :class:`ModuleDict`, native
+        C++ modules, and nested ``__dict__`` entries uniformly.
+
+        Parameters
+        ----------
+        dtype : str | None
+            Target dtype string, e.g. ``"float16"``.
+        """
         if dtype is not None:
             # Delegate to C++ helper which handles Parameters, ModuleLists,
             # ModuleDicts, native C++ modules, and nested dicts uniformly.
@@ -719,15 +1004,37 @@ class Module(SubroutineMixin):
         debug: bool = False,
         allow_extern: bool = False,
     ):
-        """Export this module to a TVM IRModule.
+        """Export this module to a TVM ``IRModule``.
 
-        Delegates to the C++ Exporter, which uses the fast ExportToIRModule
-        path when the spec contains only SpecInt/SpecTensor arg specs, and
-        falls back to the Python path for specs that use spec.Object.
+        Uses the fast C++ ``ExportToIRModule`` path when the spec contains
+        only :class:`~spec.Int` / :class:`~spec.Tensor` arg specs, and falls
+        back to the Python path for specs that use :class:`~spec.Object`.
 
-        External modules (nn.ExternModule) registered via nn.add_extern during
-        forward() are compiled and attached via the C++ AttachExternModules
-        pass when allow_extern=True.
+        External modules (:class:`~extern.ExternModule`) registered via
+        :func:`~exporter.add_extern` during ``forward()`` are compiled and
+        attached via the C++ ``AttachExternModules`` pass when
+        ``allow_extern=True``.
+
+        Parameters
+        ----------
+        spec : ModuleSpecType
+            Compilation specification (dict or :class:`~spec.ModuleSpec`).
+        debug : bool
+            If ``True``, add an ``IOEffect`` token to every method signature
+            to enable :func:`~op.debug_func` / :func:`~op.print_`.
+        allow_extern : bool
+            If ``True``, return the list of external modules as a third
+            return value.  If ``False`` and external modules are present,
+            raise :exc:`ValueError`.
+
+        Returns
+        -------
+        mod : tvm.ir.IRModule
+            The compiled Relax IR module.
+        params : list[tuple[str, Parameter]]
+            Named parameters in the order they appear in the IR.
+        extern_mods : list[ExternModule]
+            Only returned when ``allow_extern=True``.
         """
         from . import spec as _spec  # pylint: disable=import-outside-toplevel
         from .exporter import Exporter  # pylint: disable=import-outside-toplevel
@@ -749,7 +1056,29 @@ class Module(SubroutineMixin):
         out_format: str = "torch",
         debug: bool = False,
     ) -> Any:
-        """JIT-compile this module to an executable."""
+        """JIT-compile this module to a ready-to-run executable.
+
+        Parameters
+        ----------
+        spec : ModuleSpec
+            Compilation specification.
+        device : str | Device
+            Execution device, e.g. ``"cpu"`` or ``"cuda:0"``.
+        pipeline : str | Pass | None
+            Relax compilation pipeline name or a custom pass.
+            Defaults to ``"default_build"``.
+        out_format : str
+            Output wrapper format.  Currently only ``"torch"`` is supported,
+            which returns a :class:`~torch.TorchModule`.
+        debug : bool
+            If ``True``, add an ``IOEffect`` token to every method signature.
+
+        Returns
+        -------
+        module : TorchModule
+            A callable wrapper that accepts ``torch.Tensor`` inputs and
+            returns ``torch.Tensor`` outputs.
+        """
         from ...transform import AttachExternModules  # pylint: disable=import-outside-toplevel
         from ...vm_build import build as relax_build  # pylint: disable=import-outside-toplevel
         from . import spec as _spec  # pylint: disable=import-outside-toplevel
@@ -782,7 +1111,33 @@ class Module(SubroutineMixin):
 
 
 def _attribute_finder(root, prefix: str, condition_yield: Callable[[Any], bool]):
-    """Recursively yield (dotted_name, value) pairs satisfying condition_yield."""
+    """Recursively yield ``(dotted_name, value)`` pairs satisfying *condition_yield*.
+
+    Handles three cases:
+
+    1. :class:`ModuleList` / :class:`ModuleDict` — delegates to the
+       container's own ``named_parameters()``, which covers both the C++
+       store and the Python overlay (``_py_items`` / ``_py_modules``).
+    2. Native C++ module (not a container) — calls
+       ``_ffi_api.GetNativeParameters`` on the object handle.
+    3. Pure-Python :class:`Module` — walks ``__dict__`` recursively.
+
+    Parameters
+    ----------
+    root :
+        The root object to traverse.
+    prefix : str
+        Dotted prefix prepended to each yielded name.
+    condition_yield : Callable[[Any], bool]
+        Predicate; only items for which this returns ``True`` are yielded.
+
+    Yields
+    ------
+    name : str
+        Dotted name of the matching item.
+    value :
+        The matching item.
+    """
 
     # --- Case 1: native container types ------------------------------------
     # Delegate to the container's own named_parameters(), which covers both

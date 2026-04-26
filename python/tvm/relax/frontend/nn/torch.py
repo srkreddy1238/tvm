@@ -31,8 +31,21 @@ from . import spec as _spec
 
 
 class TorchModule:  # pylint: disable=too-few-public-methods
-    """A wrapper on top of TVM VirtualMachine that takes torch tensors as inputs and returns torch
-    tensors as outputs"""
+    """A wrapper on top of TVM VirtualMachine that accepts ``torch.Tensor``
+    inputs and returns ``torch.Tensor`` outputs.
+
+    Obtained by calling :meth:`~core.Module.jit` with ``out_format="torch"``.
+    Use ``module[method_name](*args)`` to invoke a compiled method.
+
+    Parameters
+    ----------
+    spec : ModuleSpec
+        The compilation spec describing method signatures.
+    vm : VirtualMachine
+        The compiled TVM VirtualMachine.
+    params : list[Tensor]
+        Pre-loaded parameter tensors on the target device.
+    """
 
     spec: _spec.ModuleSpec
     vm: VirtualMachine  # pylint: disable=invalid-name
@@ -55,6 +68,31 @@ class TorchModule:  # pylint: disable=too-few-public-methods
         self.params = params
 
     def __getitem__(self, method_name: str) -> Callable:
+        """Return a callable that invokes the compiled method *method_name*.
+
+        The returned closure converts ``torch.Tensor`` / ``int`` arguments
+        to TVM tensors / ``ShapeTuple`` values, calls the VM method, and
+        converts the outputs back to ``torch.Tensor`` / ``list``.
+
+        Parameters
+        ----------
+        method_name : str
+            Name of the compiled method to look up.
+
+        Returns
+        -------
+        closure : Callable
+            A callable with the same positional signature as the original
+            ``forward`` method.
+
+        Raises
+        ------
+        ValueError
+            If *method_name* is not found in the module spec.
+        TypeError
+            If the number of arguments does not match the spec.
+        """
+
         def _find_method(method_name):
             for key, value in zip(self.spec.method_names, self.spec.method_specs):
                 if method_name == key:
@@ -87,6 +125,18 @@ class TorchModule:  # pylint: disable=too-few-public-methods
 
 
 def _tvm_to_torch(arg):
+    """Recursively convert a TVM runtime value to a PyTorch tensor or list.
+
+    Parameters
+    ----------
+    arg : Tensor | ShapeTuple | Array | list | tuple
+        TVM value to convert.
+
+    Returns
+    -------
+    result : torch.Tensor | list
+        Converted PyTorch value.
+    """
     if isinstance(arg, list | tuple | Array):
         return [_tvm_to_torch(i) for i in arg]
     if isinstance(arg, _tensor.Tensor):
@@ -97,6 +147,27 @@ def _tvm_to_torch(arg):
 
 
 def _torch_to_tvm(arg_name, arg_spec, arg_torch):
+    """Convert a single PyTorch argument to its TVM equivalent.
+
+    Parameters
+    ----------
+    arg_name : str
+        Argument name used in error messages.
+    arg_spec : Int | Tensor | Tuple
+        The spec describing the expected type.
+    arg_torch : torch.Tensor | int | tuple
+        The PyTorch value to convert.
+
+    Returns
+    -------
+    result : tvm.runtime.Tensor | ShapeTuple | list
+        The converted TVM value.
+
+    Raises
+    ------
+    TypeError
+        If *arg_torch* does not match the type expected by *arg_spec*.
+    """
     if isinstance(arg_spec, _spec.Tensor):
         if not isinstance(arg_torch, torch.Tensor):
             raise TypeError(
@@ -121,6 +192,32 @@ def _method_spec_from_torch(
     args_torch: list[Any],
     method: Callable,
 ):
+    """Build a :class:`~spec.MethodSpec` from example ``torch.Tensor`` inputs.
+
+    Inspects the types and shapes of *args_torch* to construct the
+    corresponding :class:`~spec.Int` / :class:`~spec.Tensor` specs, then
+    pairs them with the parameter names from *method*'s signature.
+
+    Parameters
+    ----------
+    args_torch : list[Any]
+        Example inputs.  Each element must be a ``torch.Tensor`` or ``int``.
+    method : Callable
+        The Python method whose signature is inspected for argument names.
+
+    Returns
+    -------
+    method_spec : MethodSpec
+        A :class:`~spec.MethodSpec` with ``param_mode="plain"`` and
+        ``effect_mode="plain"``.
+
+    Raises
+    ------
+    TypeError
+        If the number of arguments does not match the method signature, or
+        if an argument has an unsupported type.
+    """
+
     def _as_spec(arg_torch):
         if isinstance(arg_torch, torch.Tensor):
             _, dtype = str(arg_torch.dtype).rsplit(".", maxsplit=1)

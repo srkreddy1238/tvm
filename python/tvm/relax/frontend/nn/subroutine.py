@@ -64,7 +64,13 @@ def _get_struct_info(arg):
 
 
 class SubroutineMixin:
-    """A mixin that generates a
+    """A mixin that generates private subroutine functions in the Relax IR.
+
+    When ``define_subroutine = True`` on a subclass, each call to
+    ``forward()`` is lifted into a separate private ``relax.Function`` in
+    the ``IRModule`` instead of being inlined at the call site.  Repeated
+    calls with structurally identical argument types reuse the same
+    subroutine (keyed by a structural hash of the argument struct-info).
 
     Contains common logic for `tvm.relax.frontend.nn.Module` and
     `tvm.relax.testing.nn.Module`.
@@ -81,6 +87,25 @@ class SubroutineMixin:
 
     @classmethod
     def _subroutine_dispatch(cls, old_forward):
+        """Wrap *old_forward* so that it is lifted into a subroutine when
+        ``self.define_subroutine`` is ``True``.
+
+        The wrapper is a no-op (calls *old_forward* directly) when
+        ``define_subroutine`` is ``False``, preserving the default
+        inline-expansion behaviour.
+
+        Parameters
+        ----------
+        old_forward : Callable
+            The original ``forward`` method to wrap.
+
+        Returns
+        -------
+        new_forward : Callable
+            The wrapped method, tagged with ``_is_subroutine_mixin = True``
+            to prevent double-wrapping by ``__init_subclass__``.
+        """
+
         @functools.wraps(old_forward)
         def new_forward(self, *args, **kwargs):
             if not self.define_subroutine:
@@ -118,6 +143,22 @@ class SubroutineMixin:
     def _normalize_subroutine_args(
         self, block_builder, *args, **kwargs
     ) -> typing.OrderedDict[str, relax.Expr]:
+        """Bind ``*args`` / ``**kwargs`` to the ``forward`` signature and
+        normalise each argument to a ``relax.Expr`` with struct info.
+
+        Parameters
+        ----------
+        block_builder : relax.BlockBuilder
+            The active block builder used to emit any un-annotated exprs.
+        *args, **kwargs
+            Positional and keyword arguments to bind against
+            ``inspect.signature(self.forward)``.
+
+        Returns
+        -------
+        func_args : OrderedDict[str, relax.Expr]
+            Ordered mapping from parameter name to normalised ``relax.Expr``.
+        """
         signature = inspect.signature(self.forward)
         bindings = signature.bind(*args, **kwargs)
         func_args = collections.OrderedDict(
@@ -131,6 +172,37 @@ class SubroutineMixin:
         old_forward: typing.Callable,
         func_args: typing.OrderedDict[str, relax.Expr],
     ) -> (ir.GlobalVar, bool):
+        """Look up or create the private subroutine for this module.
+
+        The subroutine is keyed by a structural hash of the combined
+        argument + parameter struct-info and the current dataflow context.
+        If a matching subroutine already exists in the ``IRModule`` it is
+        returned immediately; otherwise a new private ``relax.Function`` is
+        emitted via *block_builder* and cached on the class.
+
+        All ``relax.Var`` and ``tir.Var`` instances in the subroutine are
+        replaced with fresh variables (``copy_with_new_vars``) to maintain
+        SSA when the same subroutine is called from multiple scopes.
+
+        Parameters
+        ----------
+        block_builder : relax.BlockBuilder
+            The active block builder.
+        old_forward : Callable
+            The original (unwrapped) ``forward`` method.
+        func_args : OrderedDict[str, relax.Expr]
+            Normalised call-site arguments from
+            :meth:`_normalize_subroutine_args`.
+
+        Returns
+        -------
+        gvar : ir.GlobalVar
+            The global variable referencing the subroutine in the
+            ``IRModule``.
+        is_nn_tensor_output : bool
+            ``True`` when ``old_forward`` returns an ``nn.Tensor``
+            (as opposed to a plain ``relax.Expr``).
+        """
         cls = type(self)
         if not hasattr(cls, "_gvar"):
             cls._gvar = {}

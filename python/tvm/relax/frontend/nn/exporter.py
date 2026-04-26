@@ -218,6 +218,24 @@ def _emit_effect_init(
     builder: BlockBuilder,
     effects: list[tuple[str, core.Effect]],
 ):
+    """Emit the ``_initialize_effect`` function body into *builder*.
+
+    Calls :meth:`~core.Effect.emit_init` on each effect in *effects* and
+    collects the resulting ``DataflowVar``\s into a single output tuple.
+
+    Parameters
+    ----------
+    builder : BlockBuilder
+        The active block builder (must be inside a dataflow block).
+    effects : list[tuple[str, Effect]]
+        ``(name_hint, effect)`` pairs in the order they appear in the
+        compiled function signature.
+
+    Returns
+    -------
+    outputs : relax.DataflowVar
+        A tuple variable holding all initial effect state values.
+    """
     outputs = []
     for prefix, effect in effects:
         inits = effect.emit_init(prefix, builder)
@@ -381,7 +399,27 @@ def _emit_method(  # pylint: disable=too-many-locals,too-many-branches,too-many-
 def _method_spec_to_inputs(
     spec: _spec.MethodSpec,
 ) -> list[tir.Var | core.Tensor]:
-    """Convert the MethodSpec to a list of inputs to Module's method."""
+    """Convert a :class:`~spec.MethodSpec` to a list of placeholder inputs.
+
+    Translates each :class:`~spec.Int` spec to a ``tir.Var``, each
+    :class:`~spec.Tensor` spec to an unbound ``nn.Tensor`` placeholder,
+    each :class:`~spec.Object` spec to an ``nn.Object`` placeholder, and
+    each :class:`~spec.Tuple` spec to a nested structure of the above.
+
+    Symbolic shape names (strings in ``Tensor.shape``) are deduplicated
+    across all arguments so that the same ``tir.Var`` is reused for
+    identically-named dimensions.
+
+    Parameters
+    ----------
+    spec : MethodSpec
+        The method spec to convert.
+
+    Returns
+    -------
+    inputs : list[tir.Var | Tensor | Object | spec.Tuple]
+        One entry per argument in ``spec.arg_names``.
+    """
     str2var: dict[str, tir.Var] = {}
 
     def _get_var(name: str) -> tir.Var:

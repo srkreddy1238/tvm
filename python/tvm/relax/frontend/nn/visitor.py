@@ -44,25 +44,7 @@ class Mutator:
         """
         return self.visit(name, node)
 
-    def visit_effect(self, name: str, node: nn.Parameter) -> Any:
-        """The base visiting method for mutation of nn.Parameter nodes.
-
-        Parameters
-        ----------
-        name : str
-            The name of the current node in parent's attribute.
-
-        node : nn.Parameter
-            The current node of nn.Parameter to mutate.
-
-        Returns
-        ------
-        ret_node: Any
-            The new node to replace current node.
-        """
-        return self.visit(name, node)
-
-    def visit_param(self, name: str, node: nn.Effect) -> Any:
+    def visit_effect(self, name: str, node: nn.Effect) -> Any:
         """The base visiting method for mutation of nn.Effect nodes.
 
         Parameters
@@ -72,6 +54,24 @@ class Mutator:
 
         node : nn.Effect
             The current node of nn.Effect to mutate.
+
+        Returns
+        ------
+        ret_node: Any
+            The new node to replace current node.
+        """
+        return self.visit(name, node)
+
+    def visit_param(self, name: str, node: nn.Parameter) -> Any:
+        """The base visiting method for mutation of nn.Parameter nodes.
+
+        Parameters
+        ----------
+        name : str
+            The name of the current node in parent's attribute.
+
+        node : nn.Parameter
+            The current node of nn.Parameter to mutate.
 
         Returns
         ------

@@ -41,66 +41,92 @@ def _convert_scalar(scalar, ref) -> "Tensor":
 
 
 class _TensorOp(tvm_ffi.Object):
+    """Mixin that adds Python operator overloads and convenience methods to
+    ``nn.Tensor``.
+
+    All arithmetic, comparison, and utility methods delegate to the
+    corresponding ``nn.op.*`` functions.  Scalar operands are automatically
+    promoted to constant ``Tensor`` objects via :func:`_convert_scalar`
+    before the FFI call.
+    """
+
     def __add__(self, other):
+        """Element-wise addition with numpy-style broadcasting (``self + other``)."""
         other = _convert_scalar(other, self)
         return _op().add(self, other)
 
     def __radd__(self, other):
+        """Right-hand element-wise addition (``other + self``)."""
         other = _convert_scalar(other, self)
         return _op().add(self, other)
 
     def __sub__(self, other):
+        """Element-wise subtraction with numpy-style broadcasting (``self - other``)."""
         other = _convert_scalar(other, self)
         return _op().subtract(self, other)
 
     def __rsub__(self, other):
+        """Right-hand element-wise subtraction (``other - self``)."""
         other = _convert_scalar(other, self)
         return _op().subtract(other, self)
 
     def __mul__(self, other):
+        """Element-wise multiplication with numpy-style broadcasting (``self * other``)."""
         other = _convert_scalar(other, self)
         return _op().multiply(self, other)
 
     def __rmul__(self, other):
+        """Right-hand element-wise multiplication (``other * self``)."""
         other = _convert_scalar(other, self)
         return _op().multiply(self, other)
 
     def __truediv__(self, other):
+        """Element-wise true division with numpy-style broadcasting (``self / other``)."""
         other = _convert_scalar(other, self)
         return _op().divide(self, other)
 
     def __lt__(self, other):
+        """Broadcasted element-wise less-than comparison (``self < other``)."""
         other = _convert_scalar(other, self)
         return _op().less(self, other)
 
     def __le__(self, other):
+        """Broadcasted element-wise less-than-or-equal comparison (``self <= other``)."""
         other = _convert_scalar(other, self)
         return _op().less_equal(self, other)
 
     def __gt__(self, other):
+        """Broadcasted element-wise greater-than comparison (``self > other``)."""
         other = _convert_scalar(other, self)
         return _op().greater(self, other)
 
     def __ge__(self, other):
+        """Broadcasted element-wise greater-than-or-equal comparison (``self >= other``)."""
         other = _convert_scalar(other, self)
         return _op().greater_equal(self, other)
 
     def astype(self, dtype):
+        """Cast this tensor to *dtype* and return the result."""
         return _op().astype(self, dtype)
 
     def maximum(self, other):
+        """Element-wise maximum of ``self`` and *other*."""
         other = _convert_scalar(other, self)
         return _op().maximum(self, other)
 
     def minimum(self, other):
+        """Element-wise minimum of ``self`` and *other*."""
         other = _convert_scalar(other, self)
         return _op().minimum(self, other)
 
     def reshape(self, *shape):
+        """Return a view of this tensor with the given *shape*."""
         return _op().reshape(self, shape)
 
     def permute_dims(self, *axes):
+        """Permute the dimensions of this tensor according to *axes*."""
         return _op().permute_dims(self, axes)
 
     def repeat(self, repeats: int, axis: int | None = None):
+        """Repeat elements of this tensor *repeats* times along *axis*."""
         return _op().repeat(self, repeats, axis)

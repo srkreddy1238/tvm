@@ -14,34 +14,42 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-"""Compilation specifications for nn.Module export.
+"""Compilation specifications for ``nn.Module`` export.
 
 All six spec types are now native C++ objects:
 
-  Int        (relax.frontend.nn.spec.Int)      - no fields
-  Tensor     (relax.frontend.nn.spec.Tensor)   - shape, dtype
-  Tuple      (relax.frontend.nn.spec.Tuple)    - name, elements, is_tuple
-  MethodSpec (relax.frontend.nn.spec.MethodSpec)
-    forward:     ffi::Function(Map<String,Any>) -> Any
-    arg_names:   Array<String>
-    arg_specs:   Array<Any>
-    param_mode:  String
-    effect_mode: String
-  ModuleSpec (relax.frontend.nn.spec.ModuleSpec)
-    method_names: Array<String>
-    method_specs: Array<Any>
-    named_params: Map<String, NNParameter>
+  :class:`Int`
+      Spec for a scalar integer input.  Becomes a ``tir.Var`` in the IR.
 
-  Object - stays Python: object_type is a Python class used as a constructor.
+  :class:`Tensor`
+      Spec for a tensor input: static ndim/dtype, symbolic or static shapes.
 
-The forward function in MethodSpec receives Map<String, Any> where each
-value is an nn.Tensor (TensorNode).  The implementation casts ffi::Any to
-NNTensor as needed.  No inspect.signature is required.
+  :class:`Tuple`
+      Spec for a tuple or list input containing nested specs.
 
-MethodSpec.from_raw() and ModuleSpec.from_raw() are Python helpers that
-build the C++ objects from the user-facing dict API.  They use
-inspect.signature only to discover arg_names; the forward function they
-register is a Python closure that calls the original method.
+  :class:`MethodSpec`
+      Spec for a single compiled method.  Stores the forward function,
+      ordered argument names and specs, and the parameter/effect handling
+      modes (``"plain"``, ``"packed"``, or ``"none"``).
+
+  :class:`ModuleSpec`
+      Spec for a complete module compilation.  Stores ordered method names
+      and specs, pre-collected named parameters, and pre-collected named
+      effects.
+
+  :class:`Object`
+      Stays Python: ``object_type`` is a Python class used as a constructor
+      in ``exporter.py``.
+
+The ``forward`` function in :class:`MethodSpec` receives
+``Map<String, Any>`` where each value is an ``nn.Tensor``
+(``TensorNode``).  The implementation casts ``ffi::Any`` to ``NNTensor``
+as needed.  No ``inspect.signature`` is required at the C++ level.
+
+:meth:`MethodSpec.from_raw` and :meth:`ModuleSpec.from_raw` are Python
+helpers that build the C++ objects from the user-facing dict API.  They
+use ``inspect.signature`` only to discover ``arg_names``; the forward
+function they register is a Python closure that calls the original method.
 """
 
 import inspect
@@ -75,7 +83,11 @@ SpecAny = typing.Union["Object", "Int", "Tensor", "Tuple"]
 
 @tvm_ffi.register_object("relax.frontend.nn.spec.Int")
 class Int(tvm_ffi.Object):
-    """Spec for a scalar integer input (becomes a tir.Var in the IR)."""
+    """Spec for a scalar integer input.
+
+    When used in a :class:`MethodSpec`, the corresponding argument becomes
+    a ``tir.Var`` of dtype ``int64`` in the compiled IR.
+    """
 
     def __init__(self) -> None:
         self.__ffi_init__()
@@ -91,7 +103,11 @@ class Int(tvm_ffi.Object):
 
 @tvm_ffi.register_object("relax.frontend.nn.spec.Tensor")
 class Tensor(tvm_ffi.Object):
-    """Spec for a tensor input: static ndim/dtype, symbolic or static shapes."""
+    """Spec for a tensor input.
+
+    Carries a static rank and dtype, with each shape dimension being either
+    a concrete ``int`` (static) or a ``str`` (symbolic variable name).
+    """
 
     def __init__(self, shape: typing.Sequence[int | str], dtype: str) -> None:
         self.__ffi_init__(list(shape), dtype)
@@ -108,7 +124,12 @@ class Tensor(tvm_ffi.Object):
 
 @tvm_ffi.register_object("relax.frontend.nn.spec.Tuple")
 class Tuple(tvm_ffi.Object):
-    """Spec for a tuple or list input containing nested specs."""
+    """Spec for a tuple or list input containing nested specs.
+
+    The ``is_tuple`` flag distinguishes Python ``tuple`` (``True``) from
+    ``list`` (``False``) semantics so that :meth:`get_elements` can return
+    the correct container type.
+    """
 
     def __init__(self, name: str, elements: "list[SpecAny] | tuple[SpecAny, ...]") -> None:
         assert isinstance(elements, list | tuple)
@@ -116,7 +137,13 @@ class Tuple(tvm_ffi.Object):
         self.__ffi_init__(name, list(elements), is_tuple)
 
     def get_elements(self) -> "list[SpecAny] | tuple[SpecAny, ...]":
-        """Return elements as list or tuple, matching the original is_tuple flag."""
+        """Return elements as ``list`` or ``tuple``, matching the original ``is_tuple`` flag.
+
+        Returns
+        -------
+        elements : list[SpecAny] | tuple[SpecAny, ...]
+            The nested spec elements in their original container type.
+        """
         # The C++ 'elements' field is accessed via the FFI __getattr__ fallback.
         # We use getattr() here (no @property named 'elements' exists to shadow it).
         raw = list(getattr(self, "elements"))
@@ -130,7 +157,17 @@ class Tuple(tvm_ffi.Object):
 
 
 class Object:
-    """Spec for a non-tensor opaque frontend object (e.g. KVCache)."""
+    """Spec for a non-tensor opaque frontend object (e.g. KVCache).
+
+    Unlike the other spec types, :class:`Object` stays Python because
+    ``object_type`` is a Python class used as a constructor in
+    ``exporter.py`` to instantiate the object during the Python-path export.
+
+    Parameters
+    ----------
+    object_type : type
+        The Python class to instantiate when building the method inputs.
+    """
 
     object_type: type
 
@@ -157,9 +194,15 @@ class Object:
 class MethodSpec(tvm_ffi.Object):
     """Spec for a single compiled method.
 
-    The forward function receives Map<String, Any> where each value is an
-    nn.Tensor.  arg_names is provided explicitly; no inspect.signature needed
-    at the C++ level.
+    The ``forward`` function receives ``Map<String, Any>`` where each value
+    is an ``nn.Tensor``.  ``arg_names`` is provided explicitly; no
+    ``inspect.signature`` is needed at the C++ level.
+
+    ``param_mode`` and ``effect_mode`` each take one of three values:
+
+    * ``"plain"``  — individual parameters/effects as separate function args.
+    * ``"packed"`` — all parameters/effects bundled into a single tuple arg.
+    * ``"none"``   — parameters/effects omitted from the function signature.
     """
 
     def __init__(
@@ -215,10 +258,23 @@ class MethodSpec(tvm_ffi.Object):
 
     @staticmethod
     def from_raw(spec: MethodSpecType, method: typing.Callable) -> "MethodSpec":
-        """Build a MethodSpec from a raw dict.
+        """Build a :class:`MethodSpec` from a raw dict.
 
-        inspect.signature is used here (Python side) only to discover
-        arg_names.  The C++ MethodSpecNode never calls inspect.
+        ``inspect.signature`` is used here (Python side only) to discover
+        ``arg_names``.  The C++ ``MethodSpecNode`` never calls ``inspect``.
+
+        Parameters
+        ----------
+        spec : MethodSpecType
+            A dict mapping argument names to their specs, optionally with a
+            ``"$"`` key for ``param_mode`` / ``effect_mode`` overrides.
+        method : Callable
+            The Python method whose signature is inspected for ``arg_names``.
+
+        Returns
+        -------
+        method_spec : MethodSpec
+            The constructed :class:`MethodSpec`.
         """
         if isinstance(spec, MethodSpec):
             return spec
@@ -262,7 +318,22 @@ class MethodSpec(tvm_ffi.Object):
 
     @staticmethod
     def from_torch(args: list[typing.Any], method: typing.Callable) -> "MethodSpec":
-        """Build a MethodSpec from a list of example torch tensors."""
+        """Build a :class:`MethodSpec` from a list of example ``torch.Tensor`` inputs.
+
+        Parameters
+        ----------
+        args : list[Any]
+            Example inputs.  Each element must be a ``torch.Tensor`` or
+            ``int``.
+        method : Callable
+            The Python method whose signature is inspected for ``arg_names``.
+
+        Returns
+        -------
+        method_spec : MethodSpec
+            The constructed :class:`MethodSpec` with ``param_mode="plain"``
+            and ``effect_mode="plain"``.
+        """
         from .torch import _method_spec_from_torch  # pylint: disable=import-outside-toplevel
 
         return _method_spec_from_torch(args, method)
@@ -278,7 +349,12 @@ class MethodSpec(tvm_ffi.Object):
 
 @tvm_ffi.register_object("relax.frontend.nn.spec.ModuleSpec")
 class ModuleSpec(tvm_ffi.Object):
-    """Spec for a complete nn.Module compilation."""
+    """Spec for a complete ``nn.Module`` compilation.
+
+    ``named_params`` is pre-collected from :meth:`Module.named_parameters`
+    before constructing :class:`ModuleSpec` so the C++ exporter never needs
+    to call back into Python for parameter discovery during IR generation.
+    """
 
     def __init__(
         self,
@@ -316,7 +392,21 @@ class ModuleSpec(tvm_ffi.Object):
 
     @staticmethod
     def from_raw(spec: ModuleSpecType, module: "_nn_module_class") -> "ModuleSpec":
-        """Build a ModuleSpec from a raw dict or return as-is."""
+        """Build a :class:`ModuleSpec` from a raw dict, or return *spec* unchanged.
+
+        Parameters
+        ----------
+        spec : ModuleSpecType
+            A dict mapping method names to their specs, or an existing
+            :class:`ModuleSpec`.
+        module : Module
+            The ``nn.Module`` instance to compile.
+
+        Returns
+        -------
+        module_spec : ModuleSpec
+            The constructed (or unchanged) :class:`ModuleSpec`.
+        """
         if isinstance(spec, ModuleSpec):
             return spec
         method_names = list(spec.keys())  # type: ignore[union-attr]

@@ -50,7 +50,11 @@ from .core import Effect, Module, Tensor, get_default_dtype
 
 @tvm_ffi.register_object("relax.frontend.nn.Identity")
 class Identity(tvm_ffi.Object, Module):
-    """Pass-through module."""
+    """Pass-through module that returns its input unchanged.
+
+    Useful as a no-op placeholder in model architectures where an
+    activation or projection layer is optional.
+    """
 
     def __init__(self) -> None:
         self.__ffi_init__()
@@ -66,7 +70,14 @@ class Identity(tvm_ffi.Object, Module):
 
 @tvm_ffi.register_object("relax.frontend.nn.IOEffect")
 class IOEffect(tvm_ffi.Object, Effect):
-    """Modeling IO side effect — backed by native C++."""
+    """Side-effect token for debug I/O operations.
+
+    Represents a sequenced IO side-effect in the Relax IR.  When
+    ``debug=True`` is passed to :meth:`~core.Module.export_tvm`, an
+    ``IOEffect`` is prepended to every compiled method's argument list so
+    that :func:`~op.debug_func` and :func:`~op.print_` calls are correctly
+    ordered in the IR.  Backed by a native C++ object.
+    """
 
     def __init__(self) -> None:
         self.__ffi_init__()
@@ -89,7 +100,10 @@ class IOEffect(tvm_ffi.Object, Effect):
 
 @tvm_ffi.register_object("relax.frontend.nn.ReLU")
 class ReLU(tvm_ffi.Object, Module):
-    """ReLU activation."""
+    """Rectified Linear Unit activation: ``max(0, x)``.
+
+    Applies the element-wise function :math:`\\text{ReLU}(x) = \\max(0, x)`.
+    """
 
     def __init__(self) -> None:
         self.__ffi_init__()
@@ -105,7 +119,12 @@ class ReLU(tvm_ffi.Object, Module):
 
 @tvm_ffi.register_object("relax.frontend.nn.SiLU")
 class SiLU(tvm_ffi.Object, Module):
-    """SiLU activation."""
+    """Sigmoid Linear Unit activation: ``x * sigmoid(x)``.
+
+    Applies the element-wise function
+    :math:`\\text{SiLU}(x) = x \\cdot \\sigma(x)` where
+    :math:`\\sigma` is the logistic sigmoid.
+    """
 
     def __init__(self) -> None:
         self.__ffi_init__()
@@ -121,7 +140,18 @@ class SiLU(tvm_ffi.Object, Module):
 
 @tvm_ffi.register_object("relax.frontend.nn.GELU")
 class GELU(tvm_ffi.Object, Module):
-    """GELU activation."""
+    """Gaussian Error Linear Unit activation.
+
+    Applies the element-wise GELU function.  When *approximate* is
+    ``"tanh"``, the fast tanh approximation from Hendrycks & Gimpel (2016)
+    is used instead of the exact ``erf``-based formula.
+
+    Parameters
+    ----------
+    approximate : str
+        Approximation method.  Pass ``"tanh"`` for the tanh approximation
+        or ``""`` (default) for the exact computation.
+    """
 
     def __init__(self, approximate: str = "") -> None:
         self.__ffi_init__(approximate)
@@ -139,10 +169,26 @@ class GELU(tvm_ffi.Object, Module):
 
 @tvm_ffi.register_object("relax.frontend.nn.Linear")
 class Linear(tvm_ffi.Object, Module):
-    """Linear layer: out = x @ W^T + b.
+    """Fully-connected linear layer: ``out = x @ weight.T + bias``.
 
-    All state (weight Parameter, bias Parameter, out_dtype) lives in C++.
-    weight, bias, out_dtype are set as properties by register_object.
+    All state (``weight`` Parameter, ``bias`` Parameter, ``out_dtype``) lives
+    in C++.  ``weight``, ``bias``, and ``out_dtype`` are set as properties by
+    ``register_object``.
+
+    Parameters
+    ----------
+    in_features : int | str | tir.PrimExpr
+        Size of each input sample.
+    out_features : int | str | tir.PrimExpr
+        Size of each output sample.
+    bias : bool
+        If ``True`` (default), add a learnable bias term.
+    dtype : str | None
+        Data type for the weight (and bias when *out_dtype* is ``None``).
+        Defaults to the current default dtype.
+    out_dtype : str | None
+        If set, the output is cast to this dtype after the matmul.  The
+        bias (if any) is kept in *dtype* and added before the cast.
     """
 
     def __init__(
@@ -179,8 +225,20 @@ class Linear(tvm_ffi.Object, Module):
 
 @tvm_ffi.register_object("relax.frontend.nn.Embedding")
 class Embedding(tvm_ffi.Object, Module):
-    """Embedding lookup. All state lives in C++.
-    weight is set as a property by register_object.
+    """Lookup table that maps integer indices to dense vectors.
+
+    All state lives in C++.  ``weight`` is set as a property by
+    ``register_object``.
+
+    Parameters
+    ----------
+    num : int | str | tir.PrimExpr
+        Size of the embedding dictionary (vocabulary size).
+    dim : int | str | tir.PrimExpr
+        Dimensionality of each embedding vector.
+    dtype : str | None
+        Data type for the weight matrix.  Defaults to the current default
+        dtype.
     """
 
     def __init__(
@@ -203,8 +261,25 @@ class Embedding(tvm_ffi.Object, Module):
 
 @tvm_ffi.register_object("relax.frontend.nn.LayerNorm")
 class LayerNorm(tvm_ffi.Object, Module):
-    """Layer Normalization. All state lives in C++.
-    weight, bias, axes, epsilon, elementwise_affine set by register_object.
+    """Layer Normalization (Ba et al., 2016).
+
+    Normalises the last *normalized_shape* dimensions of the input tensor,
+    then applies a learnable affine transform when *elementwise_affine* is
+    ``True``.  All state lives in C++.  ``weight``, ``bias``, ``axes``,
+    ``epsilon``, and ``elementwise_affine`` are set by ``register_object``.
+
+    Parameters
+    ----------
+    normalized_shape : int
+        Number of features in the last dimension to normalise.
+    eps : float | None
+        Small constant added to the variance for numerical stability.
+        Defaults to ``1e-5``.
+    elementwise_affine : bool
+        If ``True`` (default), learn per-element scale and shift parameters.
+    dtype : str | None
+        Data type for the weight and bias.  Defaults to the current default
+        dtype.
     """
 
     def __init__(
@@ -233,8 +308,26 @@ class LayerNorm(tvm_ffi.Object, Module):
 
 @tvm_ffi.register_object("relax.frontend.nn.RMSNorm")
 class RMSNorm(tvm_ffi.Object, Module):
-    """RMS Normalization. All state lives in C++.
-    weight, bias, axes, epsilon set by register_object.
+    """Root Mean Square Layer Normalization (Zhang & Sennrich, 2019).
+
+    Normalises the input by its root mean square without subtracting the
+    mean, then applies a learnable scale.  All state lives in C++.
+    ``weight``, ``bias``, ``axes``, and ``epsilon`` are set by
+    ``register_object``.
+
+    Parameters
+    ----------
+    hidden_size : int
+        Number of features to normalise (size of the last dimension).
+    axes : int | list[int]
+        Axis or axes over which to compute the RMS.
+    epsilon : float
+        Small constant added to the RMS for numerical stability.
+    bias : bool
+        If ``True`` (default), add a learnable bias term.
+    dtype : str | None
+        Data type for the weight and bias.  Defaults to the current default
+        dtype.
     """
 
     def __init__(
@@ -266,8 +359,25 @@ class RMSNorm(tvm_ffi.Object, Module):
 
 @tvm_ffi.register_object("relax.frontend.nn.GroupNorm")
 class GroupNorm(tvm_ffi.Object, Module):
-    """Group Normalization. All state lives in C++.
-    num_groups, weight, bias, epsilon set by register_object.
+    """Group Normalization (Wu & He, 2018).
+
+    Divides the channels into *num_groups* groups and normalises each group
+    independently.  All state lives in C++.  ``num_groups``, ``weight``,
+    ``bias``, and ``epsilon`` are set by ``register_object``.
+
+    Parameters
+    ----------
+    num_groups : int
+        Number of groups to divide the channels into.
+    num_channels : int
+        Total number of channels (must be divisible by *num_groups*).
+    eps : float
+        Small constant added to the variance for numerical stability.
+    affine : bool
+        If ``True`` (default), learn per-channel scale and shift parameters.
+    dtype : str | None
+        Data type for the weight and bias.  Defaults to the current default
+        dtype.
     """
 
     def __init__(
@@ -300,8 +410,35 @@ class GroupNorm(tvm_ffi.Object, Module):
 
 @tvm_ffi.register_object("relax.frontend.nn.Conv1D")
 class Conv1D(tvm_ffi.Object, Module):
-    """1D Convolution. All state lives in C++.
-    weight, bias, stride, padding, dilation, groups set by register_object.
+    """1D convolution layer.
+
+    Applies a 1D convolution over an input signal of shape
+    ``(N, C_in, L)``.  All state lives in C++.  ``weight``, ``bias``,
+    ``stride``, ``padding``, ``dilation``, and ``groups`` are set by
+    ``register_object``.
+
+    Parameters
+    ----------
+    in_channels : int
+        Number of input channels.
+    out_channels : int
+        Number of output channels produced by the convolution.
+    kernel_size : int
+        Size of the convolving kernel.
+    stride : int
+        Stride of the convolution.  Defaults to ``1``.
+    padding : int
+        Zero-padding added to both sides of the input.  Defaults to ``0``.
+    dilation : int
+        Spacing between kernel elements.  Defaults to ``1``.
+    groups : int
+        Number of blocked connections from input to output channels.
+        Defaults to ``1``.
+    bias : bool
+        If ``True`` (default), add a learnable bias term.
+    dtype : str | None
+        Data type for the weight and bias.  Defaults to the current default
+        dtype.
     """
 
     def __init__(
@@ -340,8 +477,38 @@ class Conv1D(tvm_ffi.Object, Module):
 
 @tvm_ffi.register_object("relax.frontend.nn.Conv2D")
 class Conv2D(tvm_ffi.Object, Module):
-    """2D Convolution. All state lives in C++.
-    weight, bias, stride, padding, dilation, groups, data_layout set by register_object.
+    """2D convolution layer.
+
+    Applies a 2D convolution over an input image of shape
+    ``(N, C_in, H, W)`` (NCHW layout by default).  All state lives in C++.
+    ``weight``, ``bias``, ``stride``, ``padding``, ``dilation``, ``groups``,
+    and ``data_layout`` are set by ``register_object``.
+
+    Parameters
+    ----------
+    in_channels : int
+        Number of input channels.
+    out_channels : int
+        Number of output channels produced by the convolution.
+    kernel_size : list[int] | int
+        Size of the convolving kernel.  A single ``int`` is used for both
+        height and width.
+    stride : int
+        Stride of the convolution.  Defaults to ``1``.
+    padding : int
+        Zero-padding added to all spatial sides.  Defaults to ``0``.
+    dilation : int
+        Spacing between kernel elements.  Defaults to ``1``.
+    groups : int
+        Number of blocked connections from input to output channels.
+        Defaults to ``1``.
+    bias : bool
+        If ``True`` (default), add a learnable bias term.
+    dtype : str | None
+        Data type for the weight and bias.  Defaults to the current default
+        dtype.
+    data_layout : str
+        Layout of the input tensor.  Defaults to ``"NCHW"``.
     """
 
     def __init__(
@@ -383,8 +550,38 @@ class Conv2D(tvm_ffi.Object, Module):
 
 @tvm_ffi.register_object("relax.frontend.nn.Conv3D")
 class Conv3D(tvm_ffi.Object, Module):
-    """3D Convolution. All state lives in C++.
-    weight, bias, stride, padding, dilation, groups, data_layout set by register_object.
+    """3D convolution layer.
+
+    Applies a 3D convolution over a volumetric input of shape
+    ``(N, C_in, D, H, W)`` (NCDHW layout by default).  All state lives in
+    C++.  ``weight``, ``bias``, ``stride``, ``padding``, ``dilation``,
+    ``groups``, and ``data_layout`` are set by ``register_object``.
+
+    Parameters
+    ----------
+    in_channels : int
+        Number of input channels.
+    out_channels : int
+        Number of output channels produced by the convolution.
+    kernel_size : list[int] | int
+        Size of the convolving kernel.  A single ``int`` is broadcast to
+        all three spatial dimensions.
+    stride : list[int] | int
+        Stride of the convolution.  Defaults to ``1``.
+    padding : list[int] | int
+        Zero-padding added to all spatial sides.  Defaults to ``0``.
+    dilation : int
+        Spacing between kernel elements.  Defaults to ``1``.
+    groups : int
+        Number of blocked connections from input to output channels.
+        Defaults to ``1``.
+    bias : bool
+        If ``True`` (default), add a learnable bias term.
+    dtype : str | None
+        Data type for the weight and bias.  Defaults to the current default
+        dtype.
+    data_layout : str
+        Layout of the input tensor.  Defaults to ``"NCDHW"``.
     """
 
     def __init__(
@@ -428,8 +625,38 @@ class Conv3D(tvm_ffi.Object, Module):
 
 @tvm_ffi.register_object("relax.frontend.nn.ConvTranspose1D")
 class ConvTranspose1D(tvm_ffi.Object, Module):
-    """1D Transposed Convolution. All state lives in C++.
-    weight, bias, stride, padding, output_padding, dilation, groups set by register_object.
+    """1D transposed convolution layer (fractionally-strided convolution).
+
+    Applies a 1D transposed convolution over an input of shape
+    ``(N, C_in, L)``.  All state lives in C++.  ``weight``, ``bias``,
+    ``stride``, ``padding``, ``output_padding``, ``dilation``, and
+    ``groups`` are set by ``register_object``.
+
+    Parameters
+    ----------
+    in_channels : int
+        Number of input channels.
+    out_channels : int
+        Number of output channels produced by the transposed convolution.
+    kernel_size : int
+        Size of the convolving kernel.
+    stride : int
+        Stride of the convolution.  Defaults to ``1``.
+    padding : int
+        Zero-padding added to both sides of the input.  Defaults to ``0``.
+    output_padding : int
+        Additional size added to one side of the output shape.  Defaults
+        to ``0``.
+    dilation : int
+        Spacing between kernel elements.  Defaults to ``1``.
+    groups : int
+        Number of blocked connections from input to output channels.
+        Defaults to ``1``.
+    bias : bool
+        If ``True`` (default), add a learnable bias term.
+    dtype : str | None
+        Data type for the weight and bias.  Defaults to the current default
+        dtype.
     """
 
     def __init__(
@@ -470,7 +697,24 @@ class ConvTranspose1D(tvm_ffi.Object, Module):
 
 @tvm_ffi.register_object("relax.frontend.nn.KVCache")
 class KVCache(tvm_ffi.Object, Effect):
-    """KVCache effect — backed by native C++."""
+    """Key-value cache effect for autoregressive inference.
+
+    Maintains a growing cache of key/value tensors across decoding steps.
+    Backed by a native C++ object.  The cache is initialised with
+    *init_seq_len* slots of shape *unit_shape* and grows dynamically via
+    :meth:`append`.
+
+    Parameters
+    ----------
+    init_seq_len : int
+        Initial number of sequence positions to pre-allocate.
+    unit_shape : Sequence[int]
+        Shape of a single cache entry (excluding the sequence dimension),
+        e.g. ``[num_heads, head_dim]``.
+    dtype : str | None
+        Data type for the cached tensors.  Defaults to the current default
+        dtype.
+    """
 
     def __init__(
         self, init_seq_len: int, unit_shape: Sequence[int], dtype: str | None = None
@@ -498,9 +742,28 @@ class KVCache(tvm_ffi.Object, Effect):
             self._cpp_to(dtype)
 
     def view(self, seq_len) -> Tensor:
+        """Return a view of the first *seq_len* entries in the cache.
+
+        Parameters
+        ----------
+        seq_len : int | tir.PrimExpr
+            Number of sequence positions to include in the view.
+
+        Returns
+        -------
+        result : Tensor
+            Tensor of shape ``(seq_len, *unit_shape)``.
+        """
         return Tensor(_expr=self._view(seq_len)._expr)
 
     def append(self, new_element: Tensor) -> None:
+        """Append *new_element* to the end of the cache.
+
+        Parameters
+        ----------
+        new_element : Tensor
+            Tensor of shape ``(1, *unit_shape)`` to append.
+        """
         self._append(new_element)
 
 
@@ -511,7 +774,28 @@ class KVCache(tvm_ffi.Object, Effect):
 
 @tvm_ffi.register_object("relax.frontend.nn.TimestepEmbedding")
 class TimestepEmbedding(tvm_ffi.Object, Module):
-    """HF TimestepEmbedding layer — backed by native C++."""
+    """Hugging Face-compatible timestep embedding layer.
+
+    Projects a scalar timestep through two linear layers with an
+    activation in between, matching the ``TimestepEmbedding`` module from
+    ``diffusers``.  Backed by a native C++ object.
+
+    Parameters
+    ----------
+    in_channels : int
+        Dimensionality of the input timestep embedding.
+    time_embed_dim : int
+        Dimensionality of the output embedding.
+    act_fn : str
+        Activation function name between the two linear layers.
+        Defaults to ``"silu"``.
+    out_dim : int | None
+        If set, add a second linear projection to this output size.
+    post_act_fn : str | None
+        Optional activation applied after the final linear layer.
+    cond_proj_dim : int | None
+        If set, add a conditioning projection of this size.
+    """
 
     def __init__(
         self,
@@ -544,7 +828,23 @@ class TimestepEmbedding(tvm_ffi.Object, Module):
 
 @tvm_ffi.register_object("relax.frontend.nn.Timesteps")
 class Timesteps(tvm_ffi.Object, Module):
-    """HF Timesteps layer — backed by native C++."""
+    """Hugging Face-compatible sinusoidal timestep projection layer.
+
+    Converts scalar timestep indices to sinusoidal embeddings, matching
+    the ``Timesteps`` module from ``diffusers``.  Backed by a native C++
+    object.
+
+    Parameters
+    ----------
+    num_channels : int
+        Dimensionality of the output embedding.
+    flip_sin_to_cos : bool
+        If ``True``, place cosine features before sine features.
+        Defaults to ``False``.
+    downscale_freq_shift : float
+        Shift applied to the log-frequency before exponentiation.
+        Defaults to ``1``.
+    """
 
     def __init__(self, num_channels, flip_sin_to_cos=False, downscale_freq_shift=1) -> None:
         self.__init_handle_by_constructor__(
@@ -565,7 +865,35 @@ class Timesteps(tvm_ffi.Object, Module):
 
 @tvm_ffi.register_object("relax.frontend.nn.Attention")
 class Attention(tvm_ffi.Object, Module):
-    """Cross-attention layer — backed by native C++."""
+    """Multi-head cross-attention layer.
+
+    Implements scaled dot-product attention with optional cross-attention
+    (separate query and key/value sources) and optional group normalization
+    on the query.  Matches the ``Attention`` module from ``diffusers``.
+    Backed by a native C++ object.
+
+    Parameters
+    ----------
+    query_dim : int
+        Dimensionality of the query input.
+    cross_attention_dim : int | None
+        Dimensionality of the key/value input for cross-attention.  When
+        ``None``, self-attention is used (key/value come from the query).
+    heads : int
+        Number of attention heads.  Defaults to ``8``.
+    dim_head : int
+        Dimensionality of each attention head.  Defaults to ``64``.
+    bias : bool
+        If ``True``, add bias to the query/key/value projections.
+        Defaults to ``False``.
+    norm_num_groups : int | None
+        If set, apply group normalization with this many groups to the
+        query before computing attention.
+    out_bias : bool
+        If ``True`` (default), add bias to the output projection.
+    scale_qk : bool
+        Kept for API compatibility; currently unused.
+    """
 
     def __init__(
         self,

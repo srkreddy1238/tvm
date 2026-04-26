@@ -49,6 +49,91 @@ IntExpr = int | _tir.PrimExpr
 # ---------------------------------------------------------------------------
 from . import _ffi_api_op as _ffi_op  # noqa: E402
 
+# ---------------------------------------------------------------------------
+# Public API exported by ``from .op import *``
+# Internal helpers (_v, _t, IntExpr, OutType) are intentionally excluded.
+# ---------------------------------------------------------------------------
+__all__ = [
+    "add",
+    "arange",
+    "argsort",
+    "astype",
+    "broadcast_to",
+    "ccl_allgather",
+    "ccl_allreduce",
+    "ccl_broadcast_from_worker0",
+    "chunk",
+    "clip",
+    "concat",
+    "conv1d",
+    "conv1d_transpose",
+    "conv2d",
+    "conv3d",
+    "cumsum",
+    "debug_func",
+    "divide",
+    "empty",
+    "equal",
+    "exp",
+    "extern",
+    "floor",
+    "full",
+    "gelu",
+    "get_timestep_embedding",
+    "greater",
+    "greater_equal",
+    "group_norm",
+    "interpolate",
+    "layer_norm",
+    "less",
+    "less_equal",
+    "log",
+    "matmul",
+    "max",
+    "maximum",
+    "min",
+    "minimum",
+    "multinomial_from_uniform",
+    "multiply",
+    "negative",
+    "not_equal",
+    "ones",
+    "pad",
+    "permute",
+    "permute_dims",
+    "prelu",
+    "print_",
+    "relu",
+    "relu6",
+    "renormalize_top_p_top_k_prob",
+    "repeat",
+    "reshape",
+    "rms_norm",
+    "sample_top_p_top_k_from_sorted_prob",
+    "scaled_dot_product_attention",
+    "sigmoid",
+    "silu",
+    "softmax",
+    "softplus",
+    "sort",
+    "split",
+    "sqrt",
+    "square",
+    "squeeze",
+    "subtract",
+    "sum",
+    "take",
+    "tanh",
+    "tensor_expr_op",
+    "tensor_ir_inplace_op",
+    "tensor_ir_op",
+    "topk",
+    "triu",
+    "unsqueeze",
+    "where",
+    "zeros",
+]
+
 
 def _v(t: Tensor) -> rx.Var:
     """Unwrap nn.Tensor to its underlying relax.Var."""
@@ -61,37 +146,147 @@ def _t(result) -> "Tensor | tuple":
 
 
 def unsqueeze(x: Tensor, dim: int, name: str = "unsqueeze") -> Tensor:
-    """Add a new axis to a tensor"""
+    """Add a new axis of size 1 at position *dim*.
+
+    Parameters
+    ----------
+    x : Tensor
+        Input tensor.
+    dim : int
+        Position at which to insert the new axis.  Negative values count
+        from the end of the shape.
+    name : str
+        Name hint for the emitted binding.
+
+    Returns
+    -------
+    result : Tensor
+        Tensor with ``x.ndim + 1`` dimensions.
+    """
     return _t(_ffi_op.unsqueeze(_v(x), dim, name))
 
 
 def concat(x: list[Tensor], dim: int, name: str = "concat") -> Tensor:
-    """Concatenate a list of tensors along an axis."""
+    """Concatenate a list of tensors along *dim*.
+
+    Parameters
+    ----------
+    x : list[Tensor]
+        Tensors to concatenate.  All tensors must have the same shape
+        except along *dim*.
+    dim : int
+        Axis along which to concatenate.
+    name : str
+        Name hint for the emitted binding.
+
+    Returns
+    -------
+    result : Tensor
+        Concatenated tensor.
+    """
     return _t(_ffi_op.concat([_v(t) for t in x], dim, name))
 
 
 def add(a: Tensor, b: Tensor, name: str = "add") -> Tensor:
-    """Addition with numpy-style broadcasting."""
+    """Element-wise addition with numpy-style broadcasting.
+
+    Parameters
+    ----------
+    a : Tensor
+        First operand.
+    b : Tensor
+        Second operand.
+    name : str
+        Name hint for the emitted binding.
+
+    Returns
+    -------
+    result : Tensor
+        Element-wise sum ``a + b``.
+    """
     return _t(_ffi_op.add(_v(a), _v(b), name))
 
 
 def subtract(a: Tensor, b: Tensor, name: str = "subtract") -> Tensor:
-    """Subtraction with numpy-style broadcasting."""
+    """Element-wise subtraction with numpy-style broadcasting.
+
+    Parameters
+    ----------
+    a : Tensor
+        Minuend.
+    b : Tensor
+        Subtrahend.
+    name : str
+        Name hint for the emitted binding.
+
+    Returns
+    -------
+    result : Tensor
+        Element-wise difference ``a - b``.
+    """
     return _t(_ffi_op.subtract(_v(a), _v(b), name))
 
 
 def multiply(a: Tensor, b: Tensor, name: str = "mul") -> Tensor:
-    """Multiplication with numpy-style broadcasting."""
+    """Element-wise multiplication with numpy-style broadcasting.
+
+    Parameters
+    ----------
+    a : Tensor
+        First operand.
+    b : Tensor
+        Second operand.
+    name : str
+        Name hint for the emitted binding.
+
+    Returns
+    -------
+    result : Tensor
+        Element-wise product ``a * b``.
+    """
     return _t(_ffi_op.multiply(_v(a), _v(b), name))
 
 
 def divide(a: Tensor, b: Tensor, name: str = "divide") -> Tensor:
-    """Division with numpy-style broadcasting."""
+    """Element-wise true division with numpy-style broadcasting.
+
+    Parameters
+    ----------
+    a : Tensor
+        Dividend.
+    b : Tensor
+        Divisor.
+    name : str
+        Name hint for the emitted binding.
+
+    Returns
+    -------
+    result : Tensor
+        Element-wise quotient ``a / b``.
+    """
     return _t(_ffi_op.divide(_v(a), _v(b), name))
 
 
 def chunk(x: Tensor, chunks: int, dim: int = 0, name: str = "chunk") -> Tensor:
-    """Split a tensor along dim into the specified number of chunks."""
+    """Split *x* along *dim* into *chunks* equal-sized sub-tensors.
+
+    Parameters
+    ----------
+    x : Tensor
+        Input tensor.
+    chunks : int
+        Number of chunks to split into.  The last chunk may be smaller
+        if the dimension size is not evenly divisible.
+    dim : int
+        Axis along which to split.
+    name : str
+        Name hint for the emitted binding.
+
+    Returns
+    -------
+    result : tuple[Tensor, ...]
+        Tuple of sub-tensors.
+    """
     return _t(_ffi_op.chunk(_v(x), chunks, dim, name))
 
 
@@ -101,7 +296,24 @@ def sum(
     keepdims: bool = False,
     name: str = "sum",
 ) -> Tensor:
-    """Computes the sum of tensor elements over given axes."""
+    """Compute the sum of tensor elements over the given axes.
+
+    Parameters
+    ----------
+    x : Tensor
+        Input tensor.
+    axis : int | list[int] | None
+        Axis or axes to reduce.  ``None`` reduces over all axes.
+    keepdims : bool
+        If ``True``, retain reduced axes as size-1 dimensions.
+    name : str
+        Name hint for the emitted binding.
+
+    Returns
+    -------
+    result : Tensor
+        Reduced tensor.
+    """
     ax = [axis] if isinstance(axis, int) else (axis or [])
     return _t(_ffi_op.sum(_v(x), ax, keepdims, name))
 
@@ -112,7 +324,24 @@ def max(
     keepdims: bool = False,
     name: str = "max",
 ) -> Tensor:
-    """Computes the max of tensor elements over given axes."""
+    """Compute the maximum of tensor elements over the given axes.
+
+    Parameters
+    ----------
+    x : Tensor
+        Input tensor.
+    axis : int | list[int] | None
+        Axis or axes to reduce.  ``None`` reduces over all axes.
+    keepdims : bool
+        If ``True``, retain reduced axes as size-1 dimensions.
+    name : str
+        Name hint for the emitted binding.
+
+    Returns
+    -------
+    result : Tensor
+        Reduced tensor.
+    """
     ax = [axis] if isinstance(axis, int) else (axis or [])
     return _t(_ffi_op.max(_v(x), ax, keepdims, name))
 
@@ -123,13 +352,47 @@ def min(
     keepdims: bool = False,
     name: str = "min",
 ) -> Tensor:
-    """Computes the min of tensor elements over given axes."""
+    """Compute the minimum of tensor elements over the given axes.
+
+    Parameters
+    ----------
+    x : Tensor
+        Input tensor.
+    axis : int | list[int] | None
+        Axis or axes to reduce.  ``None`` reduces over all axes.
+    keepdims : bool
+        If ``True``, retain reduced axes as size-1 dimensions.
+    name : str
+        Name hint for the emitted binding.
+
+    Returns
+    -------
+    result : Tensor
+        Reduced tensor.
+    """
     ax = [axis] if isinstance(axis, int) else (axis or [])
     return _t(_ffi_op.min(_v(x), ax, keepdims, name))
 
 
 def matmul(a: Tensor, b: Tensor, out_dtype: str | None = None, name: str = "matmul") -> Tensor:
-    """General matrix multiplication of two tensors, with broadcasting on batched dimensions."""
+    """General matrix multiplication with broadcasting on batched dimensions.
+
+    Parameters
+    ----------
+    a : Tensor
+        Left-hand operand.  Must have at least 1 dimension.
+    b : Tensor
+        Right-hand operand.  Must have at least 1 dimension.
+    out_dtype : str | None
+        Optional output dtype.  Defaults to the common dtype of *a* and *b*.
+    name : str
+        Name hint for the emitted binding.
+
+    Returns
+    -------
+    result : Tensor
+        Matrix product, with batch dimensions broadcast.
+    """
     return _t(_ffi_op.matmul(_v(a), _v(b), out_dtype, name))
 
 
@@ -143,7 +406,32 @@ def conv1d(
     groups: int | None = 1,
     name: str = "conv1d",
 ) -> Tensor:
-    """1D convolution."""
+    """Apply a 1D convolution over an input signal.
+
+    Parameters
+    ----------
+    x : Tensor
+        Input tensor of shape ``(N, C_in, L)``.
+    weight : Tensor
+        Convolution kernel of shape ``(C_out, C_in/groups, kL)``.
+    bias : Tensor | None
+        Optional bias of shape ``(C_out,)``.
+    stride : int | tuple | None
+        Stride of the convolution.
+    padding : int | tuple | str | None
+        Zero-padding added to both sides of the input.
+    dilation : int | tuple | None
+        Spacing between kernel elements.
+    groups : int | None
+        Number of blocked connections from input to output channels.
+    name : str
+        Name hint for the emitted binding.
+
+    Returns
+    -------
+    result : Tensor
+        Output tensor of shape ``(N, C_out, L_out)``.
+    """
     return _t(
         _ffi_op.conv1d(
             _v(x), _v(weight), _v(bias) if bias else None, stride, padding, dilation, groups, name
@@ -162,7 +450,34 @@ def conv2d(
     data_layout: str | None = "NCHW",
     name: str = "conv2d",
 ) -> Tensor:
-    """Applies a 2D convolution."""
+    """Apply a 2D convolution over an input image.
+
+    Parameters
+    ----------
+    x : Tensor
+        Input tensor of shape ``(N, C_in, H, W)`` (NCHW layout).
+    weight : Tensor
+        Convolution kernel of shape ``(C_out, C_in/groups, kH, kW)``.
+    bias : Tensor | None
+        Optional bias of shape ``(C_out,)``.
+    stride : int | tuple | None
+        Stride of the convolution.
+    padding : int | tuple | str | None
+        Zero-padding added to both spatial sides.
+    dilation : int | tuple | None
+        Spacing between kernel elements.
+    groups : int | None
+        Number of blocked connections from input to output channels.
+    data_layout : str | None
+        Layout of the input tensor.  Defaults to ``"NCHW"``.
+    name : str
+        Name hint for the emitted binding.
+
+    Returns
+    -------
+    result : Tensor
+        Output tensor of shape ``(N, C_out, H_out, W_out)``.
+    """
     return _t(
         _ffi_op.conv2d(
             _v(x),
@@ -189,7 +504,34 @@ def conv3d(
     data_layout: str | None = "NCDHW",
     name: str = "conv3d",
 ) -> Tensor:
-    """Applies a 3D convolution."""
+    """Apply a 3D convolution over a volumetric input.
+
+    Parameters
+    ----------
+    x : Tensor
+        Input tensor of shape ``(N, C_in, D, H, W)`` (NCDHW layout).
+    weight : Tensor
+        Convolution kernel of shape ``(C_out, C_in/groups, kD, kH, kW)``.
+    bias : Tensor | None
+        Optional bias of shape ``(C_out,)``.
+    stride : int | tuple | None
+        Stride of the convolution.
+    padding : int | tuple | str | None
+        Zero-padding added to all spatial sides.
+    dilation : int | tuple | None
+        Spacing between kernel elements.
+    groups : int | None
+        Number of blocked connections from input to output channels.
+    data_layout : str | None
+        Layout of the input tensor.  Defaults to ``"NCDHW"``.
+    name : str
+        Name hint for the emitted binding.
+
+    Returns
+    -------
+    result : Tensor
+        Output tensor of shape ``(N, C_out, D_out, H_out, W_out)``.
+    """
     return _t(
         _ffi_op.conv3d(
             _v(x),
@@ -216,7 +558,34 @@ def conv1d_transpose(
     groups: int | None = 1,
     name: str = "conv1d_transpose",
 ) -> Tensor:
-    """1D transposed convolution operator."""
+    """Apply a 1D transposed convolution (fractionally-strided convolution).
+
+    Parameters
+    ----------
+    x : Tensor
+        Input tensor of shape ``(N, C_in, L)``.
+    weight : Tensor
+        Kernel of shape ``(C_in, C_out/groups, kL)``.
+    bias : Tensor | None
+        Optional bias of shape ``(C_out,)``.
+    stride : int | tuple[int] | None
+        Stride of the convolution.
+    padding : int | tuple[int, ...] | None
+        Zero-padding added to both sides of the input.
+    output_padding : int | tuple[int] | None
+        Additional size added to one side of the output shape.
+    dilation : int | tuple | None
+        Spacing between kernel elements.
+    groups : int | None
+        Number of blocked connections from input to output channels.
+    name : str
+        Name hint for the emitted binding.
+
+    Returns
+    -------
+    result : Tensor
+        Output tensor of shape ``(N, C_out, L_out)``.
+    """
     return _t(
         _ffi_op.conv1d_transpose(
             _v(x),
@@ -372,7 +741,31 @@ def layer_norm(
     eps: float = 1e-5,
     name: str = "layer_norm",
 ) -> Tensor:
-    """Layer normalization."""
+    """Apply Layer Normalization over the last ``len(normalized_shape)`` dimensions.
+
+    Parameters
+    ----------
+    x : Tensor
+        Input tensor.
+    normalized_shape : int | list[int]
+        Shape of the sub-tensor to normalise.  A single ``int`` is treated
+        as a one-element list.
+    weight : Tensor | None
+        Optional learnable per-element scale (gamma).  Defaults to all-ones
+        when ``None``.
+        bias : Tensor | None
+        Optional learnable per-element shift (beta).  Defaults to all-zeros
+        when ``None``.
+    eps : float
+        Small constant added to the variance for numerical stability.
+    name : str
+        Name hint for the emitted binding.
+
+    Returns
+    -------
+    result : Tensor
+        Normalised tensor with the same shape as *x*.
+    """
     if isinstance(normalized_shape, int):
         normalized_shape = [normalized_shape]
     dim_num = len(normalized_shape)
@@ -392,7 +785,26 @@ def rms_norm(
     epsilon: float = 1e-5,
     name: str = "rms_norm",
 ) -> Tensor:
-    """Root mean square normalization."""
+    """Apply Root Mean Square Layer Normalization.
+
+    Parameters
+    ----------
+    x : Tensor
+        Input tensor.
+    weight : Tensor
+        Learnable per-element scale (gamma).
+    axes : int | list[int]
+        Axis or axes over which to compute the RMS.  Typically ``-1``.
+    epsilon : float
+        Small constant added to the RMS for numerical stability.
+    name : str
+        Name hint for the emitted binding.
+
+    Returns
+    -------
+    result : Tensor
+        Normalised tensor with the same shape as *x*.
+    """
     ax = [axes] if isinstance(axes, int) else axes
     return _t(_ffi_op.rms_norm(_v(x), _v(weight), ax, epsilon, name))
 
@@ -407,7 +819,33 @@ def group_norm(
     axes: list[int] | None = None,
     name: str = "group_norm",
 ) -> Tensor:
-    """Group normalization."""
+    """Apply Group Normalization.
+
+    Parameters
+    ----------
+    x : Tensor
+        Input tensor of shape ``(N, C, *spatial)``.
+    num_groups : int
+        Number of groups to divide the channels into.
+    weight : Tensor | None
+        Optional learnable per-channel scale (gamma).
+    bias : Tensor | None
+        Optional learnable per-channel shift (beta).
+    eps : float
+        Small constant added to the variance for numerical stability.
+    channel_axis : int
+        Axis that holds the channel dimension.  Defaults to ``1`` (NCHW).
+    axes : list[int] | None
+        Spatial axes to normalise over.  Defaults to all axes after
+        *channel_axis* (i.e. ``range(2, x.ndim)``).
+    name : str
+        Name hint for the emitted binding.
+
+    Returns
+    -------
+    result : Tensor
+        Normalised tensor with the same shape as *x*.
+    """
     dim = len(x._expr.struct_info.shape)
     if axes is None:
         axes = list(range(2, dim))
@@ -523,7 +961,34 @@ def get_timestep_embedding(
     max_period: int = 10000,
     name: str = "get_timestep_embedding",
 ) -> Tensor:
-    """Timestep calculation as described in Denoising Diffusion Probabilistic Models."""
+    """Compute sinusoidal timestep embeddings as in DDPM.
+
+    Implements the timestep embedding described in *Denoising Diffusion
+    Probabilistic Models* (Ho et al., 2020).
+
+    Parameters
+    ----------
+    x : Tensor
+        1-D integer tensor of timestep indices, shape ``(batch,)``.
+    embedding_dim : int
+        Dimensionality of the output embedding.
+    flip_sin_to_cos : bool
+        If ``True``, place cosine features before sine features in the
+        output channel dimension.
+    downscale_freq_shift : float
+        Shift applied to the log-frequency before exponentiation.
+    scale : float
+        Multiplicative scale applied to the sinusoidal inputs.
+    max_period : int
+        Controls the minimum frequency of the embeddings.
+    name : str
+        Name hint for the emitted binding.
+
+    Returns
+    -------
+    result : Tensor
+        Embedding tensor of shape ``(batch, embedding_dim)``.
+    """
     dtype = get_default_dtype()
     return _t(
         _ffi_op.get_timestep_embedding(
@@ -548,7 +1013,34 @@ def scaled_dot_product_attention(
     scale: float | None = None,
     name: str = "scaled_dot_product_attention",
 ):
-    """Computes a scaled dot product attention."""
+    """Compute scaled dot-product attention.
+
+    Computes ``softmax(Q @ K^T / sqrt(d_k)) @ V``, optionally with a
+    causal mask.
+
+    Parameters
+    ----------
+    query : Tensor
+        Query tensor of shape ``(batch, heads, seq_q, d_k)``.
+    key : Tensor
+        Key tensor of shape ``(batch, heads, seq_k, d_k)``.
+    value : Tensor
+        Value tensor of shape ``(batch, heads, seq_k, d_v)``.
+    attn_mask : Tensor | None
+        Additive attention mask.  Currently unsupported; must be ``None``.
+    is_causal : bool | None
+        If ``True``, apply a causal (top-left) mask so each query position
+        can only attend to earlier key positions.
+    scale : float | None
+        Explicit scale factor.  Defaults to ``1 / sqrt(d_k)``.
+    name : str
+        Name hint for the emitted binding.
+
+    Returns
+    -------
+    result : Tensor
+        Attention output of shape ``(batch, heads, seq_q, d_v)``.
+    """
     assert attn_mask is None, "attn_mask not yet supported."
     causal_mask = "TopLeft" if is_causal else None
     return _t(
@@ -569,7 +1061,37 @@ def interpolate(
     data_layout: str | None = "NCHW",
     name: str = "interpolate",
 ):
-    """Resize a tensor using the specified mode."""
+    """Resize a spatial tensor using the specified interpolation mode.
+
+    Parameters
+    ----------
+    x : Tensor
+        Input tensor with layout described by *data_layout*.
+    size : int | tuple[int] | None
+        Output spatial size.  Mutually exclusive with *scale_factor*.
+    scale_factor : float | tuple[float] | None
+        Multiplier for each spatial dimension.  Mutually exclusive with
+        *size*.
+    mode : str
+        Interpolation algorithm: ``"nearest"``, ``"bilinear"``,
+        ``"bicubic"``, etc.
+    align_corners : bool | None
+        If ``True``, align the corner pixels of input and output tensors.
+        Only meaningful for ``"bilinear"`` and ``"bicubic"`` modes.
+    recompute_scale_factor : bool | None
+        Unsupported; must be ``None``.
+    antialias : bool | None
+        Unsupported; must be ``None``.
+    data_layout : str | None
+        Layout string describing the input tensor axes, e.g. ``"NCHW"``.
+    name : str
+        Name hint for the emitted binding.
+
+    Returns
+    -------
+    result : Tensor
+        Resized tensor.
+    """
     assert recompute_scale_factor is None, "recompute_scale_factor is not supported."
     assert antialias is None, "antialias is not supported."
     if size is None:
@@ -594,17 +1116,64 @@ def interpolate(
 
 
 def ccl_allreduce(x: Tensor, op_type: str = "sum", in_group: bool = True, name="ccl_allreduce"):
-    """CCL Allreduce operator."""
+    """Perform a collective all-reduce across workers.
+
+    Parameters
+    ----------
+    x : Tensor
+        Local tensor to reduce.
+    op_type : str
+        Reduction operation: ``"sum"``, ``"prod"``, ``"min"``, ``"max"``,
+        or ``"avg"``.
+    in_group : bool
+        If ``True``, restrict the reduction to the current worker group.
+    name : str
+        Name hint for the emitted binding.
+
+    Returns
+    -------
+    result : Tensor
+        Reduced tensor with the same shape as *x*.
+    """
     return _t(_ffi_op.ccl_allreduce(_v(x), op_type, in_group, name))
 
 
 def ccl_allgather(x: Tensor, num_workers: int, name="ccl_allgather"):
-    """CCL Allgather operator."""
+    """Gather tensors from all workers and concatenate along axis 0.
+
+    Parameters
+    ----------
+    x : Tensor
+        Local tensor to contribute.
+    num_workers : int
+        Total number of workers participating in the gather.
+    name : str
+        Name hint for the emitted binding.
+
+    Returns
+    -------
+    result : Tensor
+        Concatenated tensor with leading dimension scaled by *num_workers*.
+    """
     return _t(_ffi_op.ccl_allgather(_v(x), num_workers, name))
 
 
 def ccl_broadcast_from_worker0(x: Tensor, name="broadcast_from_worker"):
-    """Broadcast data from worker-0 to all other workers."""
+    """Broadcast *x* from worker 0 to all other workers.
+
+    Parameters
+    ----------
+    x : Tensor
+        Tensor on worker 0 to broadcast.  On other workers the value is
+        ignored and overwritten with the broadcast result.
+    name : str
+        Name hint for the emitted binding.
+
+    Returns
+    -------
+    result : Tensor
+        Tensor with the same shape and values as *x* on worker 0.
+    """
     return _t(_ffi_op.ccl_broadcast_from_worker0(_v(x), name))
 
 
@@ -615,7 +1184,27 @@ def tensor_expr_op(
     *,
     attrs: dict[str, Any] | None = None,
 ):
-    """Build the given tensor_expr_func with te."""
+    """Build a ``te.compute`` kernel from *tensor_expr_func* and emit it.
+
+    Parameters
+    ----------
+    tensor_expr_func : Callable
+        A function ``(*te.Tensor) -> te.Tensor | list[te.Tensor]`` that
+        describes the computation using TVM Tensor Expressions.
+    name_hint : str
+        Name hint for the generated ``PrimFunc`` and the emitted binding.
+    args : list[Tensor | tir.Var | int]
+        Inputs to the kernel.  ``nn.Tensor`` values are unwrapped to their
+        underlying ``relax.Var``; ``tir.Var`` and ``int`` are passed as-is.
+    attrs : dict[str, Any] | None
+        Optional attribute dictionary attached to the generated
+        ``PrimFunc``.
+
+    Returns
+    -------
+    result : Tensor | tuple[Tensor, ...]
+        The output tensor(s) produced by the kernel.
+    """
 
     def _convert(arg):
         if isinstance(arg, Tensor):
@@ -649,7 +1238,26 @@ def tensor_ir_op(
     args: Tensor | Sequence[Tensor | rx.ShapeExpr | _tir.PrimExpr],
     out: OutType,
 ) -> OutType:
-    """Create a `call_tir` binding with given PrimFunc."""
+    """Emit a ``call_tir`` binding that invokes a pre-built ``PrimFunc``.
+
+    Parameters
+    ----------
+    func : tir.PrimFunc
+        The TIR primitive function to call.
+    name_hint : str
+        Name hint for the emitted binding.
+    args : Tensor | Sequence[Tensor | ShapeExpr | PrimExpr]
+        Input arguments.  ``nn.Tensor`` values are unwrapped;
+        ``ShapeExpr`` and ``PrimExpr`` are wrapped in a ``ShapeExpr``.
+    out : Tensor | Sequence[Tensor]
+        Pre-allocated output tensor(s) that describe the output shape and
+        dtype.  Passed to ``call_tir`` as the destination.
+
+    Returns
+    -------
+    result : Tensor | tuple[Tensor, ...]
+        The output tensor(s), matching the type of *out*.
+    """
     if not isinstance(args, tuple | list):
         args = [args]
 
@@ -686,7 +1294,29 @@ def tensor_ir_inplace_op(
     inplace_indices: int | list[int],
     out: OutType,
 ) -> OutType:
-    """Create a `call_tir_inplace` binding with given PrimFunc."""
+    """Emit a ``call_tir_inplace`` binding that writes results back into
+    existing buffers.
+
+    Parameters
+    ----------
+    func : tir.PrimFunc
+        The TIR primitive function to call.
+    name_hint : str
+        Name hint for the emitted binding.
+    args : Tensor | Sequence[Tensor | ShapeExpr | PrimExpr]
+        Input arguments.  ``nn.Tensor`` values are unwrapped;
+        ``ShapeExpr`` and ``PrimExpr`` are wrapped in a ``ShapeExpr``.
+    inplace_indices : int | list[int]
+        Index or indices into *args* that are written in-place.
+    out : Tensor | Sequence[Tensor]
+        Pre-allocated output tensor(s) describing the output shape and
+        dtype.
+
+    Returns
+    -------
+    result : Tensor | tuple[Tensor, ...]
+        The output tensor(s), matching the type of *out*.
+    """
     if not isinstance(args, tuple | list):
         args = [args]
     if isinstance(inplace_indices, int):
@@ -724,7 +1354,26 @@ def extern(
     args: Sequence[Tensor | _tir.PrimExpr | int | float | str],
     out: OutType,
 ) -> OutType:
-    """Invoke an extern function during runtime."""
+    """Invoke a named external (packed) function at runtime.
+
+    Parameters
+    ----------
+    name : str
+        Registered name of the external function (e.g. a TVM packed-func
+        name or a symbol from an :class:`~extern.ExternModule`).
+    args : Sequence[Tensor | PrimExpr | int | float | str]
+        Arguments forwarded to the external function.  ``nn.Tensor`` values
+        are unwrapped to their underlying ``relax.Var``; scalars and strings
+        are passed as-is.
+    out : Tensor | Sequence[Tensor]
+        Pre-allocated output tensor(s) describing the expected output shape
+        and dtype (destination-passing style).
+
+    Returns
+    -------
+    result : Tensor | tuple[Tensor, ...]
+        The output tensor(s), matching the type of *out*.
+    """
 
     def _convert(arg):
         if isinstance(arg, Tensor):
@@ -750,7 +1399,25 @@ def debug_func(
     *args: Tensor | _tir.PrimExpr | int | float | str,
     _line_info: str | None = None,
 ):
-    """Call a debug function during runtime."""
+    """Call a debug callback function at runtime, threading the IO effect token.
+
+    The IO effect token is obtained from the C++ thread-local set by
+    ``ExportToIRModule``, or from the Python ``Exporter`` when running on
+    the Python export path.  Subsequent calls chain the updated token so
+    that debug calls are sequenced correctly in the IR.
+
+    Parameters
+    ----------
+    name : str
+        Registered name of the debug function to call (e.g.
+        ``"vm.builtin.debug_print"``).
+    *args : Tensor | PrimExpr | int | float | str
+        Arguments forwarded to the debug function.  ``nn.Tensor`` values
+        are unwrapped to their underlying ``relax.Var``.
+    _line_info : str | None
+        Source location string ``"filename:lineno"`` injected into the IR.
+        Auto-detected from the caller's frame when ``None``.
+    """
     # Get the current _io var from the C++ thread-local (set by ExportToIRModule)
     # or fall back to the Python Exporter if available.
     io_var = _ffi_api.GetCurrentIOVar()
@@ -782,7 +1449,16 @@ def debug_func(
 
 
 def print_(tensor: Tensor):
-    """Debug printing a Tensor during runtime."""
+    """Print *tensor* values to stdout at runtime via the debug IO effect.
+
+    Equivalent to ``debug_func("vm.builtin.debug_print", tensor)`` with
+    the caller's source location automatically recorded.
+
+    Parameters
+    ----------
+    tensor : Tensor
+        The tensor whose values to print.
+    """
     filename, line_number = inspect.getframeinfo(inspect.currentframe().f_back)[:2]
     line_info = f"{filename}:{line_number}"
     debug_func("vm.builtin.debug_print", tensor, _line_info=line_info)
