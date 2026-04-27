@@ -33,6 +33,9 @@
 #if defined(OPENCL_ENABLE_HOST_PTR)
 #include "../opencl/opencl_common.h"
 #endif
+#if TVM_ENABLE_SPIRV
+#include "../vulkan/vulkan_device_api.h"
+#endif
 
 namespace tvm {
 namespace runtime {
@@ -722,6 +725,20 @@ class PlainPagedKVCacheAuxDataManager : public PagedKVCacheAuxDataManager {
       } else {
         copy_size = DeviceAPI::Get(array->device)->GetDataSize(*array.operator->());
       }
+      memcpy(static_cast<char*>(nptr) + dst_elem_offset * sizeof(int32_t), vec_data, copy_size);
+      return;
+    }
+#endif
+#if TVM_ENABLE_SPIRV
+    if (copy_dst.device.device_type == kDLVulkan) {
+      uint64_t copy_size;
+      if (shape.defined()) {
+        TVM_FFI_ICHECK_EQ(shape.value().size(), 1);
+        copy_size = shape.value()->data[0] * sizeof(int32_t);
+      } else {
+        copy_size = DeviceAPI::Get(array->device)->GetDataSize(*array.operator->());
+      }
+      void* nptr = tvm::runtime::vulkan::VulkanDeviceAPI::Global()->GetNativePtr(array, copy_size);
       memcpy(static_cast<char*>(nptr) + dst_elem_offset * sizeof(int32_t), vec_data, copy_size);
       return;
     }

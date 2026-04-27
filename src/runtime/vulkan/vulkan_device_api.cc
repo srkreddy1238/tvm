@@ -289,6 +289,15 @@ void VulkanDeviceAPI::GetTargetProperty(Device dev, const std::string& property,
   }
 }
 
+void* VulkanDeviceAPI::GetNativePtr(const tvm::runtime::Tensor& narr, uint64_t size) {
+  VulkanBuffer* vk_buf = static_cast<VulkanBuffer*>(narr.operator->()->data);
+  void* host_addr = nullptr;
+  const auto& device = this->device(narr->device.device_id);
+  // VULKAN_CALL(vkMapMemory(device, vk_buf->memory->memory_, 0, size, 0, &host_addr));
+  VULKAN_CALL(vkMapMemory(device, vk_buf->memory, 0, size, 0, &host_addr));
+  return host_addr;
+}
+
 void* VulkanDeviceAPI::AllocDataSpace(Device dev, size_t nbytes, size_t alignment,
                                       DLDataType type_hint) {
   if (nbytes == 0) {

@@ -21,6 +21,7 @@
 #define TVM_RUNTIME_VULKAN_VULKAN_DEVICE_API_H_
 
 #include <tvm/runtime/device_api.h>
+#include <tvm/runtime/tensor.h>
 #include <vulkan/vulkan_core.h>
 
 #include <string>
@@ -51,6 +52,7 @@ class VulkanDeviceAPI final : public DeviceAPI {
   void FreeDataSpace(Device dev, void* ptr) final;
   void* AllocWorkspace(Device dev, size_t size, DLDataType type_hint) final;
   void FreeWorkspace(Device dev, void* data) final;
+  void* GetNativePtr(const tvm::runtime::Tensor& narr, uint64_t size);
 
   // Current vulkan implementation has one "stream" per CPU thread,
   // with all commands writing into a single command buffer that is
