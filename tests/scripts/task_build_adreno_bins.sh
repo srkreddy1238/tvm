@@ -39,6 +39,7 @@ echo set\(USE_OPENCL ON\) >> config.cmake
 fi
 echo set\(USE_VULKAN ON\) >> config.cmake
 echo set\(USE_RPC ON\) >> config.cmake
+echo set\(USE_CPP_RTVM ON\) >> config.cmake
 echo set\(USE_CPP_RPC ON\) >> config.cmake
 echo set\(USE_LIBBACKTRACE AUTO\) >> config.cmake
 echo set\(USE_KALLOC_ALIGNMENT 32\) >> config.cmake
@@ -66,7 +67,7 @@ cmake -G Ninja \
       -DCMAKE_C_COMPILER="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android28-clang" \
       -DMACHINE_NAME="aarch64-linux-gnu" ..
 
-ninja tvm_rpc opencl-cpptest
+ninja tvm_rpc rtvm opencl-cpptest
 
 cd -
 
@@ -93,6 +94,7 @@ if [ -f "${ADRENO_LLVM}/bin/llvm-config-native" ] ; then
     echo set\(USE_OPENCL ON\) >> config.cmake
   fi
   echo set\(USE_RPC ON\) >> config.cmake
+  echo set\(USE_CPP_RTVM ON\) >> config.cmake
   echo set\(USE_CPP_RPC ON\) >> config.cmake
   echo set\(USE_LIBBACKTRACE AUTO\) >> config.cmake
   echo set\(USE_KALLOC_ALIGNMENT 32\) >> config.cmake
@@ -123,7 +125,7 @@ if [ -f "${ADRENO_LLVM}/bin/llvm-config-native" ] ; then
       -DCMAKE_C_COMPILER="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android28-clang" \
       -DMACHINE_NAME="aarch64-linux-gnu" ..
 
-  ninja tvm cpp-compiler-test
+  ninja tvm rtvm cpp-compiler-test
 
   cd -
 fi

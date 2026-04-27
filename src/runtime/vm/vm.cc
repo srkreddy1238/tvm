@@ -211,6 +211,7 @@ class VirtualMachineImpl : public VirtualMachine {
   void _GetOutput(ffi::PackedArgs args, ffi::Any* rv);
   void _SetInputWithoutParamModule(ffi::PackedArgs args, ffi::Any* rv);
   void _SetInputWithParamModule(ffi::PackedArgs args, ffi::Any* rv);
+  void SetInputWithIndex(ffi::PackedArgs args, ffi::Any* rv);
   int _GetFunctionArity(std::string func_name);
   std::string _GetFunctionParamName(std::string func_name, int index);
   ffi::Function _LookupFunction(const ffi::String& name);
@@ -224,6 +225,7 @@ class VirtualMachineImpl : public VirtualMachine {
   TVM_MODULE_VTABLE_ENTRY_PACKED("get_output_arity", &VirtualMachineImpl::_GetOutputArity);
   TVM_MODULE_VTABLE_ENTRY_PACKED("get_output", &VirtualMachineImpl::_GetOutput);
   TVM_MODULE_VTABLE_ENTRY_PACKED("set_input", &VirtualMachineImpl::_SetInputWithoutParamModule);
+  TVM_MODULE_VTABLE_ENTRY_PACKED("set_input_with_index", &VirtualMachineImpl::SetInputWithIndex);
   TVM_MODULE_VTABLE_ENTRY_PACKED("set_input_with_param_module",
                                  &VirtualMachineImpl::_SetInputWithParamModule);
   TVM_MODULE_VTABLE_ENTRY("get_function_arity", &VirtualMachineImpl::_GetFunctionArity);
@@ -521,6 +523,25 @@ void VirtualMachineImpl::SetInput(std::string func_name, bool with_param_module,
     inputs_[func_name] = func_args;
   } else {
     TVM_FFI_THROW(ValueError) << "Unknown function: " << func_name;
+  }
+}
+
+void VirtualMachineImpl::SetInputWithIndex(ffi::PackedArgs args, ffi::Any* rv) {
+  //(std::string func_name, int index, NDArray arg) {
+  std::string func_name = args[0].cast<std::string>();
+  int index = args[1].cast<int>();
+  auto arg = args[2].as<ObjectRef>().value();
+  const auto& m = exec_->func_map;
+  Index gf_idx = m.at(func_name);
+  const VMFuncInfo& vm_func = exec_->func_table[gf_idx];
+  size_t params_num = vm_func.num_args;
+  if (inputs_[func_name].size() < params_num) inputs_[func_name].resize(params_num);
+  if (m.find(func_name) != m.end()) {
+    RegType func_arg;
+    func_arg = ConvertTensorToDevice(arg.as<Tensor>().value(), devices[0], allocators[0]);
+    inputs_[func_name][index] = func_arg;
+  } else {
+    LOG(FATAL) << "ValueError: Unknown function: " << func_name;
   }
 }
 
