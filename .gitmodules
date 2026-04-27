@@ -12,7 +12,7 @@
 	url = https://github.com/tlc-pack/libflash_attn
 [submodule "3rdparty/tvm-ffi"]
 	path = 3rdparty/tvm-ffi
-	url = https://github.com/apache/tvm-ffi
+	url = https://github.qualcomm.com/gpgpu/apache-tvm-ffi.git
 [submodule "3rdparty/cnpy"]
 	path = 3rdparty/cnpy
 	url = https://github.com/rogersce/cnpy.git
