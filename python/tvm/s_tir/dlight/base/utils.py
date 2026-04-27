@@ -33,11 +33,15 @@ def get_extent(sch: s_tir.Schedule, loop_rv: s_tir.schedule.LoopRV):
 
 
 def auto_vectorize(sch: s_tir.Schedule, loop: s_tir.schedule.LoopRV, max_vec: int):
-    """Auto vectorize the loop."""
     extent = get_extent(sch, loop)
     if not isinstance(extent, int):
         return
-    v = loop if extent <= max_vec else sch.split(loop, factors=[None, max_vec])[-1]
+    # Find the largest power of 2 factor of extent that is <= max_vec
+    vec_len = 1
+    for f in [2, 4, 8, 16]:
+        if f <= max_vec and extent % f == 0:
+            vec_len = f
+    v = loop if extent <= vec_len else sch.split(loop, factors=[None, vec_len])[-1]
     sch.vectorize(v)
 
 

@@ -506,7 +506,10 @@ class GEMV(GPUScheduleRule):
                 # sch.vectorize(vec_s)
 
             Aq_local = sch.cache_read(rf, read_buffer_index=1, storage_scope="local")
-            sch.compute_at(Aq_local, tile_r, preserve_unit_loops=True)
+            if DEC_PACK == 10:
+                sch.compute_at(Aq_local, v_tile, preserve_unit_loops=True)
+            else:
+                sch.compute_at(Aq_local, tile_r, preserve_unit_loops=True)
             # *tile_thr, vec_s = sch.get_loops(block=Aq_local)
             # sch.vectorize(vec_s)
 
@@ -592,6 +595,7 @@ class GEMV(GPUScheduleRule):
             LOAD_V_SHARED = False
             LOAD_V_VEC = 4
             LOAD_V_TILE = 8
+            DEC_PACK = get_extent(sch, c)
         elif target.kind.name == "vulkan" and ("adreno" in target.keys):
             TAG_S, TAG_R = "threadIdx.x", "threadIdx.y"
             VEC_C = 4
