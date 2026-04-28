@@ -15,286 +15,74 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""Operators for positional embeddings, e.g. RoPE."""
+"""Thin Python wrappers for positional-embedding operators (e.g. RoPE).
 
-import math
+All heavy-weight TIR construction lives in the C++ implementation at
+  src/relax/frontend/nn/llm/position_embedding.cc
+
+This module is a thin FFI bridge:
+  1. Converts Python arguments (nn.Tensor -> relax.Var, dict -> ffi.Map, …).
+  2. Calls the corresponding C++ FFI function.
+  3. Wraps the returned relax.Var(s) back into nn.Tensor via
+     ``_unwrap_ffi_result``.
+
+The public API (``llama_rope``, ``llama_rope_with_position_map``,
+``llama4_rope_with_position_map``, ``switch_rope_freq_func``) is identical
+to the previous pure-Python implementation so all call-sites remain unchanged.
+"""
+
 from collections.abc import Callable
-from functools import partial
 from typing import Any
 
 from tvm import tir
-from tvm.relax.frontend.nn import Tensor, op
-from tvm.script import tir as T
+from tvm.relax.frontend.nn import Tensor
+
+import tvm.relax.frontend.nn.llm._ffi_api_llm_position_embedding as _ffi  # C++ FFI bridge
 
 # pylint: disable=invalid-name
 
 
-def rope_freq_default(s: tir.Var, d: tir.Var, d_range: int, theta: float, dtype: str):
-    """Compute the inverse frequency of RoPE and then return the cosine and sine of it.
-
-    Parameters
-    ----------
-    s : tir.Var
-        The position index.
-
-    d : tir.Var
-        The dimension index.
-
-    d_range : int
-        The maximum dimension index.
-
-    theta : float
-        The theta value in RoPE, which controls the frequency.
-
-    dtype : str
-        The data type of the output.
-
-    Returns
-    -------
-    cos_freq : Tensor
-        The cosine of the inverse frequency.
-
-    sin_freq : Tensor
-        The sine of the inverse frequency.
-
-    var_map: Dict[tir.Var, tir.PrimExpr]
-        The common expression map.
-    """
-    freq = s / tir.power(theta, d * 2 % d_range / tir.const(d_range, "float32"))
-    freq_var = tir.Var("freq", "float32")
-    cos_freq = tir.cos(freq_var).astype(dtype)
-    sin_freq = tir.sin(freq_var).astype(dtype)
-    return cos_freq, sin_freq, {freq_var: freq}
-
-
-def rope_freq_gptj(s: tir.Var, d: tir.Var, d_range: int, theta: float, dtype: str):
-    """Compute the inverse frequency of RoPE for gptj RoPE scaling."""
-    freq = s / tir.power(theta, 2 * (d // 2) % d_range / tir.const(d_range, "float32"))
-    freq_var = tir.Var("freq", "float32")
-    cos_freq = tir.cos(freq_var).astype(dtype)
-    sin_freq = tir.sin(freq_var).astype(dtype)
-    return cos_freq, sin_freq, {freq_var: freq}
-
-
-def rope_freq_llama4(  # pylint: disable=too-many-arguments,too-many-locals
-    s: tir.Var,
-    d: tir.Var,
-    d_range: int,
-    theta: float,
-    dtype: str,
-    factor: float,
-    low_freq_factor: float,
-    high_freq_factor: float,
-    original_max_position_embeddings: float,
-):
-    """Compute the inverse frequency of RoPE for llama4 RoPE scaling."""
-    orig_freq = tir.const(1, "float32") / tir.power(
-        theta, 2 * (d // 2) / tir.const(d_range, "float32")
-    )
-    orig_freq_var = tir.Var("orig_freq", "float32")
-
-    llama4_inv_scaling_factor = 1.0 / factor
-
-    if high_freq_factor == low_freq_factor:
-        wavelength = tir.const(2 * math.pi, "float32") / orig_freq_var
-        threshold_wavelen = tir.const(original_max_position_embeddings / low_freq_factor, "float32")
-
-        scaled_freq = tir.if_then_else(
-            wavelength > threshold_wavelen, orig_freq_var / factor, orig_freq_var
-        )
-        smoothed_freq = s * scaled_freq
-
-    else:
-        # Original smooth interpolation logic
-        inv_diff_freq_factor = 1.0 / (high_freq_factor - low_freq_factor)
-
-        llama4_alpha = original_max_position_embeddings / (2 * math.pi) * inv_diff_freq_factor
-        llama4_beta = low_freq_factor * inv_diff_freq_factor
-        smooth = tir.max(0.0, tir.min(1.0, llama4_alpha * orig_freq_var - llama4_beta))
-        smoothed_freq = s * (
-            (1.0 - smooth) * orig_freq_var * llama4_inv_scaling_factor + smooth * orig_freq_var
-        )
-
-    smoothed_freq_var = tir.Var("smoothed_freq", "float32")
-    cos_freq = tir.cos(smoothed_freq_var).astype(dtype)
-    sin_freq = tir.sin(smoothed_freq_var).astype(dtype)
-    return (
-        cos_freq,
-        sin_freq,
-        {smoothed_freq_var: smoothed_freq, orig_freq_var: orig_freq},
-    )
-
-
-def rope_freq_llama3(  # pylint: disable=too-many-arguments,too-many-locals
-    s: tir.Var,
-    d: tir.Var,
-    d_range: int,
-    theta: float,
-    dtype: str,
-    factor: float,
-    low_freq_factor: float,
-    high_freq_factor: float,
-    original_max_position_embeddings: float,
-):
-    """Compute the inverse frequency of RoPE for llama3 RoPE scaling."""
-    orig_freq = tir.const(1, "float32") / tir.power(
-        theta, d * 2 % d_range / tir.const(d_range, "float32")
-    )
-    orig_freq_var = tir.Var("orig_freq", "float32")
-    inv_diff_freq_factor = 1.0 / (high_freq_factor - low_freq_factor)
-    llama3_inv_scaling_factor = 1.0 / factor
-    llama3_alpha = original_max_position_embeddings / (2 * math.pi) * inv_diff_freq_factor
-    llama3_beta = low_freq_factor * inv_diff_freq_factor
-    smooth = tir.max(0.0, tir.min(1.0, llama3_alpha * orig_freq_var - llama3_beta))
-    smoothed_freq = s * (
-        (1.0 - smooth) * orig_freq_var * llama3_inv_scaling_factor + smooth * orig_freq_var
-    )
-    smoothed_freq_var = tir.Var("smoothed_freq", "float32")
-    cos_freq = tir.cos(smoothed_freq_var).astype(dtype)
-    sin_freq = tir.sin(smoothed_freq_var).astype(dtype)
-    return (
-        cos_freq,
-        sin_freq,
-        {smoothed_freq_var: smoothed_freq, orig_freq_var: orig_freq},
-    )
-
-
-def rope_freq_longrope(  # pylint: disable=too-many-arguments
-    s: tir.Var,
-    d: tir.Var,
-    d_range: int,
-    theta: float,
-    dtype: str,
-    max_position_embeddings: int,
-    original_max_position_embeddings: int,
-    ext_factors: T.Buffer | None = None,
-):
-    """Compute the inverse frequency of RoPE for longrope scaling."""
-    scale = max_position_embeddings / original_max_position_embeddings
-    scaling_factor = (
-        math.sqrt(1 + math.log(scale) / math.log(original_max_position_embeddings))
-        if scale > 1.0
-        else 1.0
-    )
-    divisor = tir.power(theta, d * 2 % d_range / tir.const(d_range, "float32"))
-    if ext_factors is not None:
-        divisor = ext_factors[d % (d_range // 2)] * divisor
-    freq = s / divisor
-    freq_var = tir.Var("freq", "float32")
-    cos_freq = (tir.cos(freq_var) * scaling_factor).astype(dtype)
-    sin_freq = (tir.sin(freq_var) * scaling_factor).astype(dtype)
-    return cos_freq, sin_freq, {freq_var: freq}
-
-
-def yarn_find_correction_dim(
-    num_rotations: int,
-    d: tir.Var,
-    max_position_embeddings: int,
-    inv_theta_log_scale: float | tir.PrimExpr | None = None,
-):
-    """Inverse dim formula to find dim based on number of rotations"""
-    return (
-        d * math.log(max_position_embeddings / (num_rotations * 2 * math.pi)) * inv_theta_log_scale
-    )
-
-
-def yarn_find_correction_range(
-    low_rot: int,
-    high_rot: int,
-    d: tir.Var,
-    max_position_embeddings: int,
-    inv_theta_log_scale: float | tir.PrimExpr | None = None,
-):
-    """Find the correction range based on the number of rotations"""
-    low = yarn_find_correction_dim(
-        low_rot, d, max_position_embeddings, inv_theta_log_scale=inv_theta_log_scale
-    )
-    high = yarn_find_correction_dim(
-        high_rot, d, max_position_embeddings, inv_theta_log_scale=inv_theta_log_scale
-    )
-    return tir.max(low, 0), tir.min(high, d - 1)
-
-
-def rope_freq_yarn(
-    s: tir.Var,
-    d: tir.Var,
-    d_range: int,
-    theta: float | tir.PrimExpr,
-    dtype: str,
-    original_max_position_embeddings: int,
-    scaling_factor: float,
-    beta_fast: int,
-    beta_slow: int,
-    inv_theta_log_scale: float | tir.PrimExpr | None = None,
-):  # pylint: disable=too-many-arguments, too-many-locals
-    """Compute the inverse frequency of RoPE for yarn RoPE scaling."""
-
-    exponent = d * 2 % d_range / tir.const(d_range, "float32")
-    freq_power = tir.power(theta, exponent)
-    freq_extra = tir.const(1, "float32") / freq_power
-    freq_inter = tir.const(1, "float32") / (scaling_factor * freq_power)
-
-    low, high = yarn_find_correction_range(
-        beta_fast,
-        beta_slow,
-        d_range,
-        original_max_position_embeddings,
-        inv_theta_log_scale=inv_theta_log_scale,
-    )
-    high = tir.if_then_else(low == high, high + 0.001, high)
-    inv_freq_mask = tir.const(1, "float32") - tir.max(
-        tir.min((d - low) / (high - low), 1.0), 0.0
-    ).astype("float32")
-    inv_freq = freq_inter * (1 - inv_freq_mask) + freq_extra * inv_freq_mask
-    freq = s * inv_freq
-    freq_var = tir.Var("freq", "float32")
-    cos_freq = tir.cos(freq_var).astype(dtype)
-    sin_freq = tir.sin(freq_var).astype(dtype)
-    return cos_freq, sin_freq, {freq_var: freq}
+# ---------------------------------------------------------------------------
+# switch_rope_freq_func – thin wrapper around the C++ implementation
+#
+# kv_cache.py and tree_attn.py call this as:
+#
+#   cos_freq, sin_freq, var_map = switch_rope_freq_func(rope_scaling)(
+#       offset * scale, d, rotary_dim, theta, "float32"
+#   )
+#
+# The C++ FFI function has signature:
+#   switch_rope_freq_func(rope_scaling, s, d, d_range, theta, dtype)
+#   -> [cos_freq, sin_freq, Array<Var> keys, Array<PrimExpr> vals]
+#
+# We wrap it so the returned callable matches the Python convention exactly.
+# ---------------------------------------------------------------------------
 
 
 def switch_rope_freq_func(rope_scaling: dict[str, Any]) -> Callable:
-    """Return the RoPE inverse frequency computation function based
-    on the given RoPE scaling.
+    """Return the RoPE inverse-frequency computation function for the given scaling config.
+
+    The returned callable has signature::
+
+        (s, d, d_range, theta, dtype) -> (cos_freq, sin_freq, var_map)
+
+    where ``var_map`` is a ``{tir.Var: tir.PrimExpr}`` dict of intermediate
+    variables that must be bound via ``tir.Let`` in the enclosing expression.
+
+    All computation is delegated to the C++ ``SwitchRopeFreqFunc`` /
+    ``RopeFreq*`` family via FFI.
     """
-    if "rope_type" not in rope_scaling:
-        return rope_freq_default
-    if rope_scaling["rope_type"] == "gptj":
-        return rope_freq_gptj
-    if rope_scaling["rope_type"] == "llama3":
-        return partial(
-            rope_freq_llama3,
-            factor=rope_scaling["factor"],
-            low_freq_factor=rope_scaling["low_freq_factor"],
-            high_freq_factor=rope_scaling["high_freq_factor"],
-            original_max_position_embeddings=rope_scaling["original_max_position_embeddings"],
-        )
-    if rope_scaling["rope_type"] == "llama4":
-        return partial(
-            rope_freq_llama4,
-            factor=rope_scaling["factor"],
-            low_freq_factor=rope_scaling["low_freq_factor"],
-            high_freq_factor=rope_scaling["high_freq_factor"],
-            original_max_position_embeddings=rope_scaling["original_max_position_embeddings"],
-        )
-    if rope_scaling["rope_type"] == "longrope":
-        return partial(
-            rope_freq_longrope,
-            max_position_embeddings=rope_scaling["max_position_embeddings"],
-            original_max_position_embeddings=rope_scaling["original_max_position_embeddings"],
-        )
-    if rope_scaling["rope_type"] == "yarn":
-        inv_theta_log_scale = rope_scaling.get("inv_theta_log_scale")
-        assert inv_theta_log_scale is not None, "inv_theta_log_scale must be precomputed for YaRN"
-        return partial(
-            rope_freq_yarn,
-            original_max_position_embeddings=rope_scaling["original_max_position_embeddings"],
-            scaling_factor=rope_scaling["factor"],
-            beta_fast=rope_scaling["beta_fast"],
-            beta_slow=rope_scaling["beta_slow"],
-            inv_theta_log_scale=inv_theta_log_scale,
-        )
-    raise ValueError(f"Unsupported RoPE scaling type: {rope_scaling['rope_type']}")
+
+    def _call(s: tir.Var, d: tir.Var, d_range: int, theta: float, dtype: str) -> tuple:
+        result = _ffi.switch_rope_freq_func(rope_scaling, s, d, int(d_range), float(theta), dtype)
+        cos_freq = result[0]
+        sin_freq = result[1]
+        keys = result[2]   # Array<tir.Var>
+        vals = result[3]   # Array<tir.PrimExpr>
+        var_map = {k: v for k, v in zip(keys, vals)}
+        return cos_freq, sin_freq, var_map
+
+    return _call
 
 
 # mypy: disable-error-code="attr-defined"
@@ -349,94 +137,20 @@ def llama_rope(  # pylint: disable=too-many-arguments
     k : Tensor
         The key tensor of shape [batch_size, seq_len, #kv_heads, head_dim] w/ RoPE applied
 
-    v : Tensor
+                        v : Tensor
         The value tensor of shape [batch_size, seq_len, #kv_heads, head_dim] w/o RoPE applied
     """
-    _, _, fused_heads, head_dim = qkv.shape
-    assert fused_heads == num_q_heads + num_kv_heads * 2
-    if rotary_dim is None:
-        rotary_dim = head_dim
-    dtype = qkv.dtype
-    scale = tir.const(scale, dtype)
-
-    def _rope(  # pylint: disable=too-many-arguments
-        x: T.Buffer,
-        b: tir.Var,
-        s: tir.Var,
-        h: tir.Var,
-        d: tir.Var,
-        offset: tir.Var,
-    ):
-        cos_freq, sin_freq, var_map = switch_rope_freq_func(rope_scaling)(
-            (s + offset) * scale, d, rotary_dim, theta, dtype
-        )
-        cos = cos_freq * x[b, s, h, d]
-        if rope_scaling["rope_type"] == "gptj":
-            sin = sin_freq * tir.if_then_else(
-                d % 2 == 0,
-                -x[b, s, h, d + 1],
-                x[b, s, h, d - 1],
-            )
-        else:
-            sin = sin_freq * tir.if_then_else(
-                d < rotary_dim // 2,
-                -x[b, s, h, d + rotary_dim // 2],
-                x[b, s, h, d - rotary_dim // 2],
-            )
-        expr = cos + sin
-        for var, value in var_map.items():
-            expr = tir.Let(var, value, expr)
-        return expr
-
-    @T.prim_func(private=True)
-    def fused_rope(  # pylint: disable=too-many-locals
-        var_qkv: T.handle,
-        var_q: T.handle,
-        var_k: T.handle,
-        var_v: T.handle,
-        total_seq_len: T.int64,
-    ):
-        T.func_attr(
-            {
-                "op_pattern": 8,  # 2 means injective, 8 means opaque
-                "tir.noalias": True,
-            }
-        )
-        batch_size = T.int64()
-        seq_len = T.int64()
-        qkv = T.match_buffer(var_qkv, (batch_size, seq_len, fused_heads, head_dim), dtype)
-        q = T.match_buffer(var_q, (batch_size, seq_len, num_q_heads, head_dim), dtype)
-        k = T.match_buffer(var_k, (batch_size, seq_len, num_kv_heads, head_dim), dtype)
-        v = T.match_buffer(var_v, (batch_size, seq_len, num_kv_heads, head_dim), dtype)
-        for iters in T.grid(batch_size, seq_len, fused_heads, head_dim):
-            with T.sblock("llama_fused_rope"):
-                b, s, h, d = T.axis.remap("SSSS", iters)
-                if h < num_q_heads:
-                    q[b, s, h, d] = T.if_then_else(
-                        d < rotary_dim,
-                        _rope(qkv, b, s, h, d, total_seq_len - seq_len),
-                        qkv[b, s, h, d],
-                    )
-                elif h < num_q_heads + num_kv_heads:
-                    k[b, s, h - num_q_heads, d] = T.if_then_else(
-                        d < rotary_dim,
-                        _rope(qkv, b, s, h, d, total_seq_len - seq_len),
-                        qkv[b, s, h, d],
-                    )
-                else:
-                    v[b, s, h - (num_q_heads + num_kv_heads), d] = qkv[b, s, h, d]
-
-    b, s, _, _ = qkv.shape
-    return op.tensor_ir_op(  # pylint: disable=no-member
-        fused_rope,
-        "llama_rope",
-        args=[qkv, total_seq_len],
-        out=(
-            Tensor.placeholder((b, s, num_q_heads, head_dim), dtype),
-            Tensor.placeholder((b, s, num_kv_heads, head_dim), dtype),
-            Tensor.placeholder((b, s, num_kv_heads, head_dim), dtype),
-        ),
+    result = _ffi.llama_rope(
+        qkv,
+        total_seq_len,
+        float(theta),
+        float(scale),
+        int(num_q_heads),
+        int(num_kv_heads),
+        rope_scaling,
+        rotary_dim,
     )
+    return result[0], result[1], result[2]  # type: ignore[return-value]
 
 
 def llama_rope_with_position_map(  # pylint: disable=too-many-arguments
@@ -449,7 +163,7 @@ def llama_rope_with_position_map(  # pylint: disable=too-many-arguments
     rope_scaling: dict[str, Any],
     rotary_dim: int | None = None,
 ):
-    """Return the TIR function that computes Llama-style RoPE with q position map.
+    """Return the TIR function that computes Llama-style RoPE with a position map.
 
     Parameters
     ----------
@@ -477,192 +191,24 @@ def llama_rope_with_position_map(  # pylint: disable=too-many-arguments
     rotary_dim : int
         The number of dimensions in the embedding that RoPE is applied to. By default, the
         rotary_dim is the same as head_dim.
+
+    Returns
+    -------
+    fused_rope : tir.PrimFunc
+        The TIR function implementing the fused RoPE kernel.  For longrope
+        scaling the returned function accepts an ``ext_factors`` buffer as its
+        last argument instead of ``apply_rope``.
     """
-    fused_heads = num_q_heads + num_kv_heads * 2
-    if rotary_dim is None:
-        rotary_dim = head_dim
-    scale = tir.const(scale, "float32")
-    is_longrope_scaling = rope_scaling.get("rope_type") == "longrope"
-    if is_longrope_scaling and "original_max_position_embeddings" in rope_scaling:
-        original_max_position_embeddings = rope_scaling["original_max_position_embeddings"]
-    else:
-        original_max_position_embeddings = 0
-
-    def _rope(  # pylint: disable=too-many-arguments
-        x: T.Buffer,
-        s: tir.Var,
-        h: tir.Var,
-        d: tir.Var,
-        pos: tir.Var,
-        ext_factors: T.Buffer | None = None,
-    ):
-        kwargs = {}
-        if ext_factors:
-            kwargs["ext_factors"] = ext_factors
-        cos_freq, sin_freq, var_map = switch_rope_freq_func(rope_scaling)(
-            pos * scale, d, rotary_dim, theta, "float32", **kwargs
-        )
-        cos = cos_freq * x[s, h, d].astype("float32")
-        if "rope_type" in rope_scaling and rope_scaling["rope_type"] == "gptj":
-            sin = sin_freq * tir.if_then_else(
-                d % 2 == 0,
-                -x[s, h, d + 1],
-                x[s, h, d - 1],
-            ).astype("float32")
-        else:
-            sin = sin_freq * tir.if_then_else(
-                d < rotary_dim // 2,
-                -x[s, h, d + rotary_dim // 2],
-                x[s, h, d - rotary_dim // 2],
-            ).astype("float32")
-        expr = (cos + sin).astype(dtype)
-        for var, value in var_map.items():
-            expr = tir.Let(var, value, expr)
-        return expr
-
-    @T.prim_func
-    def fused_rope(  # pylint: disable=too-many-locals
-        var_qkv: T.handle,
-        var_position_map: T.handle,
-        var_q: T.handle,
-        var_k: T.handle,
-        var_v: T.handle,
-        apply_rope: T.int32,
-    ):
-        T.func_attr(
-            {
-                "op_pattern": 8,  # 2 means injective, 8 means opaque
-                "tir.noalias": True,
-            }
-        )
-        seq_len = T.int32()
-        position_map_elem_offset = T.int32()
-        qkv = T.match_buffer(var_qkv, (seq_len, fused_heads, head_dim), dtype)
-        q = T.match_buffer(var_q, (seq_len, num_q_heads, head_dim), dtype)
-        k = T.match_buffer(var_k, (seq_len, num_kv_heads, head_dim), dtype)
-        v = T.match_buffer(var_v, (seq_len, num_kv_heads, head_dim), dtype)
-        position_map = T.match_buffer(
-            var_position_map, (seq_len,), "int32", elem_offset=position_map_elem_offset
-        )
-        for iters in T.grid(seq_len, fused_heads, head_dim):
-            with T.sblock("llama_fused_rope"):
-                s, h, d = T.axis.remap("SSS", iters)
-                if h < num_q_heads:
-                    q[s, h, d] = T.if_then_else(
-                        tir.all(apply_rope > 0, d < rotary_dim),
-                        _rope(qkv, s, h, d, position_map[s]),
-                        qkv[s, h, d],
-                    )
-                elif h < num_q_heads + num_kv_heads:
-                    k[s, h - num_q_heads, d] = T.if_then_else(
-                        tir.all(apply_rope > 0, d < rotary_dim),
-                        _rope(qkv, s, h, d, position_map[s]),
-                        qkv[s, h, d],
-                    )
-                else:
-                    v[s, h - (num_q_heads + num_kv_heads), d] = qkv[s, h, d]
-
-    @T.prim_func
-    def fused_rope_longrope_scaling(  # pylint: disable=too-many-locals
-        var_qkv: T.handle,
-        var_position_map: T.handle,
-        var_q: T.handle,
-        var_k: T.handle,
-        var_v: T.handle,
-        ext_factors: T.Buffer((rotary_dim,), "float32"),  # type: ignore
-    ):
-        T.func_attr(
-            {
-                "op_pattern": 8,  # 2 means injective, 8 means opaque
-                "tir.noalias": True,
-            }
-        )
-        seq_len = T.int64()
-        position_map_elem_offset = T.int64()
-        qkv = T.match_buffer(var_qkv, (seq_len, fused_heads, head_dim), dtype)
-        q = T.match_buffer(var_q, (seq_len, num_q_heads, head_dim), dtype)
-        k = T.match_buffer(var_k, (seq_len, num_kv_heads, head_dim), dtype)
-        v = T.match_buffer(var_v, (seq_len, num_kv_heads, head_dim), dtype)
-        position_map = T.match_buffer(
-            var_position_map, (seq_len,), "int32", elem_offset=position_map_elem_offset
-        )
-        # long factors is the first half, short factors is the second half
-        long_factors = T.Buffer((rotary_dim // 2,), "float32", data=ext_factors.data)
-        short_factors = T.Buffer(
-            (rotary_dim // 2,),
-            "float32",
-            data=ext_factors.data,
-            elem_offset=(rotary_dim // 2),
-        )
-
-        if seq_len > original_max_position_embeddings:
-            for iters in T.grid(seq_len, fused_heads, head_dim):
-                with T.sblock("llama_fused_rope"):
-                    s, h, d = T.axis.remap("SSS", iters)
-                    if h < num_q_heads:
-                        q[s, h, d] = T.if_then_else(
-                            d < rotary_dim,
-                            _rope(
-                                qkv,
-                                s,
-                                h,
-                                d,
-                                position_map[s],
-                                long_factors if is_longrope_scaling else None,
-                            ),
-                            qkv[s, h, d],
-                        )
-                    elif h < num_q_heads + num_kv_heads:
-                        k[s, h - num_q_heads, d] = T.if_then_else(
-                            d < rotary_dim,
-                            _rope(
-                                qkv,
-                                s,
-                                h,
-                                d,
-                                position_map[s],
-                                long_factors if is_longrope_scaling else None,
-                            ),
-                            qkv[s, h, d],
-                        )
-                    else:
-                        v[s, h - (num_q_heads + num_kv_heads), d] = qkv[s, h, d]
-        else:
-            for iters in T.grid(seq_len, fused_heads, head_dim):
-                with T.sblock("llama_fused_rope"):
-                    s, h, d = T.axis.remap("SSS", iters)
-                    if h < num_q_heads:
-                        q[s, h, d] = T.if_then_else(
-                            d < rotary_dim,
-                            _rope(
-                                qkv,
-                                s,
-                                h,
-                                d,
-                                position_map[s],
-                                short_factors if is_longrope_scaling else None,
-                            ),
-                            qkv[s, h, d],
-                        )
-                    elif h < num_q_heads + num_kv_heads:
-                        k[s, h - num_q_heads, d] = T.if_then_else(
-                            d < rotary_dim,
-                            _rope(
-                                qkv,
-                                s,
-                                h,
-                                d,
-                                position_map[s],
-                                short_factors if is_longrope_scaling else None,
-                            ),
-                            qkv[s, h, d],
-                        )
-                    else:
-                        v[s, h - (num_q_heads + num_kv_heads), d] = qkv[s, h, d]
-
-    if is_longrope_scaling:
-        return fused_rope_longrope_scaling
-    return fused_rope
+    return _ffi.llama_rope_with_position_map(
+        float(theta),
+        float(scale),
+        int(head_dim),
+        int(num_q_heads),
+        int(num_kv_heads),
+        dtype,
+        rope_scaling,
+        rotary_dim,
+    )
 
 
 def llama4_rope_with_position_map(  # pylint: disable=too-many-arguments
@@ -675,7 +221,7 @@ def llama4_rope_with_position_map(  # pylint: disable=too-many-arguments
     rope_scaling: dict[str, Any],
     rotary_dim: int | None = None,
 ):
-    """Return the TIR function that computes Llama-style RoPE with q position map.
+    """Return the TIR function that computes Llama-4-style RoPE with a position map.
 
     Parameters
     ----------
@@ -703,190 +249,19 @@ def llama4_rope_with_position_map(  # pylint: disable=too-many-arguments
     rotary_dim : int
         The number of dimensions in the embedding that RoPE is applied to. By default, the
         rotary_dim is the same as head_dim.
+
+    Returns
+    -------
+    fused_rope : tir.PrimFunc
+        The TIR function implementing the fused Llama-4 RoPE kernel.
     """
-    fused_heads = num_q_heads + num_kv_heads * 2
-    if rotary_dim is None:
-        rotary_dim = head_dim
-    scale = tir.const(scale, "float32")
-    is_longrope_scaling = rope_scaling.get("rope_type") == "longrope"
-    if is_longrope_scaling and "original_max_position_embeddings" in rope_scaling:
-        original_max_position_embeddings = rope_scaling["original_max_position_embeddings"]
-    else:
-        original_max_position_embeddings = 0
-
-    def _rope(  # pylint: disable=too-many-arguments
-        x: T.Buffer,
-        s: tir.Var,
-        h: tir.Var,
-        d: tir.Var,
-        pos: tir.Var,
-        ext_factors: T.Buffer | None = None,
-    ):
-        kwargs = {}
-        if ext_factors:
-            kwargs["ext_factors"] = ext_factors
-        cos_freq, sin_freq, var_map = switch_rope_freq_func(rope_scaling)(
-            pos * scale, d, rotary_dim, theta, "float32", **kwargs
-        )
-        cos = cos_freq * x[s, h, d].astype("float32")
-        if "rope_type" in rope_scaling and rope_scaling["rope_type"] == "gptj":
-            sin = sin_freq * tir.if_then_else(
-                d % 2 == 0,
-                -x[s, h, d + 1],
-                x[s, h, d - 1],
-            ).astype("float32")
-        else:
-            # Data layout is different for llama4 vs llama3
-            sin = sin_freq * tir.if_then_else(
-                d % 2 == 0,
-                -x[s, h, d + 1],
-                x[s, h, d - 1],
-            ).astype("float32")
-        expr = (cos + sin).astype(dtype)
-        for var, value in var_map.items():
-            expr = tir.Let(var, value, expr)
-        return expr
-
-    @T.prim_func(private=True)
-    def fused_rope(  # pylint: disable=too-many-locals
-        var_qkv: T.handle,
-        var_position_map: T.handle,
-        var_q: T.handle,
-        var_k: T.handle,
-        var_v: T.handle,
-        apply_rope: T.int64,
-    ):
-        T.func_attr(
-            {
-                "op_pattern": 8,  # 2 means injective, 8 means opaque
-                "tir.noalias": True,
-            }
-        )
-        seq_len = T.int32()
-        position_map_elem_offset = T.int32()
-        qkv = T.match_buffer(var_qkv, (seq_len, fused_heads, head_dim), dtype)
-        q = T.match_buffer(var_q, (seq_len, num_q_heads, head_dim), dtype)
-        k = T.match_buffer(var_k, (seq_len, num_kv_heads, head_dim), dtype)
-        v = T.match_buffer(var_v, (seq_len, num_kv_heads, head_dim), dtype)
-        position_map = T.match_buffer(
-            var_position_map, (seq_len,), "int32", elem_offset=position_map_elem_offset
-        )
-        for iters in T.grid(seq_len, fused_heads, head_dim):
-            with T.sblock("llama_fused_rope"):
-                s, h, d = T.axis.remap("SSS", iters)
-                if h < num_q_heads:
-                    q[s, h, d] = T.if_then_else(
-                        apply_rope > 0 and d < rotary_dim,
-                        _rope(qkv, s, h, d, position_map[s]),
-                        qkv[s, h, d],
-                    )
-                elif h < num_q_heads + num_kv_heads:
-                    k[s, h - num_q_heads, d] = T.if_then_else(
-                        apply_rope > 0 and d < rotary_dim,
-                        _rope(qkv, s, h, d, position_map[s]),
-                        qkv[s, h, d],
-                    )
-                else:
-                    v[s, h - (num_q_heads + num_kv_heads), d] = qkv[s, h, d]
-
-    @T.prim_func
-    def fused_rope_longrope_scaling(  # pylint: disable=too-many-locals
-        var_qkv: T.handle,
-        var_position_map: T.handle,
-        var_q: T.handle,
-        var_k: T.handle,
-        var_v: T.handle,
-        ext_factors: T.Buffer((rotary_dim,), "float32"),  # type: ignore
-    ):
-        T.func_attr(
-            {
-                "op_pattern": 8,  # 2 means injective, 8 means opaque
-                "tir.noalias": True,
-            }
-        )
-        seq_len = T.int64()
-        position_map_elem_offset = T.int64()
-        qkv = T.match_buffer(var_qkv, (seq_len, fused_heads, head_dim), dtype)
-        q = T.match_buffer(var_q, (seq_len, num_q_heads, head_dim), dtype)
-        k = T.match_buffer(var_k, (seq_len, num_kv_heads, head_dim), dtype)
-        v = T.match_buffer(var_v, (seq_len, num_kv_heads, head_dim), dtype)
-        position_map = T.match_buffer(
-            var_position_map, (seq_len,), "int32", elem_offset=position_map_elem_offset
-        )
-        # long factors is the first half, short factors is the second half
-        long_factors = T.Buffer((rotary_dim // 2,), "float32", data=ext_factors.data)
-        short_factors = T.Buffer(
-            (rotary_dim // 2,),
-            "float32",
-            data=ext_factors.data,
-            elem_offset=(rotary_dim // 2),
-        )
-
-        if seq_len > original_max_position_embeddings:
-            for iters in T.grid(seq_len, fused_heads, head_dim):
-                with T.sblock("llama_fused_rope"):
-                    s, h, d = T.axis.remap("SSS", iters)
-                    if h < num_q_heads:
-                        q[s, h, d] = T.if_then_else(
-                            d < rotary_dim,
-                            _rope(
-                                qkv,
-                                s,
-                                h,
-                                d,
-                                position_map[s],
-                                long_factors if is_longrope_scaling else None,
-                            ),
-                            qkv[s, h, d],
-                        )
-                    elif h < num_q_heads + num_kv_heads:
-                        k[s, h - num_q_heads, d] = T.if_then_else(
-                            d < rotary_dim,
-                            _rope(
-                                qkv,
-                                s,
-                                h,
-                                d,
-                                position_map[s],
-                                long_factors if is_longrope_scaling else None,
-                            ),
-                            qkv[s, h, d],
-                        )
-                    else:
-                        v[s, h - (num_q_heads + num_kv_heads), d] = qkv[s, h, d]
-        else:
-            for iters in T.grid(seq_len, fused_heads, head_dim):
-                with T.sblock("llama_fused_rope"):
-                    s, h, d = T.axis.remap("SSS", iters)
-                    if h < num_q_heads:
-                        q[s, h, d] = T.if_then_else(
-                            d < rotary_dim,
-                            _rope(
-                                qkv,
-                                s,
-                                h,
-                                d,
-                                position_map[s],
-                                short_factors if is_longrope_scaling else None,
-                            ),
-                            qkv[s, h, d],
-                        )
-                    elif h < num_q_heads + num_kv_heads:
-                        k[s, h - num_q_heads, d] = T.if_then_else(
-                            d < rotary_dim,
-                            _rope(
-                                qkv,
-                                s,
-                                h,
-                                d,
-                                position_map[s],
-                                short_factors if is_longrope_scaling else None,
-                            ),
-                            qkv[s, h, d],
-                        )
-                    else:
-                        v[s, h - (num_q_heads + num_kv_heads), d] = qkv[s, h, d]
-
-    if is_longrope_scaling:
-        return fused_rope_longrope_scaling
-    return fused_rope
+    return _ffi.llama4_rope_with_position_map(
+        float(theta),
+        float(scale),
+        int(head_dim),
+        int(num_q_heads),
+        int(num_kv_heads),
+        dtype,
+        rope_scaling,
+        rotary_dim,
+    )

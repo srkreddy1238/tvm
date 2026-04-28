@@ -37,14 +37,17 @@
 #define TVM_RELAX_FRONTEND_NN_LLM_POSITION_EMBEDDING_H_
 
 #include <tvm/relax/expr.h>
+#include <tvm/tir/buffer.h>
 #include <tvm/tir/expr.h>
+#include <tvm/tir/function.h>
 #include <tvm/tir/op.h>
 #include <tvm/tir/var.h>
 
 #include <functional>
 #include <string>
 #include <tuple>
-#include <unordered_map>
+#include <utility>
+#include <vector>
 
 namespace tvm {
 namespace relax {
@@ -80,14 +83,16 @@ struct RopeFreqResult {
   PrimExpr cos_freq;
   /*! \brief Sine of the frequency. */
   PrimExpr sin_freq;
-  /*! \brief Map of intermediate variables to their definitions. */
-  std::unordered_map<Var, PrimExpr, ObjectPtrHash, ObjectPtrEqual> var_map;
+  /*! \brief Ordered list of (var, definition) pairs for intermediate variables.
+   *  Insertion order is preserved so callers can bind them with tir::Let in
+   *  the correct dependency order (innermost binding last). */
+  std::vector<std::pair<Var, PrimExpr>> var_map;
 };
 
 /*!
  * \brief Signature for RoPE frequency computation functions.
  *
- * \param s      Position index (tir::Var).
+ * \param s      Position expression (float32 PrimExpr, e.g. Cast(f32, Cast(dtype, loop_s + offset))).
  * \param d      Dimension index (tir::Var).
  * \param d_range  Maximum dimension index (rotary_dim).
  * \param theta  Base frequency (typically 10000.0).
@@ -96,7 +101,7 @@ struct RopeFreqResult {
  * \return       RopeFreqResult containing cos/sin and intermediate variables.
  */
 using RopeFreqFunc = std::function<RopeFreqResult(
-    Var s, Var d, int64_t d_range, double theta, const std::string& dtype,
+    PrimExpr s, Var d, int64_t d_range, double theta, const std::string& dtype,
     const ffi::Map<ffi::String, ffi::Any>& extra_args)>;
 
 /*!
@@ -112,7 +117,7 @@ using RopeFreqFunc = std::function<RopeFreqResult(
  * \param extra_args  Unused for default mode.
  * \return       Cosine and sine of the frequency.
  */
-RopeFreqResult RopeFreqDefault(Var s, Var d, int64_t d_range, double theta,
+RopeFreqResult RopeFreqDefault(PrimExpr s, Var d, int64_t d_range, double theta,
                                const std::string& dtype,
                                const ffi::Map<ffi::String, ffi::Any>& extra_args);
 
@@ -129,7 +134,7 @@ RopeFreqResult RopeFreqDefault(Var s, Var d, int64_t d_range, double theta,
  * \param extra_args  Unused for gptj mode.
  * \return       Cosine and sine of the frequency.
  */
-RopeFreqResult RopeFreqGptj(Var s, Var d, int64_t d_range, double theta,
+RopeFreqResult RopeFreqGptj(PrimExpr s, Var d, int64_t d_range, double theta,
                             const std::string& dtype,
                             const ffi::Map<ffi::String, ffi::Any>& extra_args);
 
@@ -153,7 +158,7 @@ RopeFreqResult RopeFreqGptj(Var s, Var d, int64_t d_range, double theta,
  * \param extra_args  Scaling configuration.
  * \return       Cosine and sine of the frequency.
  */
-RopeFreqResult RopeFreqLlama3(Var s, Var d, int64_t d_range, double theta,
+RopeFreqResult RopeFreqLlama3(PrimExpr s, Var d, int64_t d_range, double theta,
                               const std::string& dtype,
                               const ffi::Map<ffi::String, ffi::Any>& extra_args);
 
@@ -173,7 +178,7 @@ RopeFreqResult RopeFreqLlama3(Var s, Var d, int64_t d_range, double theta,
  * \param extra_args  Scaling configuration.
  * \return       Cosine and sine of the frequency.
  */
-RopeFreqResult RopeFreqLlama4(Var s, Var d, int64_t d_range, double theta,
+RopeFreqResult RopeFreqLlama4(PrimExpr s, Var d, int64_t d_range, double theta,
                               const std::string& dtype,
                               const ffi::Map<ffi::String, ffi::Any>& extra_args);
 
@@ -195,7 +200,7 @@ RopeFreqResult RopeFreqLlama4(Var s, Var d, int64_t d_range, double theta,
  * \param extra_args  Scaling configuration.
  * \return       Cosine and sine of the frequency.
  */
-RopeFreqResult RopeFreqLongrope(Var s, Var d, int64_t d_range, double theta,
+RopeFreqResult RopeFreqLongrope(PrimExpr s, Var d, int64_t d_range, double theta,
                                 const std::string& dtype,
                                 const ffi::Map<ffi::String, ffi::Any>& extra_args);
 
@@ -219,7 +224,7 @@ RopeFreqResult RopeFreqLongrope(Var s, Var d, int64_t d_range, double theta,
  * \param extra_args  Scaling configuration.
  * \return       Cosine and sine of the frequency.
  */
-RopeFreqResult RopeFreqYarn(Var s, Var d, int64_t d_range, double theta,
+RopeFreqResult RopeFreqYarn(PrimExpr s, Var d, int64_t d_range, double theta,
                             const std::string& dtype,
                             const ffi::Map<ffi::String, ffi::Any>& extra_args);
 
@@ -256,6 +261,54 @@ RopeFreqFunc SwitchRopeFreqFunc(const ffi::Map<ffi::String, ffi::Any>& rope_scal
 std::tuple<NNTensor, NNTensor, NNTensor> LlamaRope(
     NNTensor qkv, Var total_seq_len, double theta, double scale, int64_t num_q_heads,
     int64_t num_kv_heads, const ffi::Map<ffi::String, ffi::Any>& rope_scaling,
+    ffi::Optional<int64_t> rotary_dim);
+
+/*!
+ * \brief Return the TIR PrimFunc for Llama-style RoPE with a position map.
+ *
+ * Corresponds to the Python `llama_rope_with_position_map` function.
+ * The returned PrimFunc accepts:
+ *   (var_qkv, var_position_map, var_q, var_k, var_v, apply_rope)
+ * and writes the split + rotated tensors into q, k, v.
+ *
+ * For longrope scaling the caller should use the longrope variant directly;
+ * this function handles all other scaling types.
+ *
+ * \param theta         Base frequency.
+ * \param scale         Position scaling factor.
+ * \param head_dim      Head dimension (static).
+ * \param num_q_heads   Number of query heads.
+ * \param num_kv_heads  Number of key/value heads.
+ * \param dtype         Element dtype string.
+ * \param rope_scaling  RoPE scaling configuration dictionary.
+ * \param rotary_dim    Dimensions to rotate; defaults to head_dim when nullopt.
+ * \return              TIR PrimFunc ready for use with tensor_ir_op.
+ */
+tir::PrimFunc LlamaRopeWithPositionMap(
+    double theta, double scale, int64_t head_dim, int64_t num_q_heads, int64_t num_kv_heads,
+    const std::string& dtype, const ffi::Map<ffi::String, ffi::Any>& rope_scaling,
+    ffi::Optional<int64_t> rotary_dim);
+
+/*!
+ * \brief Return the TIR PrimFunc for Llama-4-style RoPE with a position map.
+ *
+ * Identical in structure to LlamaRopeWithPositionMap but uses the Llama-4
+ * adjacent-pair (gptj-style) rotation pattern together with the llama4
+ * frequency scaling formula.
+ *
+ * \param theta         Base frequency.
+ * \param scale         Position scaling factor.
+ * \param head_dim      Head dimension (static).
+ * \param num_q_heads   Number of query heads.
+ * \param num_kv_heads  Number of key/value heads.
+ * \param dtype         Element dtype string.
+ * \param rope_scaling  RoPE scaling configuration dictionary.
+ * \param rotary_dim    Dimensions to rotate; defaults to head_dim when nullopt.
+ * \return              TIR PrimFunc ready for use with tensor_ir_op.
+ */
+tir::PrimFunc Llama4RopeWithPositionMap(
+    double theta, double scale, int64_t head_dim, int64_t num_q_heads, int64_t num_kv_heads,
+    const std::string& dtype, const ffi::Map<ffi::String, ffi::Any>& rope_scaling,
     ffi::Optional<int64_t> rotary_dim);
 
 }  // namespace llm
