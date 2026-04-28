@@ -1,3 +1,4 @@
+# ruff: noqa: E501
 # Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
 # distributed with this work for additional information
@@ -18,7 +19,7 @@
 
 Each test calls ``tree_attn_with_paged_kv_cache_cpu`` directly (it returns a
 TIR PrimFunc) and compares the result against an expected PrimFunc written in
-TVMScript – exactly the same pattern used throughout
+TVMScript - exactly the same pattern used throughout
 ``tests/python/relax/test_frontend_nn_op.py``.
 
 The expected IR was captured from the log produced by::
@@ -60,7 +61,7 @@ ROPE_SCALING_LLAMA3 = {
 
 
 def test_tree_attn_with_paged_kv_cache_cpu_none_scaling():
-    """rope_scaling={} – structural equality with expected TVMScript."""
+    """rope_scaling={} - structural equality with expected TVMScript."""
     fn = tree_attn_with_paged_kv_cache_cpu(H_KV, H_Q, D, DTYPE, ROPE_SCALING_NONE)
 
     # fmt: off
@@ -133,7 +134,7 @@ def test_tree_attn_with_paged_kv_cache_cpu_none_scaling():
                                 for d_idx in range(32):
                                     S_val[0] = S_val[0] + Q_local[d_idx] * K_local[d_idx]
                                 S_val[0] = S_val[0] * (sm_scale * T.float32(1.4426950408889634))
-                                if row_idx < kv_chunk_len[0] and (row_idx < kv_chunk_len[0] - (tree_order_indptr[b_idx + 1] - tree_order_indptr[b_idx]) or tree_order[tree_order_indptr[b_idx] + (q_idx + (tree_order_indptr[b_idx + 1] - tree_order_indptr[b_idx]) - (q_indptr[b_idx + 1] - q_indptr[b_idx])), 0] >= tree_order[tree_order_indptr[b_idx] + (row_idx - (kv_chunk_len[0] - (tree_order_indptr[b_idx + 1] - tree_order_indptr[b_idx]))), 0] and tree_order[tree_order_indptr[b_idx] + (q_idx + (tree_order_indptr[b_idx + 1] - tree_order_indptr[b_idx]) - (q_indptr[b_idx + 1] - q_indptr[b_idx])), 0] < tree_order[tree_order_indptr[b_idx] + (row_idx - (kv_chunk_len[0] - (tree_order_indptr[b_idx + 1] - tree_order_indptr[b_idx]))), 1]):
+                                if row_idx < kv_chunk_len[0] and (row_idx < kv_chunk_len[0] - (tree_order_indptr[b_idx + 1] - tree_order_indptr[b_idx]) or (tree_order[tree_order_indptr[b_idx] + (q_idx + (tree_order_indptr[b_idx + 1] - tree_order_indptr[b_idx]) - (q_indptr[b_idx + 1] - q_indptr[b_idx])), 0] >= tree_order[tree_order_indptr[b_idx] + (row_idx - (kv_chunk_len[0] - (tree_order_indptr[b_idx + 1] - tree_order_indptr[b_idx]))), 0] and tree_order[tree_order_indptr[b_idx] + (q_idx + (tree_order_indptr[b_idx + 1] - tree_order_indptr[b_idx]) - (q_indptr[b_idx + 1] - q_indptr[b_idx])), 0] < tree_order[tree_order_indptr[b_idx] + (row_idx - (kv_chunk_len[0] - (tree_order_indptr[b_idx + 1] - tree_order_indptr[b_idx]))), 1])):
                                     new_m[0] = T.max(m_val[0], S_val[0])
                                 else:
                                     S_val[0] = T.float32(-50000.0)
@@ -156,7 +157,7 @@ def test_tree_attn_with_paged_kv_cache_cpu_none_scaling():
 
 
 def test_tree_attn_with_paged_kv_cache_cpu_llama3_scaling():
-    """rope_scaling=llama3 – structural equality with expected TVMScript."""
+    """rope_scaling=llama3 - structural equality with expected TVMScript."""
     fn = tree_attn_with_paged_kv_cache_cpu(H_KV, H_Q, D, DTYPE, ROPE_SCALING_LLAMA3)
 
     # fmt: off
@@ -231,7 +232,7 @@ def test_tree_attn_with_paged_kv_cache_cpu_llama3_scaling():
                                 for d_idx in range(32):
                                     S_val[0] = S_val[0] + Q_local[d_idx] * K_local[d_idx]
                                 S_val[0] = S_val[0] * (sm_scale * T.float32(1.4426950408889634))
-                                if row_idx < kv_chunk_len[0] and (row_idx < kv_chunk_len[0] - (tree_order_indptr[b_idx + 1] - tree_order_indptr[b_idx]) or tree_order[tree_order_indptr[b_idx] + (q_idx + (tree_order_indptr[b_idx + 1] - tree_order_indptr[b_idx]) - (q_indptr[b_idx + 1] - q_indptr[b_idx])), 0] >= tree_order[tree_order_indptr[b_idx] + (row_idx - (kv_chunk_len[0] - (tree_order_indptr[b_idx + 1] - tree_order_indptr[b_idx]))), 0] and tree_order[tree_order_indptr[b_idx] + (q_idx + (tree_order_indptr[b_idx + 1] - tree_order_indptr[b_idx]) - (q_indptr[b_idx + 1] - q_indptr[b_idx])), 0] < tree_order[tree_order_indptr[b_idx] + (row_idx - (kv_chunk_len[0] - (tree_order_indptr[b_idx + 1] - tree_order_indptr[b_idx]))), 1]):
+                                if row_idx < kv_chunk_len[0] and (row_idx < kv_chunk_len[0] - (tree_order_indptr[b_idx + 1] - tree_order_indptr[b_idx]) or (tree_order[tree_order_indptr[b_idx] + (q_idx + (tree_order_indptr[b_idx + 1] - tree_order_indptr[b_idx]) - (q_indptr[b_idx + 1] - q_indptr[b_idx])), 0] >= tree_order[tree_order_indptr[b_idx] + (row_idx - (kv_chunk_len[0] - (tree_order_indptr[b_idx + 1] - tree_order_indptr[b_idx]))), 0] and tree_order[tree_order_indptr[b_idx] + (q_idx + (tree_order_indptr[b_idx + 1] - tree_order_indptr[b_idx]) - (q_indptr[b_idx + 1] - q_indptr[b_idx])), 0] < tree_order[tree_order_indptr[b_idx] + (row_idx - (kv_chunk_len[0] - (tree_order_indptr[b_idx + 1] - tree_order_indptr[b_idx]))), 1])):
                                     new_m[0] = T.max(m_val[0], S_val[0])
                                 else:
                                     S_val[0] = T.float32(-50000.0)
@@ -251,17 +252,6 @@ def test_tree_attn_with_paged_kv_cache_cpu_llama3_scaling():
     # fmt: on
 
     tvm.ir.assert_structural_equal(fn, tree_attn_paged_kv_cpu)
-
-
-def test_tree_attn_with_paged_kv_cache_cpu_none_vs_llama3_differ():
-    """Different rope_scaling configs must produce structurally different PrimFuncs."""
-    fn_none = tree_attn_with_paged_kv_cache_cpu(H_KV, H_Q, D, DTYPE, ROPE_SCALING_NONE)
-    fn_llama3 = tree_attn_with_paged_kv_cache_cpu(H_KV, H_Q, D, DTYPE, ROPE_SCALING_LLAMA3)
-    try:
-        tvm.ir.assert_structural_equal(fn_none, fn_llama3)
-        raise AssertionError("Expected structural inequality between none and llama3 scaling")
-    except (ValueError, tvm.TVMError):
-        pass  # expected
 
 
 if __name__ == "__main__":

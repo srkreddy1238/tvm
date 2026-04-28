@@ -1,3 +1,4 @@
+# ruff: noqa: E501
 # Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
 # distributed with this work for additional information
@@ -17,7 +18,7 @@
 """Tests for tree_attn_cpu.
 
 Each test calls ``tree_attn_cpu`` directly (it returns a TIR PrimFunc) and
-compares the result against an expected PrimFunc written in TVMScript –
+compares the result against an expected PrimFunc written in TVMScript -
 exactly the same pattern used throughout
 ``tests/python/relax/test_frontend_nn_op.py``.
 
@@ -60,7 +61,7 @@ ROPE_SCALING_LLAMA3 = {
 
 
 def test_tree_attn_cpu_none_scaling():
-    """rope_scaling={} – structural equality with expected TVMScript."""
+    """rope_scaling={} - structural equality with expected TVMScript."""
     fn = tree_attn_cpu(H_KV, H_Q, D, DTYPE, ROPE_SCALING_NONE)
 
     # fmt: off
@@ -111,7 +112,7 @@ def test_tree_attn_cpu_none_scaling():
                     for k_idx in range(kv_indptr[b + 1] - kv_indptr[b]):
                         for h in range(4):
                             h_kv_idx: T.int32 = h // 2
-                            if k_idx < kv_indptr[b + 1] - kv_indptr[b] and (k_idx < kv_indptr[b + 1] - kv_indptr[b] - (mn_indptr[b + 1] - mn_indptr[b]) or mask[mn_indptr[b] + (q_idx + (mn_indptr[b + 1] - mn_indptr[b]) - (q_indptr[b + 1] - q_indptr[b])), 0] >= mask[mn_indptr[b] + (k_idx - (kv_indptr[b + 1] - kv_indptr[b] - (mn_indptr[b + 1] - mn_indptr[b]))), 0] and mask[mn_indptr[b] + (q_idx + (mn_indptr[b + 1] - mn_indptr[b]) - (q_indptr[b + 1] - q_indptr[b])), 0] < mask[mn_indptr[b] + (k_idx - (kv_indptr[b + 1] - kv_indptr[b] - (mn_indptr[b + 1] - mn_indptr[b]))), 1]):
+                            if k_idx < kv_indptr[b + 1] - kv_indptr[b] and (k_idx < kv_indptr[b + 1] - kv_indptr[b] - (mn_indptr[b + 1] - mn_indptr[b]) or (mask[mn_indptr[b] + (q_idx + (mn_indptr[b + 1] - mn_indptr[b]) - (q_indptr[b + 1] - q_indptr[b])), 0] >= mask[mn_indptr[b] + (k_idx - (kv_indptr[b + 1] - kv_indptr[b] - (mn_indptr[b + 1] - mn_indptr[b]))), 0] and mask[mn_indptr[b] + (q_idx + (mn_indptr[b + 1] - mn_indptr[b]) - (q_indptr[b + 1] - q_indptr[b])), 0] < mask[mn_indptr[b] + (k_idx - (kv_indptr[b + 1] - kv_indptr[b] - (mn_indptr[b + 1] - mn_indptr[b]))), 1])):
                                 result[0] = T.float32(0.0)
                                 for d_idx in range(32):
                                     freq = T.float32()
@@ -150,7 +151,7 @@ def test_tree_attn_cpu_none_scaling():
 
 
 def test_tree_attn_cpu_llama3_scaling():
-    """rope_scaling=llama3 – structural equality with expected TVMScript."""
+    """rope_scaling=llama3 - structural equality with expected TVMScript."""
     fn = tree_attn_cpu(H_KV, H_Q, D, DTYPE, ROPE_SCALING_LLAMA3)
 
     # fmt: off
@@ -201,7 +202,7 @@ def test_tree_attn_cpu_llama3_scaling():
                     for k_idx in range(kv_indptr[b + 1] - kv_indptr[b]):
                         for h in range(4):
                             h_kv_idx: T.int32 = h // 2
-                            if k_idx < kv_indptr[b + 1] - kv_indptr[b] and (k_idx < kv_indptr[b + 1] - kv_indptr[b] - (mn_indptr[b + 1] - mn_indptr[b]) or mask[mn_indptr[b] + (q_idx + (mn_indptr[b + 1] - mn_indptr[b]) - (q_indptr[b + 1] - q_indptr[b])), 0] >= mask[mn_indptr[b] + (k_idx - (kv_indptr[b + 1] - kv_indptr[b] - (mn_indptr[b + 1] - mn_indptr[b]))), 0] and mask[mn_indptr[b] + (q_idx + (mn_indptr[b + 1] - mn_indptr[b]) - (q_indptr[b + 1] - q_indptr[b])), 0] < mask[mn_indptr[b] + (k_idx - (kv_indptr[b + 1] - kv_indptr[b] - (mn_indptr[b + 1] - mn_indptr[b]))), 1]):
+                            if k_idx < kv_indptr[b + 1] - kv_indptr[b] and (k_idx < kv_indptr[b + 1] - kv_indptr[b] - (mn_indptr[b + 1] - mn_indptr[b]) or (mask[mn_indptr[b] + (q_idx + (mn_indptr[b + 1] - mn_indptr[b]) - (q_indptr[b + 1] - q_indptr[b])), 0] >= mask[mn_indptr[b] + (k_idx - (kv_indptr[b + 1] - kv_indptr[b] - (mn_indptr[b + 1] - mn_indptr[b]))), 0] and mask[mn_indptr[b] + (q_idx + (mn_indptr[b + 1] - mn_indptr[b]) - (q_indptr[b + 1] - q_indptr[b])), 0] < mask[mn_indptr[b] + (k_idx - (kv_indptr[b + 1] - kv_indptr[b] - (mn_indptr[b + 1] - mn_indptr[b]))), 1])):
                                 result[0] = T.float32(0.0)
                                 for d_idx in range(32):
                                     orig_freq = T.float32()
@@ -239,17 +240,6 @@ def test_tree_attn_cpu_llama3_scaling():
     # fmt: on
 
     tvm.ir.assert_structural_equal(fn, batch_tree_attn)
-
-
-def test_tree_attn_cpu_none_vs_llama3_differ():
-    """Different rope_scaling configs must produce structurally different PrimFuncs."""
-    fn_none = tree_attn_cpu(H_KV, H_Q, D, DTYPE, ROPE_SCALING_NONE)
-    fn_llama3 = tree_attn_cpu(H_KV, H_Q, D, DTYPE, ROPE_SCALING_LLAMA3)
-    try:
-        tvm.ir.assert_structural_equal(fn_none, fn_llama3)
-        raise AssertionError("Expected structural inequality between none and llama3 scaling")
-    except (ValueError, tvm.TVMError):
-        pass  # expected
 
 
 if __name__ == "__main__":

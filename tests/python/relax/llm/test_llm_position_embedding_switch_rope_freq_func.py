@@ -59,6 +59,7 @@ ROPE_SCALING_LONGROPE = {
 # Helper: call the freq func with fixed TIR vars
 # ---------------------------------------------------------------------------
 
+
 def _call(rope_scaling):
     """Call switch_rope_freq_func and return (cos_freq, sin_freq, var_map)."""
     s = tir.Var("s", "float32")
@@ -72,7 +73,7 @@ def _call(rope_scaling):
 
 
 def test_switch_rope_freq_func_none_returns_default():
-    """rope_scaling={} – structural equality with expected TIR expressions."""
+    """rope_scaling={} - structural equality with expected TIR expressions."""
     (cos_freq, sin_freq, var_map), s, d = _call(ROPE_SCALING_NONE)
 
     freq_var = tir.Var("freq", "float32")
@@ -85,14 +86,14 @@ def test_switch_rope_freq_func_none_returns_default():
     )
 
     assert len(var_map) == 1
-    (actual_var, actual_val), = var_map.items()
+    ((actual_var, actual_val),) = var_map.items()
     tvm.ir.assert_structural_equal(cos_freq, expected_cos, map_free_vars=True)
     tvm.ir.assert_structural_equal(sin_freq, expected_sin, map_free_vars=True)
     tvm.ir.assert_structural_equal(actual_val, expected_freq, map_free_vars=True)
 
 
 def test_switch_rope_freq_func_gptj_returns_gptj():
-    """rope_type='gptj' – structural equality with expected TIR expressions."""
+    """rope_type='gptj' - structural equality with expected TIR expressions."""
     (cos_freq, sin_freq, var_map), s, d = _call(ROPE_SCALING_GPTJ)
 
     freq_var = tir.Var("freq", "float32")
@@ -108,14 +109,14 @@ def test_switch_rope_freq_func_gptj_returns_gptj():
     )
 
     assert len(var_map) == 1
-    (actual_var, actual_val), = var_map.items()
+    ((actual_var, actual_val),) = var_map.items()
     tvm.ir.assert_structural_equal(cos_freq, expected_cos, map_free_vars=True)
     tvm.ir.assert_structural_equal(sin_freq, expected_sin, map_free_vars=True)
     tvm.ir.assert_structural_equal(actual_val, expected_freq, map_free_vars=True)
 
 
 def test_switch_rope_freq_func_llama3_returns_callable():
-    """rope_type='llama3' – structural equality with expected TIR expressions."""
+    """rope_type='llama3' - structural equality with expected TIR expressions."""
     (cos_freq, sin_freq, var_map), s, d = _call(ROPE_SCALING_LLAMA3)
 
     smoothed_freq_var = tir.Var("smoothed_freq", "float32")
@@ -123,14 +124,19 @@ def test_switch_rope_freq_func_llama3_returns_callable():
     expected_cos = tir.Cast("float16", tir.cos(smoothed_freq_var))
     expected_sin = tir.Cast("float16", tir.sin(smoothed_freq_var))
     expected_smoothed_freq = s * (
-        (tir.const(1.0, "float32") - tir.max(
-            tir.const(0.0, "float32"),
-            tir.min(
-                tir.const(1.0, "float32"),
-                tir.const(434.59909793626889, "float32") * orig_freq_var
-                - tir.const(0.33333333333333331, "float32"),
-            ),
-        )) * orig_freq_var * tir.const(0.125, "float32")
+        (
+            tir.const(1.0, "float32")
+            - tir.max(
+                tir.const(0.0, "float32"),
+                tir.min(
+                    tir.const(1.0, "float32"),
+                    tir.const(434.59909793626889, "float32") * orig_freq_var
+                    - tir.const(0.33333333333333331, "float32"),
+                ),
+            )
+        )
+        * orig_freq_var
+        * tir.const(0.125, "float32")
         + tir.max(
             tir.const(0.0, "float32"),
             tir.min(
@@ -138,7 +144,8 @@ def test_switch_rope_freq_func_llama3_returns_callable():
                 tir.const(434.59909793626889, "float32") * orig_freq_var
                 - tir.const(0.33333333333333331, "float32"),
             ),
-        ) * orig_freq_var
+        )
+        * orig_freq_var
     )
     expected_orig_freq = tir.const(1.0, "float32") / tir.pow(
         tir.const(10000.0, "float32"),
@@ -155,7 +162,7 @@ def test_switch_rope_freq_func_llama3_returns_callable():
 
 
 def test_switch_rope_freq_func_longrope_returns_callable():
-    """rope_type='longrope' – structural equality with expected TIR expressions."""
+    """rope_type='longrope' - structural equality with expected TIR expressions."""
     (cos_freq, sin_freq, var_map), s, d = _call(ROPE_SCALING_LONGROPE)
 
     freq_var = tir.Var("freq", "float32")
@@ -169,7 +176,7 @@ def test_switch_rope_freq_func_longrope_returns_callable():
     )
 
     assert len(var_map) == 1
-    (actual_var, actual_val), = var_map.items()
+    ((actual_var, actual_val),) = var_map.items()
     tvm.ir.assert_structural_equal(cos_freq, expected_cos, map_free_vars=True)
     tvm.ir.assert_structural_equal(sin_freq, expected_sin, map_free_vars=True)
     tvm.ir.assert_structural_equal(actual_val, expected_freq, map_free_vars=True)

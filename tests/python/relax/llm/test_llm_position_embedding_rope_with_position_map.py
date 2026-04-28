@@ -1,3 +1,4 @@
+# ruff: noqa: E501
 # Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
 # distributed with this work for additional information
@@ -63,6 +64,7 @@ ROPE_SCALING_LONGROPE = {
 # Helper
 # ---------------------------------------------------------------------------
 
+
 def _build(rope_scaling, rotary_dim=None):
     return llama_rope_with_position_map(
         theta=THETA,
@@ -82,7 +84,7 @@ def _build(rope_scaling, rotary_dim=None):
 
 
 def test_rope_with_position_map_none_scaling():
-    """rope_scaling={} – structural equality with expected TVMScript."""
+    """rope_scaling={} - structural equality with expected TVMScript."""
     fn = _build(ROPE_SCALING_NONE)
 
     # fmt: off
@@ -116,7 +118,7 @@ def test_rope_with_position_map_none_scaling():
 
 
 def test_rope_with_position_map_gptj_scaling():
-    """rope_type='gptj' – structural equality with expected TVMScript."""
+    """rope_type='gptj' - structural equality with expected TVMScript."""
     fn = _build(ROPE_SCALING_GPTJ)
 
     # fmt: off
@@ -150,7 +152,7 @@ def test_rope_with_position_map_gptj_scaling():
 
 
 def test_rope_with_position_map_llama3_scaling():
-    """rope_type='llama3' – structural equality with expected TVMScript."""
+    """rope_type='llama3' - structural equality with expected TVMScript."""
     fn = _build(ROPE_SCALING_LLAMA3)
 
     # fmt: off
@@ -186,7 +188,7 @@ def test_rope_with_position_map_llama3_scaling():
 
 
 def test_rope_with_position_map_longrope_scaling():
-    """rope_type='longrope' – structural equality with expected TVMScript."""
+    """rope_type='longrope' - structural equality with expected TVMScript."""
     fn = _build(ROPE_SCALING_LONGROPE)
 
     # fmt: off
@@ -238,7 +240,7 @@ def test_rope_with_position_map_longrope_scaling():
 
 
 def test_rope_with_position_map_partial_rotary_dim():
-    """Partial rotary_dim = HEAD_DIM // 2 = 4 – structural equality with expected TVMScript."""
+    """Partial rotary_dim = HEAD_DIM // 2 = 4 - structural equality with expected TVMScript."""
     fn = _build(ROPE_SCALING_NONE, rotary_dim=HEAD_DIM // 2)
 
     # fmt: off

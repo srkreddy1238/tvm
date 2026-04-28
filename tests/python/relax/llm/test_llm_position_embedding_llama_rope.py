@@ -1,3 +1,4 @@
+# ruff: noqa: E501
 # Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
 # distributed with this work for additional information
@@ -18,7 +19,7 @@
 
 Each test calls ``llama_rope`` inside a tiny ``Module``, exports it via
 ``export_tvm``, and compares the resulting IRModule against a hand-written
-expected IRModule in TVMScript – exactly the same pattern used throughout
+expected IRModule in TVMScript - exactly the same pattern used throughout
 ``tests/python/relax/test_frontend_nn_op.py``.
 
 NOTE: llama_rope's internal ``_rope`` helper accesses ``rope_scaling["rope_type"]``
@@ -36,11 +37,11 @@ Config used across all tests
 import tvm
 import tvm.testing
 from tvm import tir
+from tvm.relax.frontend.nn import Module, Tensor, spec
+from tvm.relax.frontend.nn.llm.position_embedding import llama_rope
 from tvm.script import ir as I
 from tvm.script import relax as R
 from tvm.script import tir as T
-from tvm.relax.frontend.nn import Module, Tensor, spec
-from tvm.relax.frontend.nn.llm.position_embedding import llama_rope
 
 # ---------------------------------------------------------------------------
 # Shared constants
@@ -69,6 +70,7 @@ ROPE_SCALING_LLAMA3 = {
 # ---------------------------------------------------------------------------
 # Helper: build the IRModule for a given rope_scaling / rotary_dim
 # ---------------------------------------------------------------------------
+
 
 def _build(rope_scaling, num_q=NUM_Q, num_kv=NUM_KV, rotary_dim=None):
     fused = num_q + num_kv * 2
@@ -104,8 +106,8 @@ def _build(rope_scaling, num_q=NUM_Q, num_kv=NUM_KV, rotary_dim=None):
 # ---------------------------------------------------------------------------
 
 
-def test_llama_rope_llama3_scaling_idempotent():
-    """rope_scaling=llama3 – structural equality with expected IRModule."""
+def test_llama_rope_llama3_scaling():
+    """rope_scaling=llama3 - structural equality with expected IRModule."""
     mod = _build(ROPE_SCALING_LLAMA3)
 
     # fmt: off
@@ -163,8 +165,8 @@ def test_llama_rope_llama3_scaling_idempotent():
     tvm.ir.assert_structural_equal(mod, Expected)
 
 
-def test_llama_rope_gptj_scaling_idempotent():
-    """rope_scaling=gptj – structural equality with expected IRModule."""
+def test_llama_rope_gptj_scaling():
+    """rope_scaling=gptj - structural equality with expected IRModule."""
     mod = _build(ROPE_SCALING_GPTJ)
 
     # fmt: off
@@ -221,7 +223,7 @@ def test_llama_rope_gptj_scaling_idempotent():
 
 
 def test_llama_rope_gqa():
-    """GQA variant: num_q_heads=4, num_kv_heads=2 with llama3 scaling – structural equality with expected IRModule."""
+    """GQA variant: num_q_heads=4, num_kv_heads=2 with llama3 scaling - structural equality with expected IRModule."""
     mod = _build(ROPE_SCALING_LLAMA3, num_q=4, num_kv=2)
 
     # fmt: off
@@ -280,7 +282,7 @@ def test_llama_rope_gqa():
 
 
 def test_llama_rope_partial_rotary_dim():
-    """Partial rotary_dim = HEAD_DIM // 2 = 4 with llama3 scaling – structural equality with expected IRModule."""
+    """Partial rotary_dim = HEAD_DIM // 2 = 4 with llama3 scaling - structural equality with expected IRModule."""
     mod = _build(ROPE_SCALING_LLAMA3, rotary_dim=HEAD_DIM // 2)
 
     # fmt: off
@@ -336,7 +338,6 @@ def test_llama_rope_partial_rotary_dim():
     # fmt: on
 
     tvm.ir.assert_structural_equal(mod, Expected)
-
 
 
 if __name__ == "__main__":
