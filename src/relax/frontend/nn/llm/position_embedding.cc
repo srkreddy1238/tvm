@@ -66,12 +66,12 @@ static PrimExpr MakeFloat32(double value) {
 // Helper to create an int64 constant
 static PrimExpr MakeInt64(int64_t value) { return IntImm(DataType::Int(64), value); }
 
-RopeFreqResult RopeFreqDefault(PrimExpr s, tir::Var d, int64_t d_range, double theta,
+RopeFreqResult RopeFreqDefault(PrimExpr s, PrimExpr d, int64_t d_range, PrimExpr theta,
                                const std::string& dtype,
                                const ffi::Map<ffi::String, ffi::Any>& extra_args) {
   PrimExpr exponent = CastTo(tir::FloorMod(d * IntImm(d.dtype(), 2), IntImm(d.dtype(), d_range)), "float32") /
                       MakeFloat32(static_cast<double>(d_range));
-  PrimExpr freq = s / tvm::pow(MakeFloat32(theta), exponent);
+  PrimExpr freq = s / tvm::pow(theta, exponent);
 
   tir::Var freq_var("freq", DataType::Float(32));
   // cos/sin of a float32 var are already float32; only cast if dtype != float32
@@ -86,7 +86,7 @@ RopeFreqResult RopeFreqDefault(PrimExpr s, tir::Var d, int64_t d_range, double t
   return {cos_freq, sin_freq, var_map};
 }
 
-RopeFreqResult RopeFreqGptj(PrimExpr s, tir::Var d, int64_t d_range, double theta,
+RopeFreqResult RopeFreqGptj(PrimExpr s, PrimExpr d, int64_t d_range, PrimExpr theta,
                             const std::string& dtype,
                             const ffi::Map<ffi::String, ffi::Any>& extra_args) {
   // freq = s / (theta ^ (2 * (d // 2) % d_range / d_range))
@@ -94,7 +94,7 @@ RopeFreqResult RopeFreqGptj(PrimExpr s, tir::Var d, int64_t d_range, double thet
   PrimExpr exponent = CastTo(tir::FloorMod(IntImm(d.dtype(), 2) * tir::FloorDiv(d, IntImm(d.dtype(), 2)), IntImm(d.dtype(), d_range)),
                               "float32") /
                       MakeFloat32(static_cast<double>(d_range));
-  PrimExpr freq = s / tvm::pow(MakeFloat32(theta), exponent);
+  PrimExpr freq = s / tvm::pow(theta, exponent);
 
   tir::Var freq_var("freq", DataType::Float(32));
   PrimExpr cos_val = tvm::cos(freq_var);
@@ -108,7 +108,7 @@ RopeFreqResult RopeFreqGptj(PrimExpr s, tir::Var d, int64_t d_range, double thet
   return {cos_freq, sin_freq, var_map};
 }
 
-RopeFreqResult RopeFreqLlama3(PrimExpr s, tir::Var d, int64_t d_range, double theta,
+RopeFreqResult RopeFreqLlama3(PrimExpr s, PrimExpr d, int64_t d_range, PrimExpr theta,
                               const std::string& dtype,
                               const ffi::Map<ffi::String, ffi::Any>& extra_args) {
   // Extract required parameters
@@ -121,7 +121,7 @@ RopeFreqResult RopeFreqLlama3(PrimExpr s, tir::Var d, int64_t d_range, double th
   // orig_freq = 1 / (theta ^ ((d * 2 % d_range) / d_range))
   PrimExpr exponent = CastTo(tir::FloorMod(d * IntImm(d.dtype(), 2), IntImm(d.dtype(), d_range)), "float32") /
                       MakeFloat32(static_cast<double>(d_range));
-  PrimExpr orig_freq = MakeFloat32(1.0) / tvm::pow(MakeFloat32(theta), exponent);
+  PrimExpr orig_freq = MakeFloat32(1.0) / tvm::pow(theta, exponent);
 
   tir::Var orig_freq_var("orig_freq", DataType::Float(32));
 
@@ -159,7 +159,7 @@ RopeFreqResult RopeFreqLlama3(PrimExpr s, tir::Var d, int64_t d_range, double th
   return {cos_freq, sin_freq, var_map};
 }
 
-RopeFreqResult RopeFreqLlama4(PrimExpr s, tir::Var d, int64_t d_range, double theta,
+RopeFreqResult RopeFreqLlama4(PrimExpr s, PrimExpr d, int64_t d_range, PrimExpr theta,
                               const std::string& dtype,
                               const ffi::Map<ffi::String, ffi::Any>& extra_args) {
   // Extract required parameters
@@ -172,7 +172,7 @@ RopeFreqResult RopeFreqLlama4(PrimExpr s, tir::Var d, int64_t d_range, double th
   // orig_freq = 1 / (theta ^ (2 * (d // 2) / d_range))
   PrimExpr exponent = CastTo(IntImm(d.dtype(), 2) * tir::FloorDiv(d, IntImm(d.dtype(), 2)), "float32") /
                       MakeFloat32(static_cast<double>(d_range));
-  PrimExpr orig_freq = MakeFloat32(1.0) / tvm::pow(MakeFloat32(theta), exponent);
+  PrimExpr orig_freq = MakeFloat32(1.0) / tvm::pow(theta, exponent);
 
   tir::Var orig_freq_var("orig_freq", DataType::Float(32));
 
@@ -222,7 +222,7 @@ RopeFreqResult RopeFreqLlama4(PrimExpr s, tir::Var d, int64_t d_range, double th
   return {cos_freq, sin_freq, var_map};
 }
 
-RopeFreqResult RopeFreqLongrope(PrimExpr s, tir::Var d, int64_t d_range, double theta,
+RopeFreqResult RopeFreqLongrope(PrimExpr s, PrimExpr d, int64_t d_range, PrimExpr theta,
                                 const std::string& dtype,
                                 const ffi::Map<ffi::String, ffi::Any>& extra_args) {
   int64_t max_position_embeddings = extra_args.at("max_position_embeddings").cast<int64_t>();
@@ -238,7 +238,7 @@ RopeFreqResult RopeFreqLongrope(PrimExpr s, tir::Var d, int64_t d_range, double 
   // divisor = theta ^ ((d * 2 % d_range) / d_range)
   PrimExpr exponent = CastTo(tir::FloorMod(d * IntImm(d.dtype(), 2), IntImm(d.dtype(), d_range)), "float32") /
                       MakeFloat32(static_cast<double>(d_range));
-  PrimExpr divisor = tvm::pow(MakeFloat32(theta), exponent);
+  PrimExpr divisor = tvm::pow(theta, exponent);
 
   // Apply extension factors if provided
   if (extra_args.count("ext_factors")) {
@@ -269,7 +269,7 @@ RopeFreqResult RopeFreqLongrope(PrimExpr s, tir::Var d, int64_t d_range, double 
 }
 
 // Helper for YaRN: find correction dimension
-static PrimExpr YarnFindCorrectionDim(tir::Var d, int64_t num_rotations,
+static PrimExpr YarnFindCorrectionDim(PrimExpr d, int64_t num_rotations,
                                       int64_t max_position_embeddings,
                                       double inv_theta_log_scale) {
   double log_val = std::log(static_cast<double>(max_position_embeddings) /
@@ -279,7 +279,7 @@ static PrimExpr YarnFindCorrectionDim(tir::Var d, int64_t num_rotations,
 
 // Helper for YaRN: find correction range
 static std::pair<PrimExpr, PrimExpr> YarnFindCorrectionRange(
-    tir::Var d, int64_t low_rot, int64_t high_rot, int64_t d_range,
+    PrimExpr d, int64_t low_rot, int64_t high_rot, int64_t d_range,
     int64_t max_position_embeddings, double inv_theta_log_scale) {
   PrimExpr low = YarnFindCorrectionDim(d, low_rot, max_position_embeddings, inv_theta_log_scale);
   PrimExpr high = YarnFindCorrectionDim(d, high_rot, max_position_embeddings, inv_theta_log_scale);
@@ -290,7 +290,7 @@ static std::pair<PrimExpr, PrimExpr> YarnFindCorrectionRange(
   return {low, high};
 }
 
-RopeFreqResult RopeFreqYarn(PrimExpr s, tir::Var d, int64_t d_range, double theta,
+RopeFreqResult RopeFreqYarn(PrimExpr s, PrimExpr d, int64_t d_range, PrimExpr theta,
                             const std::string& dtype,
                             const ffi::Map<ffi::String, ffi::Any>& extra_args) {
   int64_t original_max_position_embeddings =
@@ -303,7 +303,7 @@ RopeFreqResult RopeFreqYarn(PrimExpr s, tir::Var d, int64_t d_range, double thet
   // Compute base frequencies
   PrimExpr exponent = CastTo(tir::FloorMod(d * IntImm(d.dtype(), 2), IntImm(d.dtype(), d_range)), "float32") /
                       MakeFloat32(static_cast<double>(d_range));
-  PrimExpr freq_power = tvm::pow(MakeFloat32(theta), exponent);
+  PrimExpr freq_power = tvm::pow(theta, exponent);
   PrimExpr freq_extra = MakeFloat32(1.0) / freq_power;
   PrimExpr freq_inter = MakeFloat32(1.0) / (MakeFloat32(scaling_factor) * freq_power);
 
@@ -435,7 +435,7 @@ std::tuple<NNTensor, NNTensor, NNTensor> LlamaRope(
     PrimExpr pos_f32   = tir::Cast(DataType::Float(32), pos_dtype);
     if (scale != 1.0) pos_f32 = pos_f32 * MakeFloat32(scale);
 
-    auto freq_result = rope_freq_func(pos_f32, d, rotary_dim_val, theta, dtype_str, rope_scaling);
+    auto freq_result = rope_freq_func(pos_f32, d, rotary_dim_val, MakeFloat32(theta), dtype_str, rope_scaling);
 
     PrimExpr x        = tir::BufferLoad(qkv_buf, {b, s, h, d});
     PrimExpr cos_part = freq_result.cos_freq * x;
@@ -630,7 +630,7 @@ static tir::PrimFunc BuildLlamaRopeWithPositionMapFunc(
     if (scale != 1.0) pos_f32 = pos_f32 * MakeFloat32(scale);
 
     // Use "float32" so cos_freq/sin_freq are plain float32 (no Cast wrapper)
-    auto freq_result = rope_freq_func(pos_f32, d, rotary_dim, theta, "float32", rope_scaling);
+    auto freq_result = rope_freq_func(pos_f32, d, rotary_dim, MakeFloat32(theta), "float32", rope_scaling);
 
     PrimExpr x = tir::BufferLoad(qkv_buf, {s, h, d});
     // cos_freq and sin_freq are float32; cast x to float32 for arithmetic
@@ -978,8 +978,8 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef()
       .def("relax.frontend.nn.llm.position_embedding.switch_rope_freq_func",
-           [](ffi::Map<ffi::String, ffi::Any> rope_scaling, PrimExpr s, tir::Var d,
-              int64_t d_range, double theta,
+           [](ffi::Map<ffi::String, ffi::Any> rope_scaling, PrimExpr s, PrimExpr d,
+              int64_t d_range, PrimExpr theta,
               ffi::String dtype) -> ffi::Array<ffi::Any> {
              RopeFreqFunc fn = SwitchRopeFreqFunc(rope_scaling);
              RopeFreqResult res = fn(s, d, d_range, theta, std::string(dtype), rope_scaling);

@@ -93,7 +93,8 @@ struct RopeFreqResult {
  * \brief Signature for RoPE frequency computation functions.
  *
  * \param s      Position expression (float32 PrimExpr, e.g. Cast(f32, Cast(dtype, loop_s + offset))).
- * \param d      Dimension index (tir::Var).
+ * \param d      Dimension index (PrimExpr; may be a plain tir::Var or a compound
+ *               expression such as tx*4+vec for vectorized GPU kernels).
  * \param d_range  Maximum dimension index (rotary_dim).
  * \param theta  Base frequency (typically 10000.0).
  * \param dtype  Output data type string.
@@ -101,7 +102,7 @@ struct RopeFreqResult {
  * \return       RopeFreqResult containing cos/sin and intermediate variables.
  */
 using RopeFreqFunc = std::function<RopeFreqResult(
-    PrimExpr s, Var d, int64_t d_range, double theta, const std::string& dtype,
+    PrimExpr s, PrimExpr d, int64_t d_range, PrimExpr theta, const std::string& dtype,
     const ffi::Map<ffi::String, ffi::Any>& extra_args)>;
 
 /*!
@@ -117,7 +118,7 @@ using RopeFreqFunc = std::function<RopeFreqResult(
  * \param extra_args  Unused for default mode.
  * \return       Cosine and sine of the frequency.
  */
-RopeFreqResult RopeFreqDefault(PrimExpr s, Var d, int64_t d_range, double theta,
+RopeFreqResult RopeFreqDefault(PrimExpr s, PrimExpr d, int64_t d_range, PrimExpr theta,
                                const std::string& dtype,
                                const ffi::Map<ffi::String, ffi::Any>& extra_args);
 
@@ -134,7 +135,7 @@ RopeFreqResult RopeFreqDefault(PrimExpr s, Var d, int64_t d_range, double theta,
  * \param extra_args  Unused for gptj mode.
  * \return       Cosine and sine of the frequency.
  */
-RopeFreqResult RopeFreqGptj(PrimExpr s, Var d, int64_t d_range, double theta,
+RopeFreqResult RopeFreqGptj(PrimExpr s, PrimExpr d, int64_t d_range, PrimExpr theta,
                             const std::string& dtype,
                             const ffi::Map<ffi::String, ffi::Any>& extra_args);
 
@@ -158,7 +159,7 @@ RopeFreqResult RopeFreqGptj(PrimExpr s, Var d, int64_t d_range, double theta,
  * \param extra_args  Scaling configuration.
  * \return       Cosine and sine of the frequency.
  */
-RopeFreqResult RopeFreqLlama3(PrimExpr s, Var d, int64_t d_range, double theta,
+RopeFreqResult RopeFreqLlama3(PrimExpr s, PrimExpr d, int64_t d_range, PrimExpr theta,
                               const std::string& dtype,
                               const ffi::Map<ffi::String, ffi::Any>& extra_args);
 
@@ -178,7 +179,7 @@ RopeFreqResult RopeFreqLlama3(PrimExpr s, Var d, int64_t d_range, double theta,
  * \param extra_args  Scaling configuration.
  * \return       Cosine and sine of the frequency.
  */
-RopeFreqResult RopeFreqLlama4(PrimExpr s, Var d, int64_t d_range, double theta,
+RopeFreqResult RopeFreqLlama4(PrimExpr s, PrimExpr d, int64_t d_range, PrimExpr theta,
                               const std::string& dtype,
                               const ffi::Map<ffi::String, ffi::Any>& extra_args);
 
@@ -200,7 +201,7 @@ RopeFreqResult RopeFreqLlama4(PrimExpr s, Var d, int64_t d_range, double theta,
  * \param extra_args  Scaling configuration.
  * \return       Cosine and sine of the frequency.
  */
-RopeFreqResult RopeFreqLongrope(PrimExpr s, Var d, int64_t d_range, double theta,
+RopeFreqResult RopeFreqLongrope(PrimExpr s, PrimExpr d, int64_t d_range, PrimExpr theta,
                                 const std::string& dtype,
                                 const ffi::Map<ffi::String, ffi::Any>& extra_args);
 
@@ -224,7 +225,7 @@ RopeFreqResult RopeFreqLongrope(PrimExpr s, Var d, int64_t d_range, double theta
  * \param extra_args  Scaling configuration.
  * \return       Cosine and sine of the frequency.
  */
-RopeFreqResult RopeFreqYarn(PrimExpr s, Var d, int64_t d_range, double theta,
+RopeFreqResult RopeFreqYarn(PrimExpr s, PrimExpr d, int64_t d_range, PrimExpr theta,
                             const std::string& dtype,
                             const ffi::Map<ffi::String, ffi::Any>& extra_args);
 
