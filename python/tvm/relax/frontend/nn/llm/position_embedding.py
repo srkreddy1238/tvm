@@ -73,8 +73,8 @@ def switch_rope_freq_func(rope_scaling: dict[str, Any]) -> Callable:
     ``RopeFreq*`` family via FFI.
     """
 
-    def _call(s: tir.Var, d: tir.Var, d_range: int, theta: float, dtype: str) -> tuple:
-        result = _ffi.switch_rope_freq_func(rope_scaling, s, d, int(d_range), float(theta), dtype)
+    def _call(s: tir.Var, d: tir.Var, d_range: int, theta, dtype: str) -> tuple:
+        result = _ffi.switch_rope_freq_func(rope_scaling, s, d, int(d_range), theta, dtype)
         cos_freq = result[0]
         sin_freq = result[1]
         keys = result[2]   # Array<tir.Var>
