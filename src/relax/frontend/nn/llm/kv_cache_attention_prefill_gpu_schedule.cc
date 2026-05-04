@@ -25,10 +25,9 @@
 
 #include "kv_cache_attention_prefill_gpu_schedule.h"
 
+#include <tvm/ffi/optional.h>
 #include <tvm/ir/module.h>
 #include <tvm/s_tir/schedule/schedule.h>
-#include <tvm/tir/index_map.h>
-#include <tvm/ffi/optional.h>
 #include <tvm/tir/index_map.h>
 
 #include <algorithm>
@@ -84,9 +83,9 @@ tir::PrimFunc SchedulePrefillKernel(tir::PrimFunc func, const PrefillKernelConfi
   func_map.Set(GlobalVar("main"), func);
   IRModule mod(func_map);
 
-  s_tir::Schedule sch = s_tir::Schedule::Traced(
-      mod, /*seed=*/-1, /*debug_mask=*/0,
-      s_tir::ScheduleErrorRenderLevel::kDetail, /*enable_check=*/false);
+  s_tir::Schedule sch =
+      s_tir::Schedule::Traced(mod, /*seed=*/-1, /*debug_mask=*/0,
+                              s_tir::ScheduleErrorRenderLevel::kDetail, /*enable_check=*/false);
 
   // Helper: get static extent of a loop
   auto get_extent = [&](s_tir::LoopRV lp) -> int64_t {
@@ -138,8 +137,8 @@ tir::PrimFunc SchedulePrefillKernel(tir::PrimFunc func, const PrefillKernelConfi
   };
 
   // apply_to_gemm: tile + bind + split reduction + vectorize + decompose
-  auto apply_to_gemm = [&](s_tir::SBlockRV block, std::pair<int64_t, int64_t> tile,
-                            int64_t r_len, bool k_major) {
+  auto apply_to_gemm = [&](s_tir::SBlockRV block, std::pair<int64_t, int64_t> tile, int64_t r_len,
+                           bool k_major) {
     auto loops = sch->GetLoops(block);
     auto loop_x = loops[loops.size() - 3];
     auto loop_y = loops[loops.size() - 2];
@@ -182,11 +181,9 @@ tir::PrimFunc SchedulePrefillKernel(tir::PrimFunc func, const PrefillKernelConfi
   if (transform_k_load && !merged_qk_load) {
     auto k_load_block = sch->GetSBlock("K_load");
     auto index_map = IndexMap::FromFunc(
-        2, [](ffi::Array<Var> axes) -> ffi::Array<PrimExpr> {
-          return {axes[1], axes[0]};
-        });
-    sch->TransformLayout(k_load_block, 0, s_tir::BufferIndexType::kWrite,
-                         index_map, std::nullopt, /*assume_injective_transform=*/false);
+        2, [](ffi::Array<Var> axes) -> ffi::Array<PrimExpr> { return {axes[1], axes[0]}; });
+    sch->TransformLayout(k_load_block, 0, s_tir::BufferIndexType::kWrite, index_map, std::nullopt,
+                         /*assume_injective_transform=*/false);
   }
 
   // Compute tile sizes for S and O gemms

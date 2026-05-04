@@ -63,10 +63,9 @@
  * ---------------------------------------------------------------------------
  */
 
+#include "../../../../tir/ir/script/script_complete.h"
 #include "kv_cache.h"
 #include "kv_cache_attn_common.h"
-
-#include "../../../../tir/ir/script/script_complete.h"
 
 namespace tvm {
 namespace relax {
@@ -78,12 +77,12 @@ using namespace tvm::tir;
 
 // Reuse helpers from prefill_cpu (defined in same namespace via attn_common.h)
 static PrimExpr BuildRopeLetExprDecode(PrimExpr elem, PrimExpr partner, PrimExpr pos_i32,
-                                        tir::Var d_var, int64_t D, tir::Var rope_scale,
-                                        tir::Var rope_theta, tir::Var rotary_mode,
-                                        const std::string& dtype,
-                                        const ffi::Map<ffi::String, ffi::Any>& rope_scaling) {
+                                       tir::Var d_var, int64_t D, tir::Var rope_scale,
+                                       tir::Var rope_theta, tir::Var rotary_mode,
+                                       const std::string& dtype,
+                                       const ffi::Map<ffi::String, ffi::Any>& rope_scaling) {
   bool is_f16 = (dtype == "float16");
-  DataType dt = DataType(runtime::StringToDLDataType(dtype));
+  (void)DataType(runtime::StringToDLDataType(dtype));
 
   RopeFreqFunc rope_freq_func = SwitchRopeFreqFunc(rope_scaling);
   PrimExpr pos_f32 = CastTo(pos_i32, "float32") * rope_scale;
@@ -92,7 +91,7 @@ static PrimExpr BuildRopeLetExprDecode(PrimExpr elem, PrimExpr partner, PrimExpr
   PrimExpr rope_val;
   if (is_f16) {
     rope_val = CastTo(CastTo(freq_result.cos_freq, "float32") * CastTo(elem, "float32") +
-                      CastTo(freq_result.sin_freq, "float32") * CastTo(partner, "float32"),
+                          CastTo(freq_result.sin_freq, "float32") * CastTo(partner, "float32"),
                       dtype);
   } else {
     rope_val = freq_result.cos_freq * elem + freq_result.sin_freq * partner;
@@ -106,7 +105,7 @@ static PrimExpr BuildRopeLetExprDecode(PrimExpr elem, PrimExpr partner, PrimExpr
 }
 
 static PrimExpr BuildPartnerDecode(tir::Buffer buf, ffi::Array<PrimExpr> base_idx, tir::Var d_var,
-                                    int64_t D, const std::string& dtype) {
+                                   int64_t D, const std::string& dtype) {
   DataType dt = DataType(runtime::StringToDLDataType(dtype));
   int64_t half = D / 2;
   PrimExpr neg_one = tir::make_const(dt, -1.0);
@@ -116,9 +115,8 @@ static PrimExpr BuildPartnerDecode(tir::Buffer buf, ffi::Array<PrimExpr> base_id
   ffi::Array<PrimExpr> idx_minus = base_idx;
   idx_minus.push_back(d_var - I32(half));
 
-  return tvm::if_then_else(d_var < I32(half),
-                            tir::BufferLoad(buf, idx_plus) * neg_one,
-                            tir::BufferLoad(buf, idx_minus));
+  return tvm::if_then_else(d_var < I32(half), tir::BufferLoad(buf, idx_plus) * neg_one,
+                           tir::BufferLoad(buf, idx_minus));
 }
 
 // ---------------------------------------------------------------------------
@@ -165,33 +163,30 @@ tir::PrimFunc AttentionDecodeCpu(int64_t num_kv_heads, int64_t num_qo_heads, int
   tir::Buffer pages_buf = tir::decl_buffer(
       {max_num_pages, I32(2), I32(num_kv_heads), I32(page_size), I32(head_dim)}, dt, "pages");
 
-  tir::Buffer page_indptr_buf = tir::Buffer(
-      tir::decl_buffer({B_var + I32(1)}, DataType::Int(32), "page_table_indptr")->data,
-      DataType::Int(32), {B_var + I32(1)}, {}, page_indptr_eo, "page_table_indptr", 0, 0,
-      tir::kDefault);
+  tir::Buffer page_indptr_buf =
+      tir::Buffer(tir::decl_buffer({B_var + I32(1)}, DataType::Int(32), "page_table_indptr")->data,
+                  DataType::Int(32), {B_var + I32(1)}, {}, page_indptr_eo, "page_table_indptr", 0,
+                  0, tir::kDefault);
 
   tir::Buffer page_values_buf = tir::Buffer(
       tir::decl_buffer({nnz_pages}, DataType::Int(32), "page_table_values")->data,
-      DataType::Int(32), {nnz_pages}, {}, page_values_eo, "page_table_values", 0, 0,
-      tir::kDefault);
+      DataType::Int(32), {nnz_pages}, {}, page_values_eo, "page_table_values", 0, 0, tir::kDefault);
 
   tir::Buffer length_info_buf = tir::Buffer(
-      tir::decl_buffer({B_var}, DataType::Int(32), "length_info")->data,
-      DataType::Int(32), {B_var}, {}, length_info_eo, "length_info", 0, 0, tir::kDefault);
+      tir::decl_buffer({B_var}, DataType::Int(32), "length_info")->data, DataType::Int(32), {B_var},
+      {}, length_info_eo, "length_info", 0, 0, tir::kDefault);
 
   tir::Buffer k_rope_pos_offset_buf = tir::Buffer(
-      tir::decl_buffer({B_var}, DataType::Int(32), "k_rope_pos_offset")->data,
-      DataType::Int(32), {B_var}, {}, k_rope_pos_offset_eo, "k_rope_pos_offset", 0, 0,
-      tir::kDefault);
+      tir::decl_buffer({B_var}, DataType::Int(32), "k_rope_pos_offset")->data, DataType::Int(32),
+      {B_var}, {}, k_rope_pos_offset_eo, "k_rope_pos_offset", 0, 0, tir::kDefault);
 
   tir::Buffer q_rope_position_buf = tir::Buffer(
-      tir::decl_buffer({B_var}, DataType::Int(32), "q_rope_position")->data,
-      DataType::Int(32), {B_var}, {}, q_rope_position_eo, "q_rope_position", 0, 0, tir::kDefault);
+      tir::decl_buffer({B_var}, DataType::Int(32), "q_rope_position")->data, DataType::Int(32),
+      {B_var}, {}, q_rope_position_eo, "q_rope_position", 0, 0, tir::kDefault);
 
   tir::Buffer output_buf =
       tir::decl_buffer({B_var, I32(num_qo_heads), I32(head_dim)}, dt, "output");
-  tir::Buffer lse_buf =
-      tir::decl_buffer({B_var, I32(num_qo_heads)}, DataType::Float(32), "lse");
+  tir::Buffer lse_buf = tir::decl_buffer({B_var, I32(num_qo_heads)}, DataType::Float(32), "lse");
 
   // ── outer loop var ─────────────────────────────────────────────────────────
   tir::Var b_var("b", DataType::Int(32));
@@ -201,8 +196,7 @@ tir::PrimFunc AttentionDecodeCpu(int64_t num_kv_heads, int64_t num_qo_heads, int
   tir::Buffer Q_local = tir::decl_buffer({I32(head_dim)}, DataType::Float(32), "Q_local");
   tir::Buffer K_local = tir::decl_buffer({I32(head_dim)}, DataType::Float(32), "K_local");
   tir::Buffer V_local = tir::decl_buffer({I32(head_dim)}, DataType::Float(32), "V_local");
-  tir::Buffer kv_chunk_len_buf =
-      tir::decl_buffer({I32(1)}, DataType::Int(32), "kv_chunk_len");
+  tir::Buffer kv_chunk_len_buf = tir::decl_buffer({I32(1)}, DataType::Int(32), "kv_chunk_len");
   tir::Buffer m_val_buf = tir::decl_buffer({I32(1)}, DataType::Float(32), "m_val");
   tir::Buffer new_m_buf = tir::decl_buffer({I32(1)}, DataType::Float(32), "new_m");
   tir::Buffer d_val_buf = tir::decl_buffer({I32(1)}, DataType::Float(32), "d_val");
@@ -229,8 +223,7 @@ tir::PrimFunc AttentionDecodeCpu(int64_t num_kv_heads, int64_t num_qo_heads, int
 
   PrimExpr kv_len_expr = tvm::if_then_else(
       cur_begin != cur_end,
-      (cur_end - cur_begin - I32(1)) * I32(page_size) +
-          tir::BufferLoad(length_info_buf, {b_var}),
+      (cur_end - cur_begin - I32(1)) * I32(page_size) + tir::BufferLoad(length_info_buf, {b_var}),
       I32(0));
 
   // ── inner loop vars ────────────────────────────────────────────────────────
@@ -253,16 +246,14 @@ tir::PrimFunc AttentionDecodeCpu(int64_t num_kv_heads, int64_t num_qo_heads, int
   };
 
   tir::Var dq("d", DataType::Int(32));
-  Stmt q_load_loop = tir::For(dq, I32(0), I32(head_dim), tir::ForKind::kSerial,
-                              sti(Q_local, dq, build_q_val(dq)));
+  Stmt q_load_loop =
+      tir::For(dq, I32(0), I32(head_dim), tir::ForKind::kSerial, sti(Q_local, dq, build_q_val(dq)));
 
   // ── K load loop ────────────────────────────────────────────────────────────
   auto build_k_val = [&](tir::Var dv) -> PrimExpr {
-    PrimExpr elem =
-        tir::BufferLoad(pages_buf, {page_no, I32(0), h_kv_idx, page_offset, dv});
-    PrimExpr partner =
-        BuildPartnerDecode(pages_buf, {page_no, I32(0), h_kv_idx, page_offset}, dv, head_dim,
-                           qkv_dtype);
+    PrimExpr elem = tir::BufferLoad(pages_buf, {page_no, I32(0), h_kv_idx, page_offset, dv});
+    PrimExpr partner = BuildPartnerDecode(pages_buf, {page_no, I32(0), h_kv_idx, page_offset}, dv,
+                                          head_dim, qkv_dtype);
     PrimExpr pos = tir::BufferLoad(k_rope_pos_offset_buf, {b_var}) + row_idx;
     PrimExpr rope_expr = BuildRopeLetExprDecode(elem, partner, pos, dv, head_dim, rope_scale,
                                                 rope_theta, rotary_mode, qkv_dtype, rope_scaling);
@@ -270,8 +261,8 @@ tir::PrimFunc AttentionDecodeCpu(int64_t num_kv_heads, int64_t num_qo_heads, int
   };
 
   tir::Var dk("d", DataType::Int(32));
-  Stmt k_load_loop = tir::For(dk, I32(0), I32(head_dim), tir::ForKind::kSerial,
-                              sti(K_local, dk, build_k_val(dk)));
+  Stmt k_load_loop =
+      tir::For(dk, I32(0), I32(head_dim), tir::ForKind::kSerial, sti(K_local, dk, build_k_val(dk)));
 
   // ── S dot product ──────────────────────────────────────────────────────────
   tir::Var ds("d", DataType::Int(32));
@@ -284,8 +275,8 @@ tir::PrimFunc AttentionDecodeCpu(int64_t num_kv_heads, int64_t num_qo_heads, int
   // ── decode softmax (no causal mask) ───────────────────────────────────────
   Stmt update_new_m = st0(new_m_buf, tvm::max(m_val(), S_val()));
   // d_val[0] = d_val[0]*exp2(m-new_m) + exp2(S-new_m)  (combined in one stmt)
-  Stmt update_d = st0(d_val_buf,
-                      d_val() * tvm::exp2(m_val() - new_m()) + tvm::exp2(S_val() - new_m()));
+  Stmt update_d =
+      st0(d_val_buf, d_val() * tvm::exp2(m_val() - new_m()) + tvm::exp2(S_val() - new_m()));
   Stmt update_scale_O = st0(scale_O_buf, tvm::exp2(m_val() - new_m()));
 
   // O_local[d] *= scale_O[0]  (scale_O indexed by 0, not d, for decode)
@@ -300,17 +291,16 @@ tir::PrimFunc AttentionDecodeCpu(int64_t num_kv_heads, int64_t num_qo_heads, int
   Stmt v_load_loop = tir::For(
       dv, I32(0), I32(head_dim), tir::ForKind::kSerial,
       sti(V_local, dv,
-          is_f16
-              ? CastTo(tir::BufferLoad(pages_buf, {page_no, I32(1), h_kv_idx, page_offset, dv}),
-                       "float32")
-              : tir::BufferLoad(pages_buf, {page_no, I32(1), h_kv_idx, page_offset, dv})));
+          is_f16 ? CastTo(tir::BufferLoad(pages_buf, {page_no, I32(1), h_kv_idx, page_offset, dv}),
+                          "float32")
+                 : tir::BufferLoad(pages_buf, {page_no, I32(1), h_kv_idx, page_offset, dv})));
 
   Stmt update_factor = st0(factor_buf, tvm::exp2(S_val() - m_val()));
 
   tir::Var do2("d", DataType::Int(32));
-  Stmt o_update = tir::For(do2, I32(0), I32(head_dim), tir::ForKind::kSerial,
-                           sti(O_local, do2,
-                               ldi(O_local, do2) + ldi(V_local, do2) * ld0(factor_buf)));
+  Stmt o_update =
+      tir::For(do2, I32(0), I32(head_dim), tir::ForKind::kSerial,
+               sti(O_local, do2, ldi(O_local, do2) + ldi(V_local, do2) * ld0(factor_buf)));
 
   // ── row_idx body ───────────────────────────────────────────────────────────
   Stmt row_body = tir::LetStmt(
@@ -318,14 +308,10 @@ tir::PrimFunc AttentionDecodeCpu(int64_t num_kv_heads, int64_t num_qo_heads, int
       tir::LetStmt(
           page_no,
           tir::BufferLoad(page_values_buf, {cur_begin + floordiv(seq_offset, I32(page_size))}),
-          tir::LetStmt(
-              page_offset, floormod(seq_offset, I32(page_size)),
-              tir::SeqStmt({k_load_loop,
-                            st0(S_val_buf, F32(0.0)),
-                            s_dot, s_scale_stmt,
-                            update_new_m, update_d, update_scale_O,
-                            o_scale, update_m,
-                            v_load_loop, update_factor, o_update}))));
+          tir::LetStmt(page_offset, floormod(seq_offset, I32(page_size)),
+                       tir::SeqStmt({k_load_loop, st0(S_val_buf, F32(0.0)), s_dot, s_scale_stmt,
+                                     update_new_m, update_d, update_scale_O, o_scale, update_m,
+                                     v_load_loop, update_factor, o_update}))));
 
   Stmt row_loop = tir::For(row_idx, I32(0), kv_len(), tir::ForKind::kSerial, row_body);
 
@@ -333,32 +319,27 @@ tir::PrimFunc AttentionDecodeCpu(int64_t num_kv_heads, int64_t num_qo_heads, int
   tir::Var dout("d", DataType::Int(32));
   Stmt out_loop = tir::For(
       dout, I32(0), I32(head_dim), tir::ForKind::kSerial,
-      tir::SeqStmt({
-          sti(O_local, dout, tvm::div(ldi(O_local, dout), d_val())),
-          tir::BufferStore(output_buf,
-                           is_f16 ? CastTo(ldi(O_local, dout), qkv_dtype) : ldi(O_local, dout),
-                           {b_var, h_qo, dout})}));
+      tir::SeqStmt(
+          {sti(O_local, dout, tvm::div(ldi(O_local, dout), d_val())),
+           tir::BufferStore(output_buf,
+                            is_f16 ? CastTo(ldi(O_local, dout), qkv_dtype) : ldi(O_local, dout),
+                            {b_var, h_qo, dout})}));
 
   Stmt lse_store = tir::BufferStore(lse_buf, m_val() + tvm::log2(d_val()), {b_var, h_qo});
 
   // ── h_qo body ──────────────────────────────────────────────────────────────
   tir::Var dinit("d", DataType::Int(32));
-  Stmt h_body = tir::SeqStmt({
-      st0(m_val_buf, F32(-50000.0)),
-      st0(d_val_buf, F32(1.0)),
-      tir::For(dinit, I32(0), I32(head_dim), tir::ForKind::kSerial,
-               sti(O_local, dinit, F32(0.0))),
-      q_load_loop,
-      row_loop,
-      out_loop,
-      lse_store});
+  Stmt h_body = tir::SeqStmt(
+      {st0(m_val_buf, F32(-50000.0)), st0(d_val_buf, F32(1.0)),
+       tir::For(dinit, I32(0), I32(head_dim), tir::ForKind::kSerial, sti(O_local, dinit, F32(0.0))),
+       q_load_loop, row_loop, out_loop, lse_store});
 
   Stmt h_loop = tir::For(h_qo, I32(0), I32(num_qo_heads), tir::ForKind::kSerial, h_body);
 
   // ── sblock body ────────────────────────────────────────────────────────────
-  ffi::Array<tir::Buffer> alloc_bufs = {O_local, Q_local, K_local, V_local, kv_chunk_len_buf,
-                                        m_val_buf, new_m_buf, d_val_buf, S_val_buf, scale_O_buf,
-                                        factor_buf};
+  ffi::Array<tir::Buffer> alloc_bufs = {O_local,          Q_local,     K_local,   V_local,
+                                        kv_chunk_len_buf, m_val_buf,   new_m_buf, d_val_buf,
+                                        S_val_buf,        scale_O_buf, factor_buf};
 
   ffi::Map<ffi::String, ffi::Any> sblock_annots;
   sblock_annots.Set("tir.script_parsing_detect_access", IntImm(DataType::Int(32), 3));
@@ -373,18 +354,15 @@ tir::PrimFunc AttentionDecodeCpu(int64_t num_kv_heads, int64_t num_qo_heads, int
           cur_end, tir::BufferLoad(page_indptr_buf, {b_var + I32(1)}),
           tir::SeqStmt({tir::BufferStore(kv_chunk_len_buf, kv_len_expr, {I32(0)}), h_loop})));
 
-  Stmt sblock = tir::SBlockRealize(
-      {PrimExpr(b_var)},
-      tir::const_true(),
-      tir::SBlock(iter_vars, {}, {}, "attn", sblock_body,
-                  std::nullopt, alloc_bufs, {}, sblock_annots));
+  Stmt sblock = tir::SBlockRealize({PrimExpr(b_var)}, tir::const_true(),
+                                   tir::SBlock(iter_vars, {}, {}, "attn", sblock_body, std::nullopt,
+                                               alloc_bufs, {}, sblock_annots));
 
   Stmt b_loop = tir::For(b_var, I32(0), B_var, tir::ForKind::kSerial, sblock);
 
   // Root sblock
-  Stmt root_block = tir::SBlockRealize(
-      {}, tir::const_true(),
-      tir::SBlock({}, {}, {}, "root", b_loop));
+  Stmt root_block =
+      tir::SBlockRealize({}, tir::const_true(), tir::SBlock({}, {}, {}, "root", b_loop));
 
   // ── buffer map ─────────────────────────────────────────────────────────────
   ffi::Map<tir::Var, tir::Buffer> buf_map;
@@ -398,13 +376,19 @@ tir::PrimFunc AttentionDecodeCpu(int64_t num_kv_heads, int64_t num_qo_heads, int
   buf_map.Set(h_output, output_buf);
   buf_map.Set(h_lse, lse_buf);
 
-  ffi::Array<tir::Var> params = {h_Q,          h_pages,
-                                  h_page_indptr, h_page_values,
-                                  h_length_info, h_k_rope_pos_offset,
-                                  h_q_rope_position, h_output,
-                                  h_lse,         rotary_mode,
-                                  rope_scale,    rope_theta,
-                                  sm_scale};
+  ffi::Array<tir::Var> params = {h_Q,
+                                 h_pages,
+                                 h_page_indptr,
+                                 h_page_values,
+                                 h_length_info,
+                                 h_k_rope_pos_offset,
+                                 h_q_rope_position,
+                                 h_output,
+                                 h_lse,
+                                 rotary_mode,
+                                 rope_scale,
+                                 rope_theta,
+                                 sm_scale};
 
   tir::PrimFunc fn(params, root_block, VoidType(), buf_map);
   fn = WithAttr(fn, "tir.is_scheduled", ffi::Any(true));

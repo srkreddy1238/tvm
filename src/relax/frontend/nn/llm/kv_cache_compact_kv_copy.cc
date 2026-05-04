@@ -53,13 +53,12 @@
  * ---------------------------------------------------------------------------
  */
 
-#include "kv_cache.h"
-#include "kv_cache_common.h"
-
-#include <tvm/tir/stmt.h>
 #include <tvm/tir/op.h>
+#include <tvm/tir/stmt.h>
 
 #include "../../../../tir/ir/script/script_complete.h"
+#include "kv_cache.h"
+#include "kv_cache_common.h"
 
 namespace tvm {
 namespace relax {
@@ -73,8 +72,8 @@ using namespace tvm::tir;
 // Shared helper: build the inner copy body
 // ---------------------------------------------------------------------------
 static Stmt BuildCompactCopyBody(tir::Buffer pages_buf, tir::Buffer copy_indptr_buf,
-                                 tir::Buffer copy_pos_buf, PrimExpr flat_idx,
-                                 PrimExpr batch_size, int64_t h, int64_t d) {
+                                 tir::Buffer copy_pos_buf, PrimExpr flat_idx, PrimExpr batch_size,
+                                 int64_t h, int64_t d) {
   // b = flat_idx // (h * d)
   tir::Var b_var("b", DataType::Int(32));
   // h_var = flat_idx // d % h
@@ -104,28 +103,24 @@ static Stmt BuildCompactCopyBody(tir::Buffer pages_buf, tir::Buffer copy_indptr_
   // pages[dst//16, 0, h, dst%16, d] = pages[src//16, 0, h, src%16, d]
   Stmt k_copy = tir::BufferStore(
       pages_buf,
-      tir::BufferLoad(pages_buf,
-                      {floordiv(src_pos, I32(16)), I32(0), h_var, floormod(src_pos, I32(16)), d_var}),
+      tir::BufferLoad(pages_buf, {floordiv(src_pos, I32(16)), I32(0), h_var,
+                                  floormod(src_pos, I32(16)), d_var}),
       {floordiv(dst_pos, I32(16)), I32(0), h_var, floormod(dst_pos, I32(16)), d_var});
   Stmt v_copy = tir::BufferStore(
       pages_buf,
-      tir::BufferLoad(pages_buf,
-                      {floordiv(src_pos, I32(16)), I32(1), h_var, floormod(src_pos, I32(16)), d_var}),
+      tir::BufferLoad(pages_buf, {floordiv(src_pos, I32(16)), I32(1), h_var,
+                                  floormod(src_pos, I32(16)), d_var}),
       {floordiv(dst_pos, I32(16)), I32(1), h_var, floormod(dst_pos, I32(16)), d_var});
 
-  Stmt inner_body = tir::SeqStmt({
-      tir::LetStmt(src_pos, src_pos_expr,
-      tir::LetStmt(dst_pos, dst_pos_expr,
-          tir::SeqStmt({k_copy, v_copy})))
-  });
+  Stmt inner_body = tir::SeqStmt({tir::LetStmt(
+      src_pos, src_pos_expr, tir::LetStmt(dst_pos, dst_pos_expr, tir::SeqStmt({k_copy, v_copy})))});
 
   Stmt inner_loop = tir::For(i_var, I32(0), loop_extent, tir::ForKind::kSerial, inner_body);
 
   // Bind b, h, d as let-stmts then guard
   Stmt guarded = tir::IfThenElse(guard, inner_loop);
   Stmt with_vars = tir::LetStmt(d_var, d_expr,
-                   tir::LetStmt(h_var, h_expr,
-                   tir::LetStmt(b_var, b_expr, guarded)));
+                                tir::LetStmt(h_var, h_expr, tir::LetStmt(b_var, b_expr, guarded)));
   return with_vars;
 }
 
@@ -150,12 +145,12 @@ tir::PrimFunc CompactKVCopyCpu(int64_t num_key_value_heads, int64_t head_dim,
       {num_pages, I32(2), I32(num_key_value_heads), I32(16), I32(head_dim)}, dt, "pages");
 
   // copy_length_indptr: (batch_size+1,) int32, offset_factor=1
-  tir::Buffer indptr_buf = MakeOffsetFactor1Buffer(
-      "copy_length_indptr", {batch_size + I32(1)}, "int32");
+  tir::Buffer indptr_buf =
+      MakeOffsetFactor1Buffer("copy_length_indptr", {batch_size + I32(1)}, "int32");
 
   // copy_src_dst_pos: (2, total_copy_length) int32, offset_factor=1
-  tir::Buffer pos_buf = MakeOffsetFactor1Buffer(
-      "copy_src_dst_pos", {I32(2), total_copy_length}, "int32");
+  tir::Buffer pos_buf =
+      MakeOffsetFactor1Buffer("copy_src_dst_pos", {I32(2), total_copy_length}, "int32");
 
   // Loop vars: bhd_o (int32), bhd_i (int32)
   tir::Var bhd_o("bhd_o", DataType::Int(32));
@@ -176,9 +171,8 @@ tir::PrimFunc CompactKVCopyCpu(int64_t num_key_value_heads, int64_t head_dim,
   loop = tir::For(bhd_o, I32(0), outer_extent, tir::ForKind::kSerial, loop);
 
   // Root sblock with empty reads/writes
-  Stmt root_block = tir::SBlockRealize(
-      {}, tir::const_true(),
-      tir::SBlock({}, {}, {}, "root", loop));
+  Stmt root_block =
+      tir::SBlockRealize({}, tir::const_true(), tir::SBlock({}, {}, {}, "root", loop));
 
   ffi::Map<tir::Var, tir::Buffer> buf_map;
   buf_map.Set(h_pages, pages_buf);
@@ -195,8 +189,8 @@ tir::PrimFunc CompactKVCopyCpu(int64_t num_key_value_heads, int64_t head_dim,
 // CompactKVCopy (GPU)
 // ---------------------------------------------------------------------------
 
-tir::PrimFunc CompactKVCopy(int64_t num_key_value_heads, int64_t head_dim,
-                            const std::string& dtype, Target target) {
+tir::PrimFunc CompactKVCopy(int64_t num_key_value_heads, int64_t head_dim, const std::string& dtype,
+                            Target target) {
   DataType dt = DataType(runtime::StringToDLDataType(dtype));
   const int64_t threads_per_block = 1024;
 
@@ -213,22 +207,23 @@ tir::PrimFunc CompactKVCopy(int64_t num_key_value_heads, int64_t head_dim,
 
   // pages with elem_offset
   tir::Buffer pages_buf = tir::Buffer(
-      tir::decl_buffer({num_pages, I32(2), I32(num_key_value_heads), I32(16), I32(head_dim)},
-                       dt, "pages")->data,
-      dt, {num_pages, I32(2), I32(num_key_value_heads), I32(16), I32(head_dim)},
-      {}, pages_elem_offset, "pages", 0, 0, tir::kDefault);
+      tir::decl_buffer({num_pages, I32(2), I32(num_key_value_heads), I32(16), I32(head_dim)}, dt,
+                       "pages")
+          ->data,
+      dt, {num_pages, I32(2), I32(num_key_value_heads), I32(16), I32(head_dim)}, {},
+      pages_elem_offset, "pages", 0, 0, tir::kDefault);
 
   // copy_length_indptr with elem_offset
   tir::Buffer indptr_buf = tir::Buffer(
       tir::decl_buffer({batch_size + I32(1)}, DataType::Int(32), "copy_length_indptr")->data,
-      DataType::Int(32), {batch_size + I32(1)}, {},
-      indptr_elem_offset, "copy_length_indptr", 0, 0, tir::kDefault);
+      DataType::Int(32), {batch_size + I32(1)}, {}, indptr_elem_offset, "copy_length_indptr", 0, 0,
+      tir::kDefault);
 
   // copy_src_dst_pos with elem_offset
   tir::Buffer pos_buf = tir::Buffer(
       tir::decl_buffer({I32(2), total_copy_length}, DataType::Int(32), "copy_src_dst_pos")->data,
-      DataType::Int(32), {I32(2), total_copy_length}, {},
-      pos_elem_offset, "copy_src_dst_pos", 0, 0, tir::kDefault);
+      DataType::Int(32), {I32(2), total_copy_length}, {}, pos_elem_offset, "copy_src_dst_pos", 0, 0,
+      tir::kDefault);
 
   // Thread binding vars
   tir::Var bhd_o("bhd_o", DataType::Int(32));
@@ -247,14 +242,13 @@ tir::PrimFunc CompactKVCopy(int64_t num_key_value_heads, int64_t head_dim,
   IterVar tx_iv(Range::FromMinExtent(I32(0), I32(threads_per_block)), bhd_i, tir::kThreadIndex,
                 "threadIdx.x");
 
-  Stmt inner = tir::For(bhd_i, I32(0), I32(threads_per_block), tir::ForKind::kThreadBinding,
-                        body, tx_iv);
+  Stmt inner =
+      tir::For(bhd_i, I32(0), I32(threads_per_block), tir::ForKind::kThreadBinding, body, tx_iv);
   Stmt outer = tir::For(bhd_o, I32(0), grid_x, tir::ForKind::kThreadBinding, inner, bx_iv);
 
   // Root sblock
-  Stmt root_block = tir::SBlockRealize(
-      {}, tir::const_true(),
-      tir::SBlock({}, {}, {}, "root", outer));
+  Stmt root_block =
+      tir::SBlockRealize({}, tir::const_true(), tir::SBlock({}, {}, {}, "root", outer));
 
   ffi::Map<tir::Var, tir::Buffer> buf_map;
   buf_map.Set(h_pages, pages_buf);
@@ -275,8 +269,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef()
       .def("relax.frontend.nn.llm.kv_cache.compact_kv_copy_cpu",
-           [](int64_t num_key_value_heads, int64_t head_dim,
-              ffi::String dtype) -> tir::PrimFunc {
+           [](int64_t num_key_value_heads, int64_t head_dim, ffi::String dtype) -> tir::PrimFunc {
              return CompactKVCopyCpu(num_key_value_heads, head_dim, std::string(dtype));
            })
       .def("relax.frontend.nn.llm.kv_cache.compact_kv_copy",

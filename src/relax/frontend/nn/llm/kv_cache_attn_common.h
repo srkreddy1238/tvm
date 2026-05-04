@@ -31,13 +31,12 @@
 #ifndef TVM_RELAX_FRONTEND_NN_LLM_KV_CACHE_ATTN_COMMON_H_
 #define TVM_RELAX_FRONTEND_NN_LLM_KV_CACHE_ATTN_COMMON_H_
 
-#include "kv_cache_common.h"
-#include "position_embedding.h"
-
-#include <tvm/tir/stmt.h>
 #include <tvm/tir/op.h>
+#include <tvm/tir/stmt.h>
 
 #include "../../../../tir/ir/script/script_complete.h"
+#include "kv_cache_common.h"
+#include "position_embedding.h"
 
 namespace tvm {
 namespace relax {
@@ -76,10 +75,9 @@ using namespace tvm::tir;
  * \return PrimExpr for the (possibly rotated) element value in dtype.
  */
 inline PrimExpr BuildRopeExpr(PrimExpr elem_expr, PrimExpr partner_expr, PrimExpr pos_expr,
-                               tir::Var d_idx, int64_t d, tir::Var rope_scale,
-                               tir::Var rope_theta, tir::Var rotary_mode,
-                               const std::string& dtype,
-                               const ffi::Map<ffi::String, ffi::Any>& rope_scaling) {
+                              tir::Var d_idx, int64_t d, tir::Var rope_scale, tir::Var rope_theta,
+                              tir::Var rotary_mode, const std::string& dtype,
+                              const ffi::Map<ffi::String, ffi::Any>& rope_scaling) {
   bool is_f16 = (dtype == "float16");
 
   // pos_f32 = cast<float32>(pos_expr) * rope_scale
@@ -126,8 +124,8 @@ inline PrimExpr BuildRopeExpr(PrimExpr elem_expr, PrimExpr partner_expr, PrimExp
  * \param dtype      The element dtype string.
  * \return PrimExpr for the partner element.
  */
-inline PrimExpr BuildRopePartner(tir::Buffer buf, ffi::Array<PrimExpr> base_indices,
-                                  tir::Var d_idx, int64_t d, const std::string& dtype) {
+inline PrimExpr BuildRopePartner(tir::Buffer buf, ffi::Array<PrimExpr> base_indices, tir::Var d_idx,
+                                 int64_t d, const std::string& dtype) {
   int64_t half_d = d / 2;
   DataType dt = DataType(runtime::StringToDLDataType(dtype));
   PrimExpr neg_one = tir::make_const(dt, -1.0);
@@ -139,10 +137,8 @@ inline PrimExpr BuildRopePartner(tir::Buffer buf, ffi::Array<PrimExpr> base_indi
   ffi::Array<PrimExpr> idx_minus = base_indices;
   idx_minus.push_back(d_idx - I32(half_d));
 
-  return tvm::if_then_else(
-      d_idx < I32(half_d),
-      tir::BufferLoad(buf, idx_plus) * neg_one,
-      tir::BufferLoad(buf, idx_minus));
+  return tvm::if_then_else(d_idx < I32(half_d), tir::BufferLoad(buf, idx_plus) * neg_one,
+                           tir::BufferLoad(buf, idx_minus));
 }
 
 // ============================================================================
@@ -150,17 +146,17 @@ inline PrimExpr BuildRopePartner(tir::Buffer buf, ffi::Array<PrimExpr> base_indi
 // ============================================================================
 
 struct PrefillKernelConfig {
-  int64_t h_kv;           // number of KV heads
-  int64_t h_q;            // number of Q heads
-  int64_t d_qk;           // QK head dimension
-  int64_t d_v;            // V head dimension (= d_qk for standard attention)
-  std::string dtype;      // element dtype
-  bool sliding_window;    // whether sliding window is used
-  int64_t page_size;      // page size (16)
-  bool is_ragged;         // ragged (no paged KV) vs paged KV
-  bool is_mla;            // MLA variant
-  bool is_sequence;       // sequence prefill (non-ragged, non-paged)
-  int64_t causal;         // causal flag (for sequence prefill: 0=non-causal, 1=causal)
+  int64_t h_kv;         // number of KV heads
+  int64_t h_q;          // number of Q heads
+  int64_t d_qk;         // QK head dimension
+  int64_t d_v;          // V head dimension (= d_qk for standard attention)
+  std::string dtype;    // element dtype
+  bool sliding_window;  // whether sliding window is used
+  int64_t page_size;    // page size (16)
+  bool is_ragged;       // ragged (no paged KV) vs paged KV
+  bool is_mla;          // MLA variant
+  bool is_sequence;     // sequence prefill (non-ragged, non-paged)
+  int64_t causal;       // causal flag (for sequence prefill: 0=non-causal, 1=causal)
 
   // Derived
   int64_t h_qo_per_group() const { return h_q / h_kv; }  // GQA ratio

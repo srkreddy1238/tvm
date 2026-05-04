@@ -53,13 +53,12 @@
  * ---------------------------------------------------------------------------
  */
 
-#include "kv_cache.h"
-#include "kv_cache_common.h"
-
-#include <tvm/tir/stmt.h>
 #include <tvm/tir/op.h>
+#include <tvm/tir/stmt.h>
 
 #include "../../../../tir/ir/script/script_complete.h"
+#include "kv_cache.h"
+#include "kv_cache_common.h"
 
 namespace tvm {
 namespace relax {
@@ -93,24 +92,21 @@ tir::PrimFunc KVCacheTransposeAppend(int64_t num_key_value_heads, int64_t head_d
   // pages buffer: (num_pages, 2, h, page_size, d)
   tir::Buffer pages_buf = tir::Buffer(
       tir::decl_buffer({num_pages, I64(2), I64(num_key_value_heads), I64(page_size), I64(head_dim)},
-                       dt, "pages")->data,
-      dt,
-      {num_pages, I64(2), I64(num_key_value_heads), I64(page_size), I64(head_dim)},
-      {},
-      pages_elem_offset,
-      "pages", 0, 0, tir::kDefault);
+                       dt, "pages")
+          ->data,
+      dt, {num_pages, I64(2), I64(num_key_value_heads), I64(page_size), I64(head_dim)}, {},
+      pages_elem_offset, "pages", 0, 0, tir::kDefault);
 
   // k_data: (ntoken, h, d)
-  tir::Buffer k_buf = tir::decl_buffer({ntoken, I64(num_key_value_heads), I64(head_dim)}, dt,
-                                       "k_data");
+  tir::Buffer k_buf =
+      tir::decl_buffer({ntoken, I64(num_key_value_heads), I64(head_dim)}, dt, "k_data");
   // v_data: (ntoken, h, d)
-  tir::Buffer v_buf = tir::decl_buffer({ntoken, I64(num_key_value_heads), I64(head_dim)}, dt,
-                                       "v_data");
+  tir::Buffer v_buf =
+      tir::decl_buffer({ntoken, I64(num_key_value_heads), I64(head_dim)}, dt, "v_data");
   // position_map: (ntoken,) int32, elem_offset=position_map_elem_offset
   tir::Buffer pos_buf = tir::Buffer(
-      tir::decl_buffer({ntoken}, DataType::Int(32), "position_map")->data,
-      DataType::Int(32), {ntoken}, {}, position_map_elem_offset,
-      "position_map", 0, 0, tir::kDefault);
+      tir::decl_buffer({ntoken}, DataType::Int(32), "position_map")->data, DataType::Int(32),
+      {ntoken}, {}, position_map_elem_offset, "position_map", 0, 0, tir::kDefault);
 
   // Loop vars: global_pos (int64), h (int64), f (int64)
   tir::Var gpos("global_pos", DataType::Int(64));
@@ -131,20 +127,18 @@ tir::PrimFunc KVCacheTransposeAppend(int64_t num_key_value_heads, int64_t head_d
   PrimExpr page_off = tir::FloorMod(pos_i64, I64(page_size));
 
   // k sblock body
-  Stmt k_let = tir::LetStmt(
-      pos_var, tir::BufferLoad(pos_buf, {vgpos}),
-      tir::BufferStore(pages_buf, tir::BufferLoad(k_buf, {vgpos, vh, vf}),
-                       {page_idx, I64(0), vh, page_off, vf}));
+  Stmt k_let = tir::LetStmt(pos_var, tir::BufferLoad(pos_buf, {vgpos}),
+                            tir::BufferStore(pages_buf, tir::BufferLoad(k_buf, {vgpos, vh, vf}),
+                                             {page_idx, I64(0), vh, page_off, vf}));
 
   // v sblock body
   tir::Var pos_var2("position", DataType::Int(32));
   PrimExpr pos_i64_2 = CastTo(pos_var2, "int64");
   PrimExpr page_idx2 = tir::FloorDiv(pos_i64_2, I64(page_size));
   PrimExpr page_off2 = tir::FloorMod(pos_i64_2, I64(page_size));
-  Stmt v_let = tir::LetStmt(
-      pos_var2, tir::BufferLoad(pos_buf, {vgpos}),
-      tir::BufferStore(pages_buf, tir::BufferLoad(v_buf, {vgpos, vh, vf}),
-                       {page_idx2, I64(1), vh, page_off2, vf}));
+  Stmt v_let = tir::LetStmt(pos_var2, tir::BufferLoad(pos_buf, {vgpos}),
+                            tir::BufferStore(pages_buf, tir::BufferLoad(v_buf, {vgpos, vh, vf}),
+                                             {page_idx2, I64(1), vh, page_off2, vf}));
 
   // k sblock iter vars
   ffi::Array<tir::IterVar> k_iter_vars = {
@@ -155,11 +149,10 @@ tir::PrimFunc KVCacheTransposeAppend(int64_t num_key_value_heads, int64_t head_d
   ffi::Map<ffi::String, ffi::Any> sblock_annots;
   sblock_annots.Set("tir.script_parsing_detect_access", IntImm(DataType::Int(32), 3));
 
-  Stmt k_sblock = tir::SBlockRealize(
-      {PrimExpr(gpos), PrimExpr(h_var), PrimExpr(f_var)},
-      tir::const_true(),
-      tir::SBlock(k_iter_vars, {}, {}, "k_transpose_append", k_let,
-                  std::nullopt, {}, {}, sblock_annots));
+  Stmt k_sblock =
+      tir::SBlockRealize({PrimExpr(gpos), PrimExpr(h_var), PrimExpr(f_var)}, tir::const_true(),
+                         tir::SBlock(k_iter_vars, {}, {}, "k_transpose_append", k_let, std::nullopt,
+                                     {}, {}, sblock_annots));
 
   // v sblock iter vars (fresh vars)
   tir::Var vgpos2("vgpos", DataType::Int(64));
@@ -170,25 +163,22 @@ tir::PrimFunc KVCacheTransposeAppend(int64_t num_key_value_heads, int64_t head_d
   PrimExpr pos_i64_3 = CastTo(pos_var3, "int64");
   PrimExpr page_idx3 = tir::FloorDiv(pos_i64_3, I64(page_size));
   PrimExpr page_off3 = tir::FloorMod(pos_i64_3, I64(page_size));
-  Stmt v_let2 = tir::LetStmt(
-      pos_var3, tir::BufferLoad(pos_buf, {vgpos2}),
-      tir::BufferStore(pages_buf, tir::BufferLoad(v_buf, {vgpos2, vh2, vf2}),
-                       {page_idx3, I64(1), vh2, page_off3, vf2}));
+  Stmt v_let2 = tir::LetStmt(pos_var3, tir::BufferLoad(pos_buf, {vgpos2}),
+                             tir::BufferStore(pages_buf, tir::BufferLoad(v_buf, {vgpos2, vh2, vf2}),
+                                              {page_idx3, I64(1), vh2, page_off3, vf2}));
 
   ffi::Array<tir::IterVar> v_iter_vars = {
       tir::IterVar(Range::FromMinExtent(I64(0), ntoken), vgpos2, tir::kDataPar, ""),
       tir::IterVar(Range::FromMinExtent(I64(0), I64(num_key_value_heads)), vh2, tir::kDataPar, ""),
       tir::IterVar(Range::FromMinExtent(I64(0), I64(head_dim)), vf2, tir::kDataPar, "")};
 
-  Stmt v_sblock = tir::SBlockRealize(
-      {PrimExpr(gpos), PrimExpr(h_var), PrimExpr(f_var)},
-      tir::const_true(),
-      tir::SBlock(v_iter_vars, {}, {}, "v_transpose_append", v_let2,
-                  std::nullopt, {}, {}, sblock_annots));
+  Stmt v_sblock =
+      tir::SBlockRealize({PrimExpr(gpos), PrimExpr(h_var), PrimExpr(f_var)}, tir::const_true(),
+                         tir::SBlock(v_iter_vars, {}, {}, "v_transpose_append", v_let2,
+                                     std::nullopt, {}, {}, sblock_annots));
 
   // if position_map[global_pos] != int32(-1): k_sblock; v_sblock
-  PrimExpr cond = tir::NE(tir::BufferLoad(pos_buf, {gpos}),
-                           IntImm(DataType::Int(32), -1));
+  PrimExpr cond = tir::NE(tir::BufferLoad(pos_buf, {gpos}), IntImm(DataType::Int(32), -1));
   Stmt if_body = tir::SeqStmt({k_sblock, v_sblock});
   Stmt if_stmt = tir::IfThenElse(cond, if_body);
 
@@ -216,8 +206,7 @@ tir::PrimFunc KVCacheTransposeAppend(int64_t num_key_value_heads, int64_t head_d
 // KVCacheTransposeAppendMLA
 // ---------------------------------------------------------------------------
 
-tir::PrimFunc KVCacheTransposeAppendMLA(int64_t d_qk, const std::string& dtype,
-                                        int64_t page_size) {
+tir::PrimFunc KVCacheTransposeAppendMLA(int64_t d_qk, const std::string& dtype, int64_t page_size) {
   DataType dt = DataType(runtime::StringToDLDataType(dtype));
 
   tir::SizeVar ntoken("num_tokens_excluding_cache", DataType::Int(64));
@@ -231,18 +220,16 @@ tir::PrimFunc KVCacheTransposeAppendMLA(int64_t d_qk, const std::string& dtype,
 
   // pages: (num_pages, page_size, d_qk)
   tir::Buffer pages_buf = tir::Buffer(
-      tir::decl_buffer({num_pages, I64(page_size), I64(d_qk)}, dt, "pages")->data,
-      dt, {num_pages, I64(page_size), I64(d_qk)}, {},
-      pages_elem_offset, "pages", 0, 0, tir::kDefault);
+      tir::decl_buffer({num_pages, I64(page_size), I64(d_qk)}, dt, "pages")->data, dt,
+      {num_pages, I64(page_size), I64(d_qk)}, {}, pages_elem_offset, "pages", 0, 0, tir::kDefault);
 
   // kv_data: (ntoken, d_qk)
   tir::Buffer kv_buf = tir::decl_buffer({ntoken, I64(d_qk)}, dt, "kv_data");
 
   // position_map: (ntoken,) int32
   tir::Buffer pos_buf = tir::Buffer(
-      tir::decl_buffer({ntoken}, DataType::Int(32), "position_map")->data,
-      DataType::Int(32), {ntoken}, {}, position_map_elem_offset,
-      "position_map", 0, 0, tir::kDefault);
+      tir::decl_buffer({ntoken}, DataType::Int(32), "position_map")->data, DataType::Int(32),
+      {ntoken}, {}, position_map_elem_offset, "position_map", 0, 0, tir::kDefault);
 
   // Loop vars
   tir::Var gpos("global_pos", DataType::Int(64));
@@ -259,8 +246,7 @@ tir::PrimFunc KVCacheTransposeAppendMLA(int64_t d_qk, const std::string& dtype,
 
   Stmt k_let = tir::LetStmt(
       pos_var, tir::BufferLoad(pos_buf, {vgpos}),
-      tir::BufferStore(pages_buf, tir::BufferLoad(kv_buf, {vgpos, vf}),
-                       {page_idx, page_off, vf}));
+      tir::BufferStore(pages_buf, tir::BufferLoad(kv_buf, {vgpos, vf}), {page_idx, page_off, vf}));
 
   ffi::Array<tir::IterVar> iter_vars = {
       tir::IterVar(Range::FromMinExtent(I64(0), ntoken), vgpos, tir::kDataPar, ""),
@@ -269,14 +255,11 @@ tir::PrimFunc KVCacheTransposeAppendMLA(int64_t d_qk, const std::string& dtype,
   ffi::Map<ffi::String, ffi::Any> sblock_annots;
   sblock_annots.Set("tir.script_parsing_detect_access", IntImm(DataType::Int(32), 3));
 
-  Stmt k_sblock = tir::SBlockRealize(
-      {PrimExpr(gpos), PrimExpr(f_var)},
-      tir::const_true(),
-      tir::SBlock(iter_vars, {}, {}, "k_transpose_append", k_let,
-                  std::nullopt, {}, {}, sblock_annots));
+  Stmt k_sblock = tir::SBlockRealize({PrimExpr(gpos), PrimExpr(f_var)}, tir::const_true(),
+                                     tir::SBlock(iter_vars, {}, {}, "k_transpose_append", k_let,
+                                                 std::nullopt, {}, {}, sblock_annots));
 
-  PrimExpr cond = tir::NE(tir::BufferLoad(pos_buf, {gpos}),
-                           IntImm(DataType::Int(32), -1));
+  PrimExpr cond = tir::NE(tir::BufferLoad(pos_buf, {gpos}), IntImm(DataType::Int(32), -1));
   Stmt if_stmt = tir::IfThenElse(cond, k_sblock);
 
   Stmt loop = if_stmt;
@@ -306,7 +289,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
            [](int64_t num_key_value_heads, int64_t head_dim, ffi::String dtype,
               int64_t page_size) -> tir::PrimFunc {
              return KVCacheTransposeAppend(num_key_value_heads, head_dim, std::string(dtype),
-                                          page_size);
+                                           page_size);
            })
       .def("relax.frontend.nn.llm.kv_cache.kv_cache_transpose_append_mla",
            [](int64_t d_qk, ffi::String dtype, int64_t page_size) -> tir::PrimFunc {

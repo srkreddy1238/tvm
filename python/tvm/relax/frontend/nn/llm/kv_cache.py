@@ -24,6 +24,7 @@ import math
 from typing import Any, Literal
 
 import tvm
+import tvm.relax.frontend.nn.llm._ffi_api_llm_kv_cache as _ffi_kv_cache  # C++ FFI bridge
 from tvm import relax as rx
 from tvm import s_tir, tir
 from tvm.relax.frontend.nn import Object, Tensor
@@ -32,7 +33,6 @@ from tvm.script import tir as T
 from tvm.target import Target
 
 from .position_embedding import llama_rope_with_position_map, switch_rope_freq_func
-import tvm.relax.frontend.nn.llm._ffi_api_llm_kv_cache as _ffi_kv_cache  # C++ FFI bridge
 from .tree_attn import (
     tree_attn,
     tree_attn_cpu,
@@ -934,7 +934,13 @@ def _attention_prefill_cpu(
 ):
     """CPU batched-prefill paged-KV kernel. Delegates to C++ via FFI."""
     return _ffi_kv_cache.attention_prefill_cpu(
-        h_kv, h_q, d, dtype, sliding_window, rope_scaling, page_size,
+        h_kv,
+        h_q,
+        d,
+        dtype,
+        sliding_window,
+        rope_scaling,
+        page_size,
     )
 
 
@@ -1100,7 +1106,14 @@ def _attention_prefill(
 ):
     """GPU batched-prefill paged-KV kernel. Delegates to C++ via FFI."""
     return _ffi_kv_cache.attention_prefill(
-        h_kv, h_q, d, dtype, sliding_window, rope_scaling, target, page_size,
+        h_kv,
+        h_q,
+        d,
+        dtype,
+        sliding_window,
+        rope_scaling,
+        target,
+        page_size,
     )
 
 
@@ -1272,9 +1285,16 @@ def _attention_decode(
 ):
     """GPU batched-decode paged-KV kernel. Delegates to C++ via FFI."""
     return _ffi_kv_cache.attention_decode(
-        num_kv_heads, num_qo_heads, head_dim, qkv_dtype,
-        sliding_window, rope_scaling, target, page_size,
+        num_kv_heads,
+        num_qo_heads,
+        head_dim,
+        qkv_dtype,
+        sliding_window,
+        rope_scaling,
+        target,
+        page_size,
     )
+
 
 def _merge_state_inplace_cpu(v_dtype):
     @T.prim_func
@@ -1398,14 +1418,27 @@ def _merge_state_inplace(
 def _attention_sequence_prefill(h_kv, h_q, d, dtype, target: Target, causal=0, sm_scale=1.0):  # pylint: disable=line-too-long
     """GPU sequence-prefill kernel. Delegates to C++ via FFI."""
     return _ffi_kv_cache.attention_sequence_prefill(
-        h_kv, h_q, d, d, dtype, {}, target, causal, sm_scale,
+        h_kv,
+        h_q,
+        d,
+        d,
+        dtype,
+        {},
+        target,
+        causal,
+        sm_scale,
     )
 
 
 def _attention_prefill_ragged_cpu(h_kv, h_q, d_qk, d_v, dtype, rope_scaling: dict[str, Any]):
     """CPU ragged-prefill paged-KV kernel. Delegates to C++ via FFI."""
     return _ffi_kv_cache.attention_prefill_ragged_cpu(
-        h_kv, h_q, d_qk, d_v, dtype, rope_scaling,
+        h_kv,
+        h_q,
+        d_qk,
+        d_v,
+        dtype,
+        rope_scaling,
     )
 
 
@@ -1414,7 +1447,13 @@ def _attention_prefill_ragged(
 ):
     """GPU ragged-prefill paged-KV kernel. Delegates to C++ via FFI."""
     return _ffi_kv_cache.attention_prefill_ragged(
-        h_kv, h_q, d_qk, d_v, dtype, rope_scaling, target,
+        h_kv,
+        h_q,
+        d_qk,
+        d_v,
+        dtype,
+        rope_scaling,
+        target,
     )
 
 
@@ -1431,7 +1470,12 @@ def _attention_prefill_mla(
     # C++ signature: (num_heads, v_head_dim, qk_nope_head_dim, dtype, causal_flag, target)
     # sliding_window maps to causal_flag; page_size is baked into the C++ kernel.
     return _ffi_kv_cache.attention_prefill_mla(
-        h_q, d_latent, d_rope, dtype, sliding_window, target,
+        h_q,
+        d_latent,
+        d_rope,
+        dtype,
+        sliding_window,
+        target,
     )
 
 

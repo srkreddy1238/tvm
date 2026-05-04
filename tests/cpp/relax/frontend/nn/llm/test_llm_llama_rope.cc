@@ -79,8 +79,8 @@ static IRModule BuildLlamaRopeModule(const ffi::Map<ffi::String, ffi::Any>& rope
     NNTensor qkv = args.at("qkv").cast<NNTensor>();
     tir::Var total_seq_len = args.at("total_seq_len").cast<tir::Var>();
 
-    auto [q, k, v] = LlamaRope(qkv, total_seq_len, THETA, SCALE, num_q, num_kv, rope_scaling,
-                               rotary_dim);
+    auto [q, k, v] =
+        LlamaRope(qkv, total_seq_len, THETA, SCALE, num_q, num_kv, rope_scaling, rotary_dim);
 
     ffi::Array<ffi::Any> outputs;
     outputs.push_back(ffi::Any(q->expr));
@@ -90,10 +90,10 @@ static IRModule BuildLlamaRopeModule(const ffi::Map<ffi::String, ffi::Any>& rope
   };
 
   // Create method spec
-  MethodSpec ms(forward, {"qkv", "total_seq_len"},
-                {ffi::Any(MakeSpecTensor({BATCH, SEQ, fused, HEAD_DIM}, DTYPE)),
-                 ffi::Any(SpecInt())},
-                "plain", "plain");
+  MethodSpec ms(
+      forward, {"qkv", "total_seq_len"},
+      {ffi::Any(MakeSpecTensor({BATCH, SEQ, fused, HEAD_DIM}, DTYPE)), ffi::Any(SpecInt())},
+      "plain", "plain");
 
   // Create module spec
   ModuleSpec mod_spec(ffi::Array<ffi::String>{ffi::String("forward")},
@@ -271,8 +271,8 @@ TEST(LlamaRope, PartialRotaryDim) {
   rope_scaling.Set("high_freq_factor", ffi::Any(4.0));
   rope_scaling.Set("original_max_position_embeddings", ffi::Any(int64_t(8192)));
 
-  IRModule mod = BuildLlamaRopeModule(rope_scaling, NUM_Q, NUM_KV,
-                                      ffi::Optional<int64_t>(HEAD_DIM / 2));
+  IRModule mod =
+      BuildLlamaRopeModule(rope_scaling, NUM_Q, NUM_KV, ffi::Optional<int64_t>(HEAD_DIM / 2));
 
   // Verify the module structure
   ASSERT_TRUE(mod.defined());

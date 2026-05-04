@@ -179,8 +179,8 @@ tir::PrimFunc CompactKVCopyCpu(int64_t num_key_value_heads, int64_t head_dim,
  * \param target               Target device.
  * \return TIR PrimFunc.
  */
-tir::PrimFunc CompactKVCopy(int64_t num_key_value_heads, int64_t head_dim,
-                            const std::string& dtype, Target target);
+tir::PrimFunc CompactKVCopy(int64_t num_key_value_heads, int64_t head_dim, const std::string& dtype,
+                            Target target);
 
 // ---------------------------------------------------------------------------
 // Merge state inplace kernels

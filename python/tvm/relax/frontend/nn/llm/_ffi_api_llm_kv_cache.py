@@ -20,12 +20,12 @@ Populated at import time by ``tvm_ffi.init_ffi_api``.  Each attribute
 corresponds to a C++ global registered under the namespace prefix
 ``relax.frontend.nn.llm.kv_cache.*``:
 
-  - ``attention_decode``                    – GPU batched-decode paged-KV kernel
-  - ``attention_prefill``                   – GPU batched-prefill paged-KV kernel
-  - ``attention_prefill_ragged``            – GPU ragged-prefill paged-KV kernel
-  - ``attention_prefill_ragged_cpu``        – CPU ragged-prefill paged-KV kernel
-  - ``attention_sequence_prefill``          – GPU sequence-prefill kernel
-  - ``attention_prefill_mla``               – GPU MLA prefill kernel
+  - ``attention_decode``                    - GPU batched-decode paged-KV kernel
+  - ``attention_prefill``                   - GPU batched-prefill paged-KV kernel
+  - ``attention_prefill_ragged``            - GPU ragged-prefill paged-KV kernel
+  - ``attention_prefill_ragged_cpu``        - CPU ragged-prefill paged-KV kernel
+  - ``attention_sequence_prefill``          - GPU sequence-prefill kernel
+  - ``attention_prefill_mla``               - GPU MLA prefill kernel
 """
 
 import tvm_ffi

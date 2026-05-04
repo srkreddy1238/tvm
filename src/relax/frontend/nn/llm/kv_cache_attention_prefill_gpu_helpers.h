@@ -32,15 +32,15 @@
 #ifndef TVM_RELAX_FRONTEND_NN_LLM_KV_CACHE_ATTENTION_PREFILL_GPU_HELPERS_H_
 #define TVM_RELAX_FRONTEND_NN_LLM_KV_CACHE_ATTENTION_PREFILL_GPU_HELPERS_H_
 
-#include "kv_cache_common.h"
-#include "position_embedding.h"
-
 #include <tvm/target/target.h>
 #include <tvm/tir/function.h>
-#include <tvm/tir/stmt.h>
 #include <tvm/tir/op.h>
+#include <tvm/tir/stmt.h>
 
 #include <string>
+
+#include "kv_cache_common.h"
+#include "position_embedding.h"
 
 namespace tvm {
 namespace relax {
@@ -87,11 +87,10 @@ PrefillKernelConfig ComputePrefillKernelConfig(int64_t h_kv, int64_t h_q, int64_
  * For float32: result is float32.
  * For float16: result is float16 (cast applied inside).
  */
-PrimExpr BuildPrefillRopeExpr(tir::Buffer buf, ffi::Array<PrimExpr> base_indices,
-                               tir::Var d_idx, int64_t d, PrimExpr pos_expr,
-                               tir::Var rope_scale, tir::Var rope_theta, tir::Var rotary_mode,
-                               const std::string& dtype,
-                               const ffi::Map<ffi::String, ffi::Any>& rope_scaling);
+PrimExpr BuildPrefillRopeExpr(tir::Buffer buf, ffi::Array<PrimExpr> base_indices, tir::Var d_idx,
+                              int64_t d, PrimExpr pos_expr, tir::Var rope_scale,
+                              tir::Var rope_theta, tir::Var rotary_mode, const std::string& dtype,
+                              const ffi::Map<ffi::String, ffi::Any>& rope_scaling);
 
 // ============================================================================
 // Paged KV helpers  (mirrors _get_kv_chunk_len / _get_seq_offset / _declare_length_info)
@@ -113,8 +112,7 @@ PrimExpr GetKvChunkLen(PrimExpr num_pages, int64_t page_size, PrimExpr seq_id,
  * Non-sliding-window: pos
  * Sliding-window: if pos < sink_size: pos  else: pos - sink_size + sw_offset
  */
-PrimExpr GetSeqOffset(PrimExpr pos, PrimExpr seq_id, tir::Buffer length_info,
-                      bool sliding_window);
+PrimExpr GetSeqOffset(PrimExpr pos, PrimExpr seq_id, tir::Buffer length_info, bool sliding_window);
 
 /*!
  * \brief Declare the length_info buffer.

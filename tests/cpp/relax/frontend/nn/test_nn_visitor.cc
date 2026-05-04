@@ -194,10 +194,10 @@ TEST(NNVisitor, NamingBasic) {
 //   #           mod_dict.k1.0.param, mod_dict.k1.1.param
 // ---------------------------------------------------------------------------
 TEST(NNVisitor, NamingModuleDict) {
-  ModuleList list0(ffi::Array<ffi::Any>{ffi::Any(LeafModule("float64")),
-                                        ffi::Any(LeafModule("float32"))});
-  ModuleList list1(ffi::Array<ffi::Any>{ffi::Any(LeafModule("float16")),
-                                        ffi::Any(LeafModule("float8"))});
+  ModuleList list0(
+      ffi::Array<ffi::Any>{ffi::Any(LeafModule("float64")), ffi::Any(LeafModule("float32"))});
+  ModuleList list1(
+      ffi::Array<ffi::Any>{ffi::Any(LeafModule("float16")), ffi::Any(LeafModule("float8"))});
 
   ffi::Map<ffi::String, ffi::Any> dict_modules;
   dict_modules.Set("k0", ffi::Any(list0));
@@ -220,7 +220,9 @@ TEST(NNVisitor, NamingModuleDict) {
       std::string dtype = std::string(node->GetDtype());
       auto it = expected.find(dtype);
       EXPECT_NE(it, expected.end()) << "Unexpected dtype: " << dtype;
-      if (it != expected.end()) { EXPECT_EQ(name, it->second) << "dtype=" << dtype; }
+      if (it != expected.end()) {
+        EXPECT_EQ(name, it->second) << "dtype=" << dtype;
+      }
       return ffi::Any(node);
     }
   };
@@ -240,10 +242,10 @@ TEST(NNVisitor, NamingModuleDict) {
 //   mutator.visit("mod_list", mod_list)
 // ---------------------------------------------------------------------------
 TEST(NNVisitor, NamingModuleList) {
-  ModuleList inner0(ffi::Array<ffi::Any>{ffi::Any(LeafModule("float64")),
-                                         ffi::Any(LeafModule("float32"))});
-  ModuleList inner1(ffi::Array<ffi::Any>{ffi::Any(LeafModule("float16")),
-                                         ffi::Any(LeafModule("float8"))});
+  ModuleList inner0(
+      ffi::Array<ffi::Any>{ffi::Any(LeafModule("float64")), ffi::Any(LeafModule("float32"))});
+  ModuleList inner1(
+      ffi::Array<ffi::Any>{ffi::Any(LeafModule("float16")), ffi::Any(LeafModule("float8"))});
   ModuleList outer(ffi::Array<ffi::Any>{ffi::Any(inner0), ffi::Any(inner1)});
 
   std::map<std::string, std::string> expected{
@@ -262,7 +264,9 @@ TEST(NNVisitor, NamingModuleList) {
       std::string dtype = std::string(node->GetDtype());
       auto it = expected.find(dtype);
       EXPECT_NE(it, expected.end()) << "Unexpected dtype: " << dtype;
-      if (it != expected.end()) { EXPECT_EQ(name, it->second) << "dtype=" << dtype; }
+      if (it != expected.end()) {
+        EXPECT_EQ(name, it->second) << "dtype=" << dtype;
+      }
       return ffi::Any(node);
     }
   };
@@ -416,7 +420,7 @@ TEST(NNVisitor, MutateModuleList) {
   };
 
   ModuleList ml(ffi::Array<ffi::Any>{ffi::Any(MakeTagged("m1")), ffi::Any(MakeTagged("m2")),
-                                      ffi::Any(MakeTagged("m3"))});
+                                     ffi::Any(MakeTagged("m3"))});
 
   EXPECT_EQ(GetTag(ml->modules[0]), "m1");
   EXPECT_EQ(GetTag(ml->modules[1]), "m2");
@@ -714,8 +718,8 @@ TEST(NNVisitor, ModuleListNestedModuleDict) {
 // ---------------------------------------------------------------------------
 TEST(NNVisitor, ParamDtypeUpgrade) {
   // Build the tree.
-  ModuleList c_list(ffi::Array<ffi::Any>{ffi::Any(LeafModule("float16")),
-                                          ffi::Any(LeafModule("float64"))});
+  ModuleList c_list(
+      ffi::Array<ffi::Any>{ffi::Any(LeafModule("float16")), ffi::Any(LeafModule("float64"))});
 
   ffi::Map<ffi::String, ffi::Any> d_mods;
   d_mods.Set("x", ffi::Any(LeafModule("float16")));

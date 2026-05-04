@@ -18,36 +18,34 @@
 
 Each test exercises a distinct aspect of the Mutator traversal:
 
-  test_mutator_naming_basic        – dotted names are built correctly for a
+  test_mutator_naming_basic        - dotted names are built correctly for a
                                      four-level nested Module hierarchy.
-  test_mutator_naming_moduledict   – dotted names through ModuleDict → ModuleList.
-  test_mutator_naming_modulelist   – dotted names through ModuleList → ModuleList.
-  test_mutator_module              – visit_module can replace a sub-module.
-  test_mutator_moduledict          – visit_module can replace an entry in a
+  test_mutator_naming_moduledict   - dotted names through ModuleDict → ModuleList.
+  test_mutator_naming_modulelist   - dotted names through ModuleList → ModuleList.
+  test_mutator_module              - visit_module can replace a sub-module.
+  test_mutator_moduledict          - visit_module can replace an entry in a
                                      ModuleDict.
-  test_mutator_modulelist          – visit_module can replace an entry in a
+  test_mutator_modulelist          - visit_module can replace an entry in a
                                      ModuleList.
-  test_mutator_effect              – visit_effect can replace an Effect child.
-  test_mutator_param               – visit_param can replace a Parameter child.
-  test_mutator_recursively         – visit_param recurses into nested Modules.
-  test_mutator_default_visit_param – the default visit_param (no override)
+  test_mutator_effect              - visit_effect can replace an Effect child.
+  test_mutator_param               - visit_param can replace a Parameter child.
+  test_mutator_recursively         - visit_param recurses into nested Modules.
+  test_mutator_default_visit_param - the default visit_param (no override)
                                      returns the node unchanged.
-  test_mutator_default_visit_module – the default visit_module returns the
+  test_mutator_default_visit_module - the default visit_module returns the
                                       node unchanged.
-  test_mutator_noop_on_non_module  – visit() on a plain Python object that is
+  test_mutator_noop_on_non_module  - visit() on a plain Python object that is
                                      not an nn.Module returns it unchanged.
-  test_mutator_modulelist_nested_moduledict – ModuleList containing ModuleDicts
+  test_mutator_modulelist_nested_moduledict - ModuleList containing ModuleDicts
                                              is traversed correctly.
-  test_mutator_param_dtype_upgrade – visit_param upgrades every float16
+  test_mutator_param_dtype_upgrade - visit_param upgrades every float16
                                      parameter to float32 across a mixed tree.
 """
 
 from typing import Any
 
-import pytest
 import tvm
 from tvm.relax.frontend import nn
-
 
 # ---------------------------------------------------------------------------
 # Helpers

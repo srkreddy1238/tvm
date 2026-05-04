@@ -48,13 +48,12 @@
  * ---------------------------------------------------------------------------
  */
 
-#include "kv_cache.h"
-#include "kv_cache_common.h"
-
-#include <tvm/tir/stmt.h>
 #include <tvm/tir/op.h>
+#include <tvm/tir/stmt.h>
 
 #include "../../../../tir/ir/script/script_complete.h"
+#include "kv_cache.h"
+#include "kv_cache_common.h"
 
 namespace tvm {
 namespace relax {
@@ -67,12 +66,13 @@ using namespace tvm::tir;
 // ---------------------------------------------------------------------------
 // Shared: build the sblock body for merge_state_inplace
 // ---------------------------------------------------------------------------
-static Stmt BuildMergeBody(tir::Buffer V_buf, tir::Buffer S_buf, tir::Buffer V_other_buf,
-                           tir::Buffer S_other_buf, PrimExpr n_expr, PrimExpr h_expr,
-                           tir::Var D_var, const std::string& dtype, bool is_gpu,
-                           int64_t vec_size = 4) {
+[[maybe_unused]] static Stmt BuildMergeBody(tir::Buffer V_buf, tir::Buffer S_buf,
+                                            tir::Buffer V_other_buf, tir::Buffer S_other_buf,
+                                            PrimExpr n_expr, PrimExpr h_expr, tir::Var D_var,
+                                            const std::string& dtype, bool is_gpu,
+                                            int64_t vec_size = 4) {
   bool is_f16 = (dtype == "float16");
-  DataType dt = DataType(runtime::StringToDLDataType(dtype));
+  (void)DataType(runtime::StringToDLDataType(dtype));
 
   // Alloc buffers (scope="" for CPU, "local" for GPU)
   std::string scope = is_gpu ? "local" : "";
@@ -113,12 +113,11 @@ static Stmt BuildMergeBody(tir::Buffer V_buf, tir::Buffer S_buf, tir::Buffer V_o
 
   std::vector<Stmt> stmts;
   stmts.push_back(tir::BufferStore(s_val_buf, tir::BufferLoad(S_buf, {n_expr, h_expr}), {I32(0)}));
-  stmts.push_back(tir::BufferStore(s_other_val_buf,
-                                   tir::BufferLoad(S_other_buf, {n_expr, h_expr}), {I32(0)}));
+  stmts.push_back(
+      tir::BufferStore(s_other_val_buf, tir::BufferLoad(S_other_buf, {n_expr, h_expr}), {I32(0)}));
   stmts.push_back(tir::BufferStore(s_max_buf, tvm::max(s_val(), s_other_val()), {I32(0)}));
   stmts.push_back(tir::BufferStore(s_val_buf, tvm::exp2(s_val() - s_max()), {I32(0)}));
-  stmts.push_back(
-      tir::BufferStore(s_other_val_buf, tvm::exp2(s_other_val() - s_max()), {I32(0)}));
+  stmts.push_back(tir::BufferStore(s_other_val_buf, tvm::exp2(s_other_val() - s_max()), {I32(0)}));
   stmts.push_back(tir::BufferStore(scale_buf, s_val() / (s_val() + s_other_val()), {I32(0)}));
   stmts.push_back(
       tir::BufferStore(other_scale_buf, s_other_val() / (s_val() + s_other_val()), {I32(0)}));
@@ -130,8 +129,9 @@ static Stmt BuildMergeBody(tir::Buffer V_buf, tir::Buffer S_buf, tir::Buffer V_o
     PrimExpr v_other_elem = tir::BufferLoad(V_other_buf, {n_expr, h_expr, d_var});
     PrimExpr blend;
     if (is_f16) {
-      blend = CastTo(CastTo(v_elem, "float32") * scale() +
-                     CastTo(v_other_elem, "float32") * other_scale(), dtype);
+      blend = CastTo(
+          CastTo(v_elem, "float32") * scale() + CastTo(v_other_elem, "float32") * other_scale(),
+          dtype);
     } else {
       blend = v_elem * scale() + v_other_elem * other_scale();
     }
@@ -152,9 +152,8 @@ static Stmt BuildMergeBody(tir::Buffer V_buf, tir::Buffer S_buf, tir::Buffer V_o
   }
 
   // S[n,h] = log2(s_val+s_other_val) + s_max
-  stmts.push_back(tir::BufferStore(S_buf,
-                                   tvm::log2(s_val() + s_other_val()) + s_max(),
-                                   {n_expr, h_expr}));
+  stmts.push_back(
+      tir::BufferStore(S_buf, tvm::log2(s_val() + s_other_val()) + s_max(), {n_expr, h_expr}));
 
   return tir::SeqStmt(ffi::Array<Stmt>(stmts.begin(), stmts.end()));
 }
@@ -187,8 +186,7 @@ tir::PrimFunc MergeStateInplaceCpu(const std::string& dtype) {
   tir::Var h_var("h", DataType::Int(32));
 
   // Alloc buffers (no scope for CPU)
-  auto alloc_cpu = [&](const std::string& name, int64_t n,
-                       const std::string& adtype = "float32") {
+  auto alloc_cpu = [&](const std::string& name, int64_t n, const std::string& adtype = "float32") {
     DataType adt = DataType(runtime::StringToDLDataType(adtype));
     return tir::decl_buffer({I32(n)}, adt, name);
   };
@@ -211,8 +209,9 @@ tir::PrimFunc MergeStateInplaceCpu(const std::string& dtype) {
   PrimExpr v_other_elem = tir::BufferLoad(V_other_buf, {n_var, h_var, d_var});
   PrimExpr blend;
   if (is_f16) {
-    blend = CastTo(CastTo(v_elem, "float32") * scale() +
-                   CastTo(v_other_elem, "float32") * other_scale(), dtype);
+    blend = CastTo(
+        CastTo(v_elem, "float32") * scale() + CastTo(v_other_elem, "float32") * other_scale(),
+        dtype);
   } else {
     blend = v_elem * scale() + v_other_elem * other_scale();
   }
@@ -221,22 +220,22 @@ tir::PrimFunc MergeStateInplaceCpu(const std::string& dtype) {
 
   // reads/writes for sblock
   ffi::Array<tir::BufferRegion> reads = {
-      tir::BufferRegion(S_buf, {Range::FromMinExtent(n_var, I32(1)),
-                                Range::FromMinExtent(h_var, I32(1))}),
-      tir::BufferRegion(S_other_buf, {Range::FromMinExtent(n_var, I32(1)),
-                                      Range::FromMinExtent(h_var, I32(1))}),
-      tir::BufferRegion(V_buf, {Range::FromMinExtent(n_var, I32(1)),
-                                Range::FromMinExtent(h_var, I32(1)),
-                                Range::FromMinExtent(I32(0), D_var)}),
-      tir::BufferRegion(V_other_buf, {Range::FromMinExtent(n_var, I32(1)),
-                                      Range::FromMinExtent(h_var, I32(1)),
-                                      Range::FromMinExtent(I32(0), D_var)})};
+      tir::BufferRegion(S_buf,
+                        {Range::FromMinExtent(n_var, I32(1)), Range::FromMinExtent(h_var, I32(1))}),
+      tir::BufferRegion(S_other_buf,
+                        {Range::FromMinExtent(n_var, I32(1)), Range::FromMinExtent(h_var, I32(1))}),
+      tir::BufferRegion(V_buf,
+                        {Range::FromMinExtent(n_var, I32(1)), Range::FromMinExtent(h_var, I32(1)),
+                         Range::FromMinExtent(I32(0), D_var)}),
+      tir::BufferRegion(V_other_buf,
+                        {Range::FromMinExtent(n_var, I32(1)), Range::FromMinExtent(h_var, I32(1)),
+                         Range::FromMinExtent(I32(0), D_var)})};
   ffi::Array<tir::BufferRegion> writes = {
-      tir::BufferRegion(V_buf, {Range::FromMinExtent(n_var, I32(1)),
-                                Range::FromMinExtent(h_var, I32(1)),
-                                Range::FromMinExtent(I32(0), D_var)}),
-      tir::BufferRegion(S_buf, {Range::FromMinExtent(n_var, I32(1)),
-                                Range::FromMinExtent(h_var, I32(1))})};
+      tir::BufferRegion(V_buf,
+                        {Range::FromMinExtent(n_var, I32(1)), Range::FromMinExtent(h_var, I32(1)),
+                         Range::FromMinExtent(I32(0), D_var)}),
+      tir::BufferRegion(
+          S_buf, {Range::FromMinExtent(n_var, I32(1)), Range::FromMinExtent(h_var, I32(1))})};
 
   // sblock body
   ffi::Array<Stmt> sblock_stmts = {
@@ -264,10 +263,8 @@ tir::PrimFunc MergeStateInplaceCpu(const std::string& dtype) {
                                         other_scale_buf};
 
   Stmt sblock = tir::SBlockRealize(
-      {PrimExpr(n_var), PrimExpr(h_var)},
-      tir::const_true(),
-      tir::SBlock(iter_vars, reads, writes, "merge", sblock_body,
-                  std::nullopt, alloc_bufs));
+      {PrimExpr(n_var), PrimExpr(h_var)}, tir::const_true(),
+      tir::SBlock(iter_vars, reads, writes, "merge", sblock_body, std::nullopt, alloc_bufs));
 
   Stmt loop = sblock;
   loop = tir::For(h_var, I32(0), H_var, tir::ForKind::kSerial, loop);
@@ -351,37 +348,37 @@ tir::PrimFunc MergeStateInplace(int64_t num_attention_heads, int64_t v_head_dim,
 
   // reads/writes for sblock
   ffi::Array<tir::BufferRegion> reads = {
-      tir::BufferRegion(S_buf, {Range::FromMinExtent(bx, I32(1)),
-                                Range::FromMinExtent(h_idx, I32(1))}),
-      tir::BufferRegion(S_other_buf, {Range::FromMinExtent(bx, I32(1)),
-                                      Range::FromMinExtent(h_idx, I32(1))}),
-      tir::BufferRegion(V_buf, {Range::FromMinExtent(bx, I32(1)),
-                                Range::FromMinExtent(h_idx, I32(1)),
-                                Range::FromMinExtent(d_base, I32(4))}),
-      tir::BufferRegion(V_other_buf, {Range::FromMinExtent(bx, I32(1)),
-                                      Range::FromMinExtent(h_idx, I32(1)),
-                                      Range::FromMinExtent(d_base, I32(4))})};
+      tir::BufferRegion(S_buf,
+                        {Range::FromMinExtent(bx, I32(1)), Range::FromMinExtent(h_idx, I32(1))}),
+      tir::BufferRegion(S_other_buf,
+                        {Range::FromMinExtent(bx, I32(1)), Range::FromMinExtent(h_idx, I32(1))}),
+      tir::BufferRegion(V_buf,
+                        {Range::FromMinExtent(bx, I32(1)), Range::FromMinExtent(h_idx, I32(1)),
+                         Range::FromMinExtent(d_base, I32(4))}),
+      tir::BufferRegion(V_other_buf,
+                        {Range::FromMinExtent(bx, I32(1)), Range::FromMinExtent(h_idx, I32(1)),
+                         Range::FromMinExtent(d_base, I32(4))})};
   ffi::Array<tir::BufferRegion> writes = {
-      tir::BufferRegion(V_buf, {Range::FromMinExtent(bx, I32(1)),
-                                Range::FromMinExtent(h_idx, I32(1)),
-                                Range::FromMinExtent(d_base, I32(4))}),
-      tir::BufferRegion(S_buf, {Range::FromMinExtent(bx, I32(1)),
-                                Range::FromMinExtent(h_idx, I32(1))})};
+      tir::BufferRegion(V_buf,
+                        {Range::FromMinExtent(bx, I32(1)), Range::FromMinExtent(h_idx, I32(1)),
+                         Range::FromMinExtent(d_base, I32(4))}),
+      tir::BufferRegion(S_buf,
+                        {Range::FromMinExtent(bx, I32(1)), Range::FromMinExtent(h_idx, I32(1))})};
 
   // Build sblock body
   tir::Var vec_var("vec", DataType::Int(32));
 
   // Vectorized load of v_vec
-  Stmt load_v = tir::For(vec_var, I32(0), I32(4), tir::ForKind::kVectorized,
-                         tir::BufferStore(v_vec_buf,
-                                          tir::BufferLoad(V_buf, {bx, h_idx, d_base + vec_var}),
-                                          {vec_var}));
+  Stmt load_v =
+      tir::For(vec_var, I32(0), I32(4), tir::ForKind::kVectorized,
+               tir::BufferStore(v_vec_buf, tir::BufferLoad(V_buf, {bx, h_idx, d_base + vec_var}),
+                                {vec_var}));
   // Vectorized load of v_other_vec
   tir::Var vec_var2("vec", DataType::Int(32));
-  Stmt load_vo = tir::For(vec_var2, I32(0), I32(4), tir::ForKind::kVectorized,
-                          tir::BufferStore(v_other_vec_buf,
-                                           tir::BufferLoad(V_other_buf, {bx, h_idx, d_base + vec_var2}),
-                                           {vec_var2}));
+  Stmt load_vo = tir::For(
+      vec_var2, I32(0), I32(4), tir::ForKind::kVectorized,
+      tir::BufferStore(v_other_vec_buf,
+                       tir::BufferLoad(V_other_buf, {bx, h_idx, d_base + vec_var2}), {vec_var2}));
 
   // Blend loop: for vec in range(4): v_vec[vec] = cast(cast(v_vec[vec])*scale + ...)
   tir::Var vec_var3("vec", DataType::Int(32));
@@ -389,8 +386,8 @@ tir::PrimFunc MergeStateInplace(int64_t num_attention_heads, int64_t v_head_dim,
   PrimExpr vo_elem = tir::BufferLoad(v_other_vec_buf, {vec_var3});
   PrimExpr blend;
   if (is_f16) {
-    blend = CastTo(CastTo(v_elem, "float32") * scale() +
-                   CastTo(vo_elem, "float32") * other_scale(), dtype);
+    blend = CastTo(CastTo(v_elem, "float32") * scale() + CastTo(vo_elem, "float32") * other_scale(),
+                   dtype);
   } else {
     blend = v_elem * scale() + vo_elem * other_scale();
   }
@@ -400,8 +397,7 @@ tir::PrimFunc MergeStateInplace(int64_t num_attention_heads, int64_t v_head_dim,
   // Vectorized store
   tir::Var vec_var4("vec", DataType::Int(32));
   Stmt store_v = tir::For(vec_var4, I32(0), I32(4), tir::ForKind::kVectorized,
-                          tir::BufferStore(V_buf,
-                                           tir::BufferLoad(v_vec_buf, {vec_var4}),
+                          tir::BufferStore(V_buf, tir::BufferLoad(v_vec_buf, {vec_var4}),
                                            {bx, h_idx, d_base + vec_var4}));
 
   ffi::Array<Stmt> sblock_stmts = {
@@ -420,8 +416,8 @@ tir::PrimFunc MergeStateInplace(int64_t num_attention_heads, int64_t v_head_dim,
 
   Stmt sblock_body = tir::SeqStmt(sblock_stmts);
 
-  ffi::Array<tir::Buffer> alloc_bufs = {s_val_buf, s_other_val_buf, s_max_buf, scale_buf,
-                                        other_scale_buf, v_vec_buf, v_other_vec_buf};
+  ffi::Array<tir::Buffer> alloc_bufs = {s_val_buf,       s_other_val_buf, s_max_buf,      scale_buf,
+                                        other_scale_buf, v_vec_buf,       v_other_vec_buf};
 
   Stmt sblock = tir::SBlockRealize(
       {}, tir::const_true(),
@@ -430,10 +426,8 @@ tir::PrimFunc MergeStateInplace(int64_t num_attention_heads, int64_t v_head_dim,
   // Thread binding loops: bx→blockIdx.x, by→blockIdx.y, ty→threadIdx.y, tx→threadIdx.x
   IterVar bx_iv(Range::FromMinExtent(I32(0), N_var), bx, tir::kThreadIndex, "blockIdx.x");
   IterVar by_iv(Range::FromMinExtent(I32(0), I32(by_extent)), by, tir::kThreadIndex, "blockIdx.y");
-  IterVar ty_iv(Range::FromMinExtent(I32(0), I32(ty_extent)), ty, tir::kThreadIndex,
-                "threadIdx.y");
-  IterVar tx_iv(Range::FromMinExtent(I32(0), I32(tx_extent)), tx, tir::kThreadIndex,
-                "threadIdx.x");
+  IterVar ty_iv(Range::FromMinExtent(I32(0), I32(ty_extent)), ty, tir::kThreadIndex, "threadIdx.y");
+  IterVar tx_iv(Range::FromMinExtent(I32(0), I32(tx_extent)), tx, tir::kThreadIndex, "threadIdx.x");
 
   Stmt body = sblock;
   body = tir::For(tx, I32(0), I32(tx_extent), tir::ForKind::kThreadBinding, body, tx_iv);
@@ -469,7 +463,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
            [](int64_t num_attention_heads, int64_t v_head_dim, ffi::String dtype, Target target,
               ffi::String global_symbol) -> tir::PrimFunc {
              return MergeStateInplace(num_attention_heads, v_head_dim, std::string(dtype), target,
-                                     std::string(global_symbol));
+                                      std::string(global_symbol));
            });
 }
 

@@ -34,14 +34,14 @@
 #ifndef TVM_RELAX_FRONTEND_NN_LLM_KV_CACHE_ATTENTION_DECODE_GPU_HELPERS_H_
 #define TVM_RELAX_FRONTEND_NN_LLM_KV_CACHE_ATTENTION_DECODE_GPU_HELPERS_H_
 
-#include "kv_cache_common.h"
-#include "position_embedding.h"
-
 #include <tvm/target/target.h>
-#include <tvm/tir/stmt.h>
 #include <tvm/tir/op.h>
+#include <tvm/tir/stmt.h>
 
 #include <string>
+
+#include "kv_cache_common.h"
+#include "position_embedding.h"
 
 namespace tvm {
 namespace relax {
@@ -68,13 +68,13 @@ using namespace tvm::tir;
  */
 struct DecodeGpuConfig {
   int64_t VEC_SIZE;
-  int64_t bdx;              ///< threadIdx.x extent  (= D / VEC_SIZE)
-  int64_t bdy;              ///< threadIdx.y extent  (= reduced GROUP_SIZE)
-  int64_t bdz;              ///< threadIdx.z extent
-  int64_t gdz;              ///< blockIdx.y multiplier (= GROUP_SIZE / bdy)
-  int64_t tile_size_per_bdx;///< KV rows loaded per (bdx,bdy) tile
-  int64_t GROUP_SIZE;       ///< H_qo / H_kv
-  std::string global_symbol;///< kernel name
+  int64_t bdx;                ///< threadIdx.x extent  (= D / VEC_SIZE)
+  int64_t bdy;                ///< threadIdx.y extent  (= reduced GROUP_SIZE)
+  int64_t bdz;                ///< threadIdx.z extent
+  int64_t gdz;                ///< blockIdx.y multiplier (= GROUP_SIZE / bdy)
+  int64_t tile_size_per_bdx;  ///< KV rows loaded per (bdx,bdy) tile
+  int64_t GROUP_SIZE;         ///< H_qo / H_kv
+  std::string global_symbol;  ///< kernel name
 };
 
 /*!
@@ -121,9 +121,9 @@ DecodeGpuConfig ComputeDecodeGpuConfig(int64_t H_kv, int64_t H_qo, int64_t D,
  * \return              PrimExpr in `dtype` for the (possibly rotated) element.
  */
 PrimExpr BuildDecodeRopeExpr(tir::Buffer buf, ffi::Array<PrimExpr> base_indices, PrimExpr d_expr,
-                              int64_t D, PrimExpr pos_expr, tir::Var rope_scale,
-                              tir::Var rope_theta, tir::Var rotary_mode, const std::string& dtype,
-                              const ffi::Map<ffi::String, ffi::Any>& rope_scaling);
+                             int64_t D, PrimExpr pos_expr, tir::Var rope_scale, tir::Var rope_theta,
+                             tir::Var rotary_mode, const std::string& dtype,
+                             const ffi::Map<ffi::String, ffi::Any>& rope_scaling);
 
 // ============================================================================
 // KV-load body builder

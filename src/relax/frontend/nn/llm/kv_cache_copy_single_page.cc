@@ -66,13 +66,12 @@
  * ---------------------------------------------------------------------------
  */
 
-#include "kv_cache.h"
-#include "kv_cache_common.h"
-
-#include <tvm/tir/stmt.h>
 #include <tvm/tir/op.h>
+#include <tvm/tir/stmt.h>
 
 #include "../../../../tir/ir/script/script_complete.h"
+#include "kv_cache.h"
+#include "kv_cache_common.h"
 
 namespace tvm {
 namespace relax {
@@ -113,14 +112,12 @@ struct CopySinglePageSblock {
 
     // reads: pages[src, 0:2, vh, vp, vd]
     // writes: pages[tgt, 0:2, vh, vp, vd]
-    Stmt k_store = tir::BufferStore(
-        pages_buf,
-        tir::BufferLoad(pages_buf, {src_page_id, I64(0), vh, vp, vd}),
-        {tgt_page_id, I64(0), vh, vp, vd});
-    Stmt v_store = tir::BufferStore(
-        pages_buf,
-        tir::BufferLoad(pages_buf, {src_page_id, I64(1), vh, vp, vd}),
-        {tgt_page_id, I64(1), vh, vp, vd});
+    Stmt k_store =
+        tir::BufferStore(pages_buf, tir::BufferLoad(pages_buf, {src_page_id, I64(0), vh, vp, vd}),
+                         {tgt_page_id, I64(0), vh, vp, vd});
+    Stmt v_store =
+        tir::BufferStore(pages_buf, tir::BufferLoad(pages_buf, {src_page_id, I64(1), vh, vp, vd}),
+                         {tgt_page_id, I64(1), vh, vp, vd});
     Stmt body = tir::SeqStmt({k_store, v_store});
 
     // IterVars for the sblock
@@ -130,25 +127,17 @@ struct CopySinglePageSblock {
         tir::IterVar(Range::FromMinExtent(I32(0), I32(d)), vd, tir::kDataPar, "")};
 
     // reads/writes annotations
-    ffi::Array<tir::BufferRegion> reads = {
-        tir::BufferRegion(pages_buf,
-                          {Range::FromMinExtent(src_page_id, I64(1)),
-                           Range::FromMinExtent(I64(0), I64(2)),
-                           Range::FromMinExtent(vh, I32(1)),
-                           Range::FromMinExtent(vp, I64(1)),
-                           Range::FromMinExtent(vd, I32(1))})};
-    ffi::Array<tir::BufferRegion> writes = {
-        tir::BufferRegion(pages_buf,
-                          {Range::FromMinExtent(tgt_page_id, I64(1)),
-                           Range::FromMinExtent(I64(0), I64(2)),
-                           Range::FromMinExtent(vh, I32(1)),
-                           Range::FromMinExtent(vp, I64(1)),
-                           Range::FromMinExtent(vd, I32(1))})};
+    ffi::Array<tir::BufferRegion> reads = {tir::BufferRegion(
+        pages_buf, {Range::FromMinExtent(src_page_id, I64(1)), Range::FromMinExtent(I64(0), I64(2)),
+                    Range::FromMinExtent(vh, I32(1)), Range::FromMinExtent(vp, I64(1)),
+                    Range::FromMinExtent(vd, I32(1))})};
+    ffi::Array<tir::BufferRegion> writes = {tir::BufferRegion(
+        pages_buf, {Range::FromMinExtent(tgt_page_id, I64(1)), Range::FromMinExtent(I64(0), I64(2)),
+                    Range::FromMinExtent(vh, I32(1)), Range::FromMinExtent(vp, I64(1)),
+                    Range::FromMinExtent(vd, I32(1))})};
 
-    Stmt sblock = tir::SBlockRealize(
-        {vh_expr, vp_expr, vd_expr},
-        where_cond,
-        tir::SBlock(iter_vars, reads, writes, "copy", body));
+    Stmt sblock = tir::SBlockRealize({vh_expr, vp_expr, vd_expr}, where_cond,
+                                     tir::SBlock(iter_vars, reads, writes, "copy", body));
 
     return sblock;
   }
@@ -185,8 +174,8 @@ tir::PrimFunc CopySinglePageCpu(int64_t num_key_value_heads, int64_t page_size, 
   // flat_idx = b + cast<int64>(t)
   PrimExpr flat_idx = b_var + CastTo(t_var, "int64");
 
-  CopySinglePageSblock helper{vh, vp, vd, pages_buf, src_page_id, tgt_page_id, copy_length,
-                               num_key_value_heads, head_dim};
+  CopySinglePageSblock helper{
+      vh, vp, vd, pages_buf, src_page_id, tgt_page_id, copy_length, num_key_value_heads, head_dim};
   Stmt sblock = helper.Build(flat_idx, b_var, t_var);
 
   // for b, t in T.grid(copy_length * h * d / d, 1):
@@ -245,10 +234,10 @@ tir::PrimFunc CopySinglePage(int64_t num_key_value_heads, int64_t page_size, int
 
   // pages: (num_pages, 2, h, page_size, d) with elem_offset
   tir::Buffer pages_buf = tir::Buffer(
-      tir::decl_buffer(
-          {CastTo(num_pages, "int64"), I64(2), I64(num_key_value_heads), I64(page_size),
-           I64(head_dim)},
-          dt, "pages")->data,
+      tir::decl_buffer({CastTo(num_pages, "int64"), I64(2), I64(num_key_value_heads),
+                        I64(page_size), I64(head_dim)},
+                       dt, "pages")
+          ->data,
       dt,
       {CastTo(num_pages, "int64"), I64(2), I64(num_key_value_heads), I64(page_size), I64(head_dim)},
       {}, pages_elem_offset, "pages", 0, 0, tir::kDefault);
@@ -265,8 +254,8 @@ tir::PrimFunc CopySinglePage(int64_t num_key_value_heads, int64_t page_size, int
   // flat_idx = b * threads_per_block + cast<int64>(t)
   PrimExpr flat_idx = b_var * I64(threads_per_block) + CastTo(t_var, "int64");
 
-  CopySinglePageSblock helper{vh, vp, vd, pages_buf, src_page_id, tgt_page_id, copy_length,
-                               num_key_value_heads, head_dim};
+  CopySinglePageSblock helper{
+      vh, vp, vd, pages_buf, src_page_id, tgt_page_id, copy_length, num_key_value_heads, head_dim};
   Stmt sblock = helper.Build(flat_idx, b_var, t_var);
 
   // Grid: (copy_length * h * d + threads_per_block - 1) // threads_per_block
@@ -278,8 +267,8 @@ tir::PrimFunc CopySinglePage(int64_t num_key_value_heads, int64_t page_size, int
   IterVar tx_iv(Range::FromMinExtent(I64(0), I64(threads_per_block)), t_var, tir::kThreadIndex,
                 "threadIdx.x");
 
-  Stmt inner = tir::For(t_var, I64(0), I64(threads_per_block), tir::ForKind::kThreadBinding,
-                        sblock, tx_iv);
+  Stmt inner =
+      tir::For(t_var, I64(0), I64(threads_per_block), tir::ForKind::kThreadBinding, sblock, tx_iv);
   Stmt outer = tir::For(b_var, I64(0), grid_x, tir::ForKind::kThreadBinding, inner, bx_iv);
 
   ffi::Map<tir::Var, tir::Buffer> buf_map;
@@ -310,8 +299,8 @@ tir::PrimFunc CopySinglePageMLA(int64_t page_size, int64_t d_qk, const std::stri
   // pages: (num_pages, page_size, d_qk) with elem_offset
   tir::Buffer pages_buf = tir::Buffer(
       tir::decl_buffer({CastTo(num_pages, "int64"), I64(page_size), I64(d_qk)}, dt, "pages")->data,
-      dt, {CastTo(num_pages, "int64"), I64(page_size), I64(d_qk)}, {},
-      pages_elem_offset, "pages", 0, 0, tir::kDefault);
+      dt, {CastTo(num_pages, "int64"), I64(page_size), I64(d_qk)}, {}, pages_elem_offset, "pages",
+      0, 0, tir::kDefault);
 
   tir::Var b_var("b", DataType::Int(64));
   tir::Var t_var("t", DataType::Int(64));
@@ -329,30 +318,22 @@ tir::PrimFunc CopySinglePageMLA(int64_t page_size, int64_t d_qk, const std::stri
 
   PrimExpr where_cond = flat_idx < copy_length * I64(d_qk);
 
-  Stmt body = tir::BufferStore(
-      pages_buf,
-      tir::BufferLoad(pages_buf, {src_page_id, vp, vd}),
-      {tgt_page_id, vp, vd});
+  Stmt body = tir::BufferStore(pages_buf, tir::BufferLoad(pages_buf, {src_page_id, vp, vd}),
+                               {tgt_page_id, vp, vd});
 
   ffi::Array<tir::IterVar> iter_vars = {
       tir::IterVar(Range::FromMinExtent(I64(0), copy_length), vp, tir::kDataPar, ""),
       tir::IterVar(Range::FromMinExtent(I32(0), I32(d_qk)), vd, tir::kDataPar, "")};
 
-  ffi::Array<tir::BufferRegion> reads = {
-      tir::BufferRegion(pages_buf,
-                        {Range::FromMinExtent(src_page_id, I64(1)),
-                         Range::FromMinExtent(vp, I64(1)),
-                         Range::FromMinExtent(vd, I32(1))})};
-  ffi::Array<tir::BufferRegion> writes = {
-      tir::BufferRegion(pages_buf,
-                        {Range::FromMinExtent(tgt_page_id, I64(1)),
-                         Range::FromMinExtent(vp, I64(1)),
-                         Range::FromMinExtent(vd, I32(1))})};
+  ffi::Array<tir::BufferRegion> reads = {tir::BufferRegion(
+      pages_buf, {Range::FromMinExtent(src_page_id, I64(1)), Range::FromMinExtent(vp, I64(1)),
+                  Range::FromMinExtent(vd, I32(1))})};
+  ffi::Array<tir::BufferRegion> writes = {tir::BufferRegion(
+      pages_buf, {Range::FromMinExtent(tgt_page_id, I64(1)), Range::FromMinExtent(vp, I64(1)),
+                  Range::FromMinExtent(vd, I32(1))})};
 
-  Stmt sblock = tir::SBlockRealize(
-      {vp_expr, vd_expr},
-      where_cond,
-      tir::SBlock(iter_vars, reads, writes, "copy", body));
+  Stmt sblock = tir::SBlockRealize({vp_expr, vd_expr}, where_cond,
+                                   tir::SBlock(iter_vars, reads, writes, "copy", body));
 
   PrimExpr total = copy_length * I64(d_qk);
   PrimExpr grid_x = tir::FloorDiv(total + I64(threads_per_block - 1), I64(threads_per_block));
@@ -361,8 +342,8 @@ tir::PrimFunc CopySinglePageMLA(int64_t page_size, int64_t d_qk, const std::stri
   IterVar tx_iv(Range::FromMinExtent(I64(0), I64(threads_per_block)), t_var, tir::kThreadIndex,
                 "threadIdx.x");
 
-  Stmt inner = tir::For(t_var, I64(0), I64(threads_per_block), tir::ForKind::kThreadBinding,
-                        sblock, tx_iv);
+  Stmt inner =
+      tir::For(t_var, I64(0), I64(threads_per_block), tir::ForKind::kThreadBinding, sblock, tx_iv);
   Stmt outer = tir::For(b_var, I64(0), grid_x, tir::ForKind::kThreadBinding, inner, bx_iv);
 
   ffi::Map<tir::Var, tir::Buffer> buf_map;
@@ -384,8 +365,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def("relax.frontend.nn.llm.kv_cache.copy_single_page_cpu",
            [](int64_t num_key_value_heads, int64_t page_size, int64_t head_dim,
               ffi::String dtype) -> tir::PrimFunc {
-             return CopySinglePageCpu(num_key_value_heads, page_size, head_dim,
-                                     std::string(dtype));
+             return CopySinglePageCpu(num_key_value_heads, page_size, head_dim, std::string(dtype));
            })
       .def("relax.frontend.nn.llm.kv_cache.copy_single_page",
            [](int64_t num_key_value_heads, int64_t page_size, int64_t head_dim, ffi::String dtype,
@@ -394,8 +374,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
                                    target);
            })
       .def("relax.frontend.nn.llm.kv_cache.copy_single_page_mla",
-           [](int64_t page_size, int64_t d_qk, ffi::String dtype,
-              Target target) -> tir::PrimFunc {
+           [](int64_t page_size, int64_t d_qk, ffi::String dtype, Target target) -> tir::PrimFunc {
              return CopySinglePageMLA(page_size, d_qk, std::string(dtype), target);
            });
 }

@@ -92,7 +92,8 @@ struct RopeFreqResult {
 /*!
  * \brief Signature for RoPE frequency computation functions.
  *
- * \param s      Position expression (float32 PrimExpr, e.g. Cast(f32, Cast(dtype, loop_s + offset))).
+ * \param s      Position expression (float32 PrimExpr, e.g. Cast(f32, Cast(dtype, loop_s +
+ * offset))).
  * \param d      Dimension index (PrimExpr; may be a plain tir::Var or a compound
  *               expression such as tx*4+vec for vectorized GPU kernels).
  * \param d_range  Maximum dimension index (rotary_dim).
@@ -285,10 +286,11 @@ std::tuple<NNTensor, NNTensor, NNTensor> LlamaRope(
  * \param rotary_dim    Dimensions to rotate; defaults to head_dim when nullopt.
  * \return              TIR PrimFunc ready for use with tensor_ir_op.
  */
-tir::PrimFunc LlamaRopeWithPositionMap(
-    double theta, double scale, int64_t head_dim, int64_t num_q_heads, int64_t num_kv_heads,
-    const std::string& dtype, const ffi::Map<ffi::String, ffi::Any>& rope_scaling,
-    ffi::Optional<int64_t> rotary_dim);
+tir::PrimFunc LlamaRopeWithPositionMap(double theta, double scale, int64_t head_dim,
+                                       int64_t num_q_heads, int64_t num_kv_heads,
+                                       const std::string& dtype,
+                                       const ffi::Map<ffi::String, ffi::Any>& rope_scaling,
+                                       ffi::Optional<int64_t> rotary_dim);
 
 /*!
  * \brief Return the TIR PrimFunc for Llama-4-style RoPE with a position map.
@@ -307,10 +309,11 @@ tir::PrimFunc LlamaRopeWithPositionMap(
  * \param rotary_dim    Dimensions to rotate; defaults to head_dim when nullopt.
  * \return              TIR PrimFunc ready for use with tensor_ir_op.
  */
-tir::PrimFunc Llama4RopeWithPositionMap(
-    double theta, double scale, int64_t head_dim, int64_t num_q_heads, int64_t num_kv_heads,
-    const std::string& dtype, const ffi::Map<ffi::String, ffi::Any>& rope_scaling,
-    ffi::Optional<int64_t> rotary_dim);
+tir::PrimFunc Llama4RopeWithPositionMap(double theta, double scale, int64_t head_dim,
+                                        int64_t num_q_heads, int64_t num_kv_heads,
+                                        const std::string& dtype,
+                                        const ffi::Map<ffi::String, ffi::Any>& rope_scaling,
+                                        ffi::Optional<int64_t> rotary_dim);
 
 }  // namespace llm
 }  // namespace nn

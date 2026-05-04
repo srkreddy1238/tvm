@@ -50,13 +50,12 @@
  * ---------------------------------------------------------------------------
  */
 
-#include "kv_cache.h"
-#include "kv_cache_common.h"
-
-#include <tvm/tir/stmt.h>
 #include <tvm/tir/op.h>
+#include <tvm/tir/stmt.h>
 
 #include "../../../../tir/ir/script/script_complete.h"
+#include "kv_cache.h"
+#include "kv_cache_common.h"
 
 namespace tvm {
 namespace relax {
@@ -88,9 +87,7 @@ tir::PrimFunc KVCacheDebugGetKV(int64_t num_hidden_layers, int64_t num_key_value
 
   // pages: (num_pages, 2, h, page_size, d), offset_factor=1
   tir::Buffer pages_buf = MakeOffsetFactor1Buffer(
-      "pages",
-      {num_pages, I64(2), I64(num_key_value_heads), page_size, I64(head_dim)},
-      dtype);
+      "pages", {num_pages, I64(2), I64(num_key_value_heads), page_size, I64(head_dim)}, dtype);
 
   // position_map: (seqlen,) int32, offset_factor=1
   tir::Buffer pos_buf = MakeOffsetFactor1Buffer("position_map", {seqlen}, "int32");
@@ -124,11 +121,9 @@ tir::PrimFunc KVCacheDebugGetKV(int64_t num_hidden_layers, int64_t num_key_value
   Stmt body = tir::LetStmt(
       pos_var, tir::BufferLoad(pos_buf, {vp}),
       tir::SeqStmt({
-          tir::BufferStore(k_buf,
-                           tir::BufferLoad(pages_buf, {page_idx, I64(0), vh, page_off, vd}),
+          tir::BufferStore(k_buf, tir::BufferLoad(pages_buf, {page_idx, I64(0), vh, page_off, vd}),
                            {layer_id, vp, vh, vd}),
-          tir::BufferStore(v_buf,
-                           tir::BufferLoad(pages_buf, {page_idx, I64(1), vh, page_off, vd}),
+          tir::BufferStore(v_buf, tir::BufferLoad(pages_buf, {page_idx, I64(1), vh, page_off, vd}),
                            {layer_id, vp, vh, vd}),
       }));
 
@@ -141,8 +136,7 @@ tir::PrimFunc KVCacheDebugGetKV(int64_t num_hidden_layers, int64_t num_key_value
   sblock_annots.Set("tir.script_parsing_detect_access", IntImm(DataType::Int(32), 3));
 
   Stmt sblock = tir::SBlockRealize(
-      {PrimExpr(p_var), PrimExpr(h_var), PrimExpr(d_var)},
-      tir::const_true(),
+      {PrimExpr(p_var), PrimExpr(h_var), PrimExpr(d_var)}, tir::const_true(),
       tir::SBlock(iter_vars, {}, {}, "copy0", body, std::nullopt, {}, {}, sblock_annots));
 
   // for p, h, d in T.grid(seqlen, h, d):
@@ -182,15 +176,15 @@ tir::PrimFunc KVCacheDebugGetKVMLA(int64_t num_hidden_layers, int64_t d_qk,
   tir::Var layer_id("layer_id", DataType::Int(64));
 
   // pages: (num_pages, page_size, d_qk), offset_factor=1
-  tir::Buffer pages_buf = MakeOffsetFactor1Buffer(
-      "pages", {num_pages, page_size, I64(d_qk)}, dtype);
+  tir::Buffer pages_buf =
+      MakeOffsetFactor1Buffer("pages", {num_pages, page_size, I64(d_qk)}, dtype);
 
   // position_map: (seqlen,) int32, offset_factor=1
   tir::Buffer pos_buf = MakeOffsetFactor1Buffer("position_map", {seqlen}, "int32");
 
   // compressed_kv_with_k_pe_data: (num_hidden_layers, seqlen, d_qk)
-  tir::Buffer kv_buf = tir::decl_buffer(
-      {I64(num_hidden_layers), seqlen, I64(d_qk)}, dt, "compressed_kv_with_k_pe_data");
+  tir::Buffer kv_buf = tir::decl_buffer({I64(num_hidden_layers), seqlen, I64(d_qk)}, dt,
+                                        "compressed_kv_with_k_pe_data");
 
   // Loop vars
   tir::Var p_var("p", DataType::Int(64));
@@ -205,11 +199,10 @@ tir::PrimFunc KVCacheDebugGetKVMLA(int64_t num_hidden_layers, int64_t d_qk,
   PrimExpr page_idx = tir::FloorDiv(pos_i64, page_size);
   PrimExpr page_off = tir::FloorMod(pos_i64, page_size);
 
-  Stmt body = tir::LetStmt(
-      pos_var, tir::BufferLoad(pos_buf, {vp}),
-      tir::BufferStore(kv_buf,
-                       tir::BufferLoad(pages_buf, {page_idx, page_off, vd}),
-                       {layer_id, vp, vd}));
+  Stmt body =
+      tir::LetStmt(pos_var, tir::BufferLoad(pos_buf, {vp}),
+                   tir::BufferStore(kv_buf, tir::BufferLoad(pages_buf, {page_idx, page_off, vd}),
+                                    {layer_id, vp, vd}));
 
   ffi::Array<tir::IterVar> iter_vars = {
       tir::IterVar(Range::FromMinExtent(I64(0), seqlen), vp, tir::kDataPar, ""),
@@ -219,8 +212,7 @@ tir::PrimFunc KVCacheDebugGetKVMLA(int64_t num_hidden_layers, int64_t d_qk,
   sblock_annots.Set("tir.script_parsing_detect_access", IntImm(DataType::Int(32), 3));
 
   Stmt sblock = tir::SBlockRealize(
-      {PrimExpr(p_var), PrimExpr(d_var)},
-      tir::const_true(),
+      {PrimExpr(p_var), PrimExpr(d_var)}, tir::const_true(),
       tir::SBlock(iter_vars, {}, {}, "copy0", body, std::nullopt, {}, {}, sblock_annots));
 
   Stmt loop = sblock;
@@ -250,7 +242,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
            [](int64_t num_hidden_layers, int64_t num_key_value_heads, int64_t head_dim,
               ffi::String dtype) -> tir::PrimFunc {
              return KVCacheDebugGetKV(num_hidden_layers, num_key_value_heads, head_dim,
-                                     std::string(dtype));
+                                      std::string(dtype));
            })
       .def("relax.frontend.nn.llm.kv_cache.kv_cache_debug_get_kv_mla",
            [](int64_t num_hidden_layers, int64_t d_qk, ffi::String dtype) -> tir::PrimFunc {

@@ -95,11 +95,10 @@ PrefillKernelConfig ComputePrefillKernelConfig(int64_t h_kv, int64_t h_q, int64_
 // BuildPrefillRopeExpr
 // ============================================================================
 
-PrimExpr BuildPrefillRopeExpr(tir::Buffer buf, ffi::Array<PrimExpr> base_indices,
-                               tir::Var d_idx, int64_t d, PrimExpr pos_expr,
-                               tir::Var rope_scale, tir::Var rope_theta, tir::Var rotary_mode,
-                               const std::string& dtype,
-                               const ffi::Map<ffi::String, ffi::Any>& rope_scaling) {
+PrimExpr BuildPrefillRopeExpr(tir::Buffer buf, ffi::Array<PrimExpr> base_indices, tir::Var d_idx,
+                              int64_t d, PrimExpr pos_expr, tir::Var rope_scale,
+                              tir::Var rope_theta, tir::Var rotary_mode, const std::string& dtype,
+                              const ffi::Map<ffi::String, ffi::Any>& rope_scaling) {
   bool is_f16 = (dtype == "float16");
   int64_t half_d = d / 2;
   DataType dt = DataType(runtime::StringToDLDataType(dtype));
@@ -115,9 +114,9 @@ PrimExpr BuildPrefillRopeExpr(tir::Buffer buf, ffi::Array<PrimExpr> base_indices
   ffi::Array<PrimExpr> idx_minus = base_indices;
   idx_minus.push_back(d_idx - I32(half_d));
   PrimExpr neg_one = tir::make_const(dt, -1.0);
-  PrimExpr partner = tvm::if_then_else(d_idx < I32(half_d),
-                                        tir::BufferLoad(buf, idx_plus) * neg_one,
-                                        tir::BufferLoad(buf, idx_minus));
+  PrimExpr partner =
+      tvm::if_then_else(d_idx < I32(half_d), tir::BufferLoad(buf, idx_plus) * neg_one,
+                        tir::BufferLoad(buf, idx_minus));
 
   // Rope frequency  always computed in float32 (matches Python which passes "float32")
   PrimExpr pos_f32 = CastTo(pos_expr, "float32") * rope_scale;
@@ -128,8 +127,9 @@ PrimExpr BuildPrefillRopeExpr(tir::Buffer buf, ffi::Array<PrimExpr> base_indices
   PrimExpr rope_val;
   if (is_f16) {
     // cos_freq / sin_freq are float32; cast elem/partner to float32, then cast result to f16
-    rope_val = CastTo(freq.cos_freq * CastTo(elem, "float32") +
-                      freq.sin_freq * CastTo(partner, "float32"), dtype);
+    rope_val =
+        CastTo(freq.cos_freq * CastTo(elem, "float32") + freq.sin_freq * CastTo(partner, "float32"),
+               dtype);
   } else {
     rope_val = freq.cos_freq * elem + freq.sin_freq * partner;
   }
@@ -149,18 +149,15 @@ PrimExpr BuildPrefillRopeExpr(tir::Buffer buf, ffi::Array<PrimExpr> base_indices
 PrimExpr GetKvChunkLen(PrimExpr num_pages, int64_t page_size, PrimExpr seq_id,
                        tir::Buffer length_info, bool sliding_window) {
   if (!sliding_window) {
-    return (num_pages - I32(1)) * I32(page_size) +
-           tir::BufferLoad(length_info, {seq_id});
+    return (num_pages - I32(1)) * I32(page_size) + tir::BufferLoad(length_info, {seq_id});
   } else {
-    return (num_pages - I32(1)) * I32(page_size) +
-           tir::BufferLoad(length_info, {I32(0), seq_id}) -
+    return (num_pages - I32(1)) * I32(page_size) + tir::BufferLoad(length_info, {I32(0), seq_id}) -
            tir::BufferLoad(length_info, {I32(1), seq_id}) +
            tir::BufferLoad(length_info, {I32(2), seq_id});
   }
 }
 
-PrimExpr GetSeqOffset(PrimExpr pos, PrimExpr seq_id, tir::Buffer length_info,
-                      bool sliding_window) {
+PrimExpr GetSeqOffset(PrimExpr pos, PrimExpr seq_id, tir::Buffer length_info, bool sliding_window) {
   if (!sliding_window) {
     return pos;
   } else {
@@ -172,13 +169,12 @@ PrimExpr GetSeqOffset(PrimExpr pos, PrimExpr seq_id, tir::Buffer length_info,
 
 tir::Buffer DeclLengthInfo(tir::Var var_length_info, PrimExpr batch_size, bool sliding_window,
                            tir::Var elem_offset_var) {
-  ffi::Array<PrimExpr> shape = sliding_window
-      ? ffi::Array<PrimExpr>{I32(3), batch_size}
-      : ffi::Array<PrimExpr>{batch_size};
+  ffi::Array<PrimExpr> shape =
+      sliding_window ? ffi::Array<PrimExpr>{I32(3), batch_size} : ffi::Array<PrimExpr>{batch_size};
   // Use decl_buffer to obtain a PointerType-annotated data var (required by Buffer ctor).
   tir::Var data_var = tir::decl_buffer(shape, DataType::Int(32), "length_info")->data;
-  return tir::Buffer(data_var, DataType::Int(32), shape, {}, elem_offset_var,
-                     "length_info", 0, 0, tir::kDefault);
+  return tir::Buffer(data_var, DataType::Int(32), shape, {}, elem_offset_var, "length_info", 0, 0,
+                     tir::kDefault);
 }
 
 }  // namespace llm

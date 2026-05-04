@@ -20,10 +20,10 @@ Populated at import time by ``tvm_ffi.init_ffi_api``.  Each attribute
 corresponds to a C++ global registered under the namespace prefix
 ``relax.frontend.nn.llm.position_embedding.*``:
 
-  - ``switch_rope_freq_func``          – dispatch on rope_type, return (cos, sin, keys, vals)
-  - ``llama_rope``                     – fused QKV split + RoPE
-  - ``llama_rope_with_position_map``   – returns a TIR PrimFunc (non-longrope)
-  - ``llama4_rope_with_position_map``  – Llama-4 variant TIR PrimFunc
+  - ``switch_rope_freq_func``          - dispatch on rope_type, return (cos, sin, keys, vals)
+  - ``llama_rope``                     - fused QKV split + RoPE
+  - ``llama_rope_with_position_map``   - returns a TIR PrimFunc (non-longrope)
+  - ``llama4_rope_with_position_map``  - Llama-4 variant TIR PrimFunc
 """
 
 import tvm_ffi

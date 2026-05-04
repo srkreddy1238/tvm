@@ -32,16 +32,16 @@
  *   - merged_qk_load=true in SchedulePrefillKernel (KV_load block, not K_load+V_load).
  */
 
-#include "kv_cache.h"
-#include "kv_cache_attention_prefill_gpu_helpers.h"
-#include "kv_cache_attention_prefill_gpu_schedule.h"
-#include "../../../../tir/ir/script/script_complete.h"
-
 #include <tvm/s_tir/stmt.h>
 #include <tvm/tir/op.h>
 
 #include <cmath>
 #include <string>
+
+#include "../../../../tir/ir/script/script_complete.h"
+#include "kv_cache.h"
+#include "kv_cache_attention_prefill_gpu_helpers.h"
+#include "kv_cache_attention_prefill_gpu_schedule.h"
 
 namespace tvm {
 namespace relax {
@@ -52,21 +52,20 @@ namespace llm {
 using namespace tvm::tir;
 
 static tir::Buffer AllocLocal(const std::string& name, ffi::Array<PrimExpr> shape,
-                               const std::string& dtype = "float32") {
+                              const std::string& dtype = "float32") {
   return tir::decl_buffer(shape, DataType(runtime::StringToDLDataType(dtype)), name, "local");
 }
 static tir::Buffer AllocShared(const std::string& name, ffi::Array<PrimExpr> shape,
-                                const std::string& dtype = "float32") {
+                               const std::string& dtype = "float32") {
   return tir::decl_buffer(shape, DataType(runtime::StringToDLDataType(dtype)), name, "shared");
 }
 static Stmt Sync() {
   return tir::Evaluate(tir::Call(DataType::Int(32), tir::builtin::tvm_storage_sync(),
-                                  ffi::Array<PrimExpr>{tir::StringImm("shared")}));
+                                 ffi::Array<PrimExpr>{tir::StringImm("shared")}));
 }
 
-tir::PrimFunc AttentionPrefillMLA(int64_t num_heads, int64_t v_head_dim,
-                                  int64_t qk_nope_head_dim, const std::string& dtype,
-                                  bool causal_flag, Target target) {
+tir::PrimFunc AttentionPrefillMLA(int64_t num_heads, int64_t v_head_dim, int64_t qk_nope_head_dim,
+                                  const std::string& dtype, bool causal_flag, Target target) {
   // d_qk = qk_nope_head_dim + v_head_dim (the full compressed KV dim)
   int64_t d_qk = qk_nope_head_dim + v_head_dim;
   int64_t d_v = v_head_dim;
@@ -117,18 +116,17 @@ tir::PrimFunc AttentionPrefillMLA(int64_t num_heads, int64_t v_head_dim,
       DataType::Int(32), {batch_size + I32(1)}, {}, q_indptr_eo, "q_indptr", 0, 0, tir::kDefault);
   // Pages: (max_num_pages, page_size, d_qk) — no head dim, no K/V split
   tir::Buffer pages_buf = tir::Buffer(
-      tir::decl_buffer({max_num_pages, I32(page_size), I32(d_qk)}, dt, "pages")->data,
-      dt, {max_num_pages, I32(page_size), I32(d_qk)}, {}, pages_eo,
-      "pages", 0, 0, tir::kDefault);
-  tir::Buffer page_indptr_buf = tir::Buffer(
-      tir::decl_buffer({batch_size + I32(1)}, DataType::Int(32), "page_indptr")->data,
-      DataType::Int(32), {batch_size + I32(1)}, {}, page_indptr_eo, "page_indptr", 0, 0, tir::kDefault);
+      tir::decl_buffer({max_num_pages, I32(page_size), I32(d_qk)}, dt, "pages")->data, dt,
+      {max_num_pages, I32(page_size), I32(d_qk)}, {}, pages_eo, "pages", 0, 0, tir::kDefault);
+  tir::Buffer page_indptr_buf =
+      tir::Buffer(tir::decl_buffer({batch_size + I32(1)}, DataType::Int(32), "page_indptr")->data,
+                  DataType::Int(32), {batch_size + I32(1)}, {}, page_indptr_eo, "page_indptr", 0, 0,
+                  tir::kDefault);
   tir::Buffer page_values_buf = tir::Buffer(
-      tir::decl_buffer({nnz_pages}, DataType::Int(32), "page_values")->data,
-      DataType::Int(32), {nnz_pages}, {}, page_values_eo, "page_values", 0, 0, tir::kDefault);
-  tir::Buffer length_info_buf = tir::Buffer(
-      tir::decl_buffer({batch_size}, DataType::Int(32), "length_info")->data,
-      DataType::Int(32), {batch_size}, {}, length_info_eo, "length_info", 0, 0, tir::kDefault);
+      tir::decl_buffer({nnz_pages}, DataType::Int(32), "page_values")->data, DataType::Int(32),
+      {nnz_pages}, {}, page_values_eo, "page_values", 0, 0, tir::kDefault);
+  tir::Buffer length_info_buf =
+      DeclLengthInfo(h_length_info_h, batch_size, causal_flag, length_info_eo);
   // Output: (total_len, num_heads, d_v)
   tir::Buffer output_buf = tir::decl_buffer({total_len, I32(num_heads), I32(d_v)}, dt, "output");
   tir::Buffer lse_buf = tir::decl_buffer({total_len, I32(num_heads)}, DataType::Float(32), "lse");
@@ -141,36 +139,39 @@ tir::PrimFunc AttentionPrefillMLA(int64_t num_heads, int64_t v_head_dim,
   tir::Var ty("ty", DataType::Int(32)), tx("tx", DataType::Int(32));
 
   // ---- sblock-local alloc buffers ----
-  tir::Buffer tile_id_buf    = AllocLocal("tile_id",    {I32(1)}, "int32");
-  tir::Buffer batch_idx_buf  = AllocLocal("batch_idx",  {I32(1)}, "int32");
-  tir::Buffer batch_tiles_buf= AllocLocal("batch_tiles",{I32(1)}, "int32");
+  tir::Buffer tile_id_buf = AllocLocal("tile_id", {I32(1)}, "int32");
+  tir::Buffer batch_idx_buf = AllocLocal("batch_idx", {I32(1)}, "int32");
+  tir::Buffer batch_tiles_buf = AllocLocal("batch_tiles", {I32(1)}, "int32");
   tir::Buffer batch_rows_buf = AllocLocal("batch_rows", {I32(1)}, "int32");
-  tir::Buffer iterator_buf   = AllocLocal("iterator",   {I32(1)}, "int32");
-  tir::Buffer kv_chunk_buf   = AllocLocal("kv_chunk_len",{I32(1)},"int32");
+  tir::Buffer iterator_buf = AllocLocal("iterator", {I32(1)}, "int32");
+  tir::Buffer kv_chunk_buf = AllocLocal("kv_chunk_len", {I32(1)}, "int32");
   // Q_smem: (tile_x, d_qk)
-  tir::Buffer Q_smem  = AllocShared("Q_smem", {I32(tile_x), I32(d_qk)}, dtype);
+  tir::Buffer Q_smem = AllocShared("Q_smem", {I32(tile_x), I32(d_qk)}, dtype);
   // KV_smem: (tile_z, d_qk) — merged K and V
   tir::Buffer KV_smem = AllocShared("KV_smem", {I32(tile_z), I32(d_qk)}, dtype);
-  tir::Buffer S_smem  = AllocShared("S_smem", {I32(tile_x), I32(tile_z)}, "float32");
+  tir::Buffer S_smem = AllocShared("S_smem", {I32(tile_x), I32(tile_z)}, "float32");
   tir::Buffer S_local = AllocLocal("S_local", {I32(tile_x), I32(tile_z)}, "float32");
   tir::Buffer O_local = AllocLocal("O_local", {I32(tile_x), I32(d_v)}, "float32");
-  tir::Buffer m_smem      = AllocShared("m_smem",      {I32(tile_x)}, "float32");
+  tir::Buffer m_smem = AllocShared("m_smem", {I32(tile_x)}, "float32");
   tir::Buffer m_prev_smem = AllocShared("m_prev_smem", {I32(tile_x)}, "float32");
-  tir::Buffer d_smem      = AllocShared("d_smem",      {I32(tile_x)}, "float32");
+  tir::Buffer d_smem = AllocShared("d_smem", {I32(tile_x)}, "float32");
   int64_t md_sz = static_cast<int64_t>(std::ceil((double)tile_x / (bdx * num_warps)));
-  tir::Buffer m_new_buf  = AllocLocal("m_new",  {I32(md_sz)}, "float32");
+  tir::Buffer m_new_buf = AllocLocal("m_new", {I32(md_sz)}, "float32");
   tir::Buffer m_prev_buf = AllocLocal("m_prev", {I32(md_sz)}, "float32");
-  tir::Buffer d_new_buf  = AllocLocal("d_new",  {I32(md_sz)}, "float32");
+  tir::Buffer d_new_buf = AllocLocal("d_new", {I32(md_sz)}, "float32");
 
   auto ld0 = [](tir::Buffer b) { return tir::BufferLoad(b, {I32(0)}); };
   auto st0 = [](tir::Buffer b, PrimExpr v) -> Stmt { return tir::BufferStore(b, v, {I32(0)}); };
 
+  // Annotation for auto-detecting reads/writes in sblocks
+  ffi::Map<ffi::String, ffi::Any> detect_annots;
+  detect_annots.Set("tir.script_parsing_detect_access", IntImm(DataType::Int(32), 3));
+
   // MLA causal mask: row_ = (LH_start + row) // num_heads
-  auto causal_mask_mla = [&](PrimExpr row, PrimExpr col, PrimExpr kv_len_e, PrimExpr qo_len_e) {
-    PrimExpr row_ = floordiv(row, I32(num_heads));
-    return tvm::if_then_else(causal > I32(0),
-                              col < kv_len_e - qo_len_e + row_ + I32(1),
-                              col < kv_len_e);
+  // causal_mask_mla: row_ is already floordiv(LH_start+row, num_heads)
+  auto causal_mask_mla = [&](PrimExpr row_, PrimExpr col, PrimExpr kv_len_e, PrimExpr qo_len_e) {
+    return tvm::if_then_else(causal > I32(0), col < kv_len_e - qo_len_e + row_ + I32(1),
+                             col < kv_len_e);
   };
 
   tir::Var b_idx("b_idx", DataType::Int(32));
@@ -183,338 +184,529 @@ tir::PrimFunc AttentionPrefillMLA(int64_t num_heads, int64_t v_head_dim,
 
   PrimExpr kv_len_expr = tvm::if_then_else(
       cur_begin != cur_end,
-      (cur_end - cur_begin - I32(1)) * I32(page_size) +
-      tir::BufferLoad(length_info_buf, {b_idx}),
-      I32(0));
-  PrimExpr qo_len_expr = tir::BufferLoad(q_indptr_buf, {b_idx + I32(1)}) -
-                         tir::BufferLoad(q_indptr_buf, {b_idx});
+      GetKvChunkLen(cur_end - cur_begin, page_size, b_idx, length_info_buf, causal_flag), I32(0));
+  PrimExpr qo_len_expr =
+      tir::BufferLoad(q_indptr_buf, {b_idx + I32(1)}) - tir::BufferLoad(q_indptr_buf, {b_idx});
 
   // init states
   tir::Var i_init("i", DataType::Int(32)), row_init("row", DataType::Int(32));
-  Stmt init_md = tir::For(i_init, I32(0), I32(md_sz), tir::ForKind::kSerial,
-      tir::LetStmt(row_init, i_init * I32(bdx * num_warps) + ty * I32(bdx) + tx,
+  Stmt init_md = tir::For(
+      i_init, I32(0), I32(md_sz), tir::ForKind::kSerial,
+      tir::LetStmt(
+          row_init, i_init * I32(bdx) * I32(num_warps) + ty * I32(bdx) + tx,
           tir::IfThenElse(row_init < I32(tile_x),
-              tir::SeqStmt({tir::BufferStore(m_smem, F32(-50000.0), {row_init}),
-                            tir::BufferStore(d_smem, F32(1.0), {row_init})}))));
+                          tir::SeqStmt({tir::BufferStore(m_smem, F32(-50000.0), {row_init}),
+                                        tir::BufferStore(d_smem, F32(1.0), {row_init})}))));
 
   // O_init
   tir::Var li_oi("li", DataType::Int(32)), lj_oi("lj", DataType::Int(32));
+  tir::Var vi_oi("i", DataType::Int(32)), vj_oi("j", DataType::Int(32));
+  ffi::Array<tir::BufferRegion> o_init_writes = {
+      tir::BufferRegion(O_local, ffi::Array<tvm::Range>{tvm::Range::FromMinExtent(vi_oi, I32(1)),
+                                                        tvm::Range::FromMinExtent(vj_oi, I32(1))})};
+  auto o_init_block = tir::SBlock(
+      ffi::Array<IterVar>{
+          IterVar(Range::FromMinExtent(I32(0), I32(tile_x)), vi_oi, tir::kDataPar, ""),
+          IterVar(Range::FromMinExtent(I32(0), I32(d_v)), vj_oi, tir::kDataPar, "")},
+      {}, o_init_writes, "O_init",
+      tir::BufferStore(O_local, F32(0.0), ffi::Array<PrimExpr>{vi_oi, vj_oi}));
   Stmt o_init = tir::For(li_oi, I32(0), I32(tile_x), tir::ForKind::kSerial,
-      tir::For(lj_oi, I32(0), I32(d_v), tir::ForKind::kSerial,
-          tir::SBlockRealize({}, tir::const_true(),
-              tir::SBlock({}, {}, {}, "O_init",
-                  tir::BufferStore(O_local, F32(0.0), ffi::Array<PrimExpr>{li_oi, lj_oi})))));
+                         tir::For(lj_oi, I32(0), I32(d_v), tir::ForKind::kSerial,
+                                  tir::SBlockRealize({PrimExpr(li_oi), PrimExpr(lj_oi)},
+                                                     tir::const_true(), o_init_block)));
 
   // Q_load: cur_L = q_indptr_val + (LH_start + i) // num_heads
   //         cur_H_qo = (LH_start + i) % num_heads
   tir::Var li_ql("li", DataType::Int(32)), lj_ql("lj", DataType::Int(32));
+  tir::Var vi_ql("i", DataType::Int(32)), vj_ql("j", DataType::Int(32));
   tir::Var cur_L_ql("cur_L", DataType::Int(32)), cur_H_qo_ql("cur_H_qo", DataType::Int(32));
-  PrimExpr zero_val = is_f16 ? CastTo(F32(0.0), dtype) : F32(0.0);
-  Stmt q_load = tir::For(li_ql, I32(0), I32(tile_x), tir::ForKind::kSerial,
-      tir::For(lj_ql, I32(0), I32(d_qk), tir::ForKind::kSerial,
-          tir::SBlockRealize({}, tir::const_true(),
-              tir::SBlock({}, {}, {}, "Q_load",
-                  tir::LetStmt(cur_L_ql,
-                      q_indptr_val + floordiv(LH_start + li_ql, I32(num_heads)),
-                      tir::LetStmt(cur_H_qo_ql,
-                          floormod(LH_start + li_ql, I32(num_heads)),
+  PrimExpr zero_val = is_f16 ? PrimExpr(tvm::FloatImm(dt, 0.0)) : F32(0.0);
+  Stmt q_load = tir::For(
+      li_ql, I32(0), I32(tile_x), tir::ForKind::kSerial,
+      tir::For(
+          lj_ql, I32(0), I32(d_qk), tir::ForKind::kSerial,
+          tir::SBlockRealize(
+              {PrimExpr(li_ql), PrimExpr(lj_ql)}, tir::const_true(),
+              tir::SBlock(
+                  ffi::Array<IterVar>{
+                      IterVar(Range::FromMinExtent(I32(0), I32(tile_x)), vi_ql, tir::kDataPar, ""),
+                      IterVar(Range::FromMinExtent(I32(0), I32(d_qk)), vj_ql, tir::kDataPar, "")},
+                  {}, {}, "Q_load",
+                  tir::LetStmt(
+                      cur_L_ql, q_indptr_val + floordiv(LH_start + vi_ql, I32(num_heads)),
+                      tir::LetStmt(
+                          cur_H_qo_ql, floormod(LH_start + vi_ql, I32(num_heads)),
                           tir::IfThenElse(
                               cur_L_ql < tir::BufferLoad(q_indptr_buf, {b_idx + I32(1)}),
-                              tir::BufferStore(Q_smem,
-                                  tir::BufferLoad(q_buf, ffi::Array<PrimExpr>{cur_L_ql, cur_H_qo_ql, lj_ql}), ffi::Array<PrimExpr>{li_ql, lj_ql}),
-                              tir::BufferStore(Q_smem, zero_val, ffi::Array<PrimExpr>{li_ql, lj_ql}))))))));
+                              tir::BufferStore(
+                                  Q_smem,
+                                  tir::BufferLoad(
+                                      q_buf, ffi::Array<PrimExpr>{cur_L_ql, cur_H_qo_ql, vj_ql}),
+                                  ffi::Array<PrimExpr>{vi_ql, vj_ql}),
+                              tir::BufferStore(Q_smem, zero_val,
+                                               ffi::Array<PrimExpr>{vi_ql, vj_ql}))))))));
 
   // KV_load: loads from pages (no head dim, no K/V split)
   tir::Var lz_kl("lz", DataType::Int(32)), ly_kl("ly", DataType::Int(32));
+  tir::Var vi_kl("i", DataType::Int(32)), vj_kl("j", DataType::Int(32));
   tir::Var cur_L_kl("cur_L", DataType::Int(32));
   tir::SizeVar seq_off_kl("seq_offset", DataType::Int(32));
   tir::SizeVar page_no_kl("page_no", DataType::Int(32));
   tir::SizeVar page_off_kl("page_offset", DataType::Int(32));
-  Stmt kv_load = tir::For(lz_kl, I32(0), I32(tile_z), tir::ForKind::kSerial,
-      tir::For(ly_kl, I32(0), I32(d_qk), tir::ForKind::kSerial,
-          tir::SBlockRealize({}, tir::const_true(),
-              tir::SBlock({}, {}, {}, "KV_load",
-                  tir::LetStmt(cur_L_kl, L_kv_start + lz_kl,
-                      tir::IfThenElse(cur_L_kl < ld0(kv_chunk_buf),
-                          tir::LetStmt(seq_off_kl, cur_L_kl,
-                              tir::LetStmt(page_no_kl,
-                                  tir::BufferLoad(page_values_buf, ffi::Array<PrimExpr>{cur_begin + floordiv(seq_off_kl, I32(page_size))}),
-                                  tir::LetStmt(page_off_kl, floormod(seq_off_kl, I32(page_size)),
-                                      tir::BufferStore(KV_smem,
-                                          tir::BufferLoad(pages_buf, ffi::Array<PrimExpr>{page_no_kl, page_off_kl, ly_kl}), ffi::Array<PrimExpr>{lz_kl, ly_kl})))),
-                          tir::BufferStore(KV_smem, zero_val, ffi::Array<PrimExpr>{lz_kl, ly_kl})))))));
+  Stmt kv_load = tir::For(
+      lz_kl, I32(0), I32(tile_z), tir::ForKind::kSerial,
+      tir::For(
+          ly_kl, I32(0), I32(d_qk), tir::ForKind::kSerial,
+          tir::SBlockRealize(
+              {PrimExpr(lz_kl), PrimExpr(ly_kl)}, tir::const_true(),
+              tir::SBlock(
+                  ffi::Array<IterVar>{
+                      IterVar(Range::FromMinExtent(I32(0), I32(tile_z)), vi_kl, tir::kDataPar, ""),
+                      IterVar(Range::FromMinExtent(I32(0), I32(d_qk)), vj_kl, tir::kDataPar, "")},
+                  {}, {}, "KV_load",
+                  tir::LetStmt(
+                      cur_L_kl, L_kv_start + vi_kl,
+                      tir::IfThenElse(
+                          cur_L_kl < ld0(kv_chunk_buf),
+                          tir::LetStmt(
+                              seq_off_kl,
+                              GetSeqOffset(cur_L_kl, b_idx, length_info_buf, causal_flag),
+                              tir::LetStmt(
+                                  page_no_kl,
+                                  tir::BufferLoad(
+                                      page_values_buf,
+                                      ffi::Array<PrimExpr>{cur_begin +
+                                                           floordiv(seq_off_kl, I32(page_size))}),
+                                  tir::LetStmt(
+                                      page_off_kl, floormod(seq_off_kl, I32(page_size)),
+                                      tir::BufferStore(
+                                          KV_smem,
+                                          tir::BufferLoad(
+                                              pages_buf,
+                                              ffi::Array<PrimExpr>{page_no_kl, page_off_kl, vj_kl}),
+                                          ffi::Array<PrimExpr>{vi_kl, vj_kl})))),
+                          tir::BufferStore(KV_smem, zero_val,
+                                           ffi::Array<PrimExpr>{vi_kl, vj_kl})))))));
 
   // S_gemm
-  tir::Var li_sg("li", DataType::Int(32)), lj_sg("lj", DataType::Int(32)), lk_sg("lk", DataType::Int(32));
-  PrimExpr q_elem = is_f16 ? CastTo(tir::BufferLoad(Q_smem, ffi::Array<PrimExpr>{li_sg, lk_sg}), "float32")
-                           : tir::BufferLoad(Q_smem, ffi::Array<PrimExpr>{li_sg, lk_sg});
-  PrimExpr k_elem = is_f16 ? CastTo(tir::BufferLoad(KV_smem, ffi::Array<PrimExpr>{lj_sg, lk_sg}), "float32")
-                           : tir::BufferLoad(KV_smem, ffi::Array<PrimExpr>{lj_sg, lk_sg});
+  tir::Var li_sg("li", DataType::Int(32)), lj_sg("lj", DataType::Int(32)),
+      lk_sg("lk", DataType::Int(32));
+  PrimExpr q_elem =
+      is_f16 ? CastTo(tir::BufferLoad(Q_smem, ffi::Array<PrimExpr>{li_sg, lk_sg}), "float32")
+             : tir::BufferLoad(Q_smem, ffi::Array<PrimExpr>{li_sg, lk_sg});
+  PrimExpr k_elem =
+      is_f16 ? CastTo(tir::BufferLoad(KV_smem, ffi::Array<PrimExpr>{lj_sg, lk_sg}), "float32")
+             : tir::BufferLoad(KV_smem, ffi::Array<PrimExpr>{lj_sg, lk_sg});
 
-
-    tir::IterVar iv_sg_i = tir::IterVar(Range(I32(0), I32(tile_x)), tir::Var("i", DataType::Int(32)), tir::kDataPar);
-  tir::IterVar iv_sg_j = tir::IterVar(Range(I32(0), I32(tile_z)), tir::Var("j", DataType::Int(32)), tir::kDataPar);
-  tir::IterVar iv_sg_k = tir::IterVar(Range(I32(0), I32(d_qk)), tir::Var("k", DataType::Int(32)), tir::kCommReduce);
+  tir::IterVar iv_sg_i =
+      tir::IterVar(Range(I32(0), I32(tile_x)), tir::Var("i", DataType::Int(32)), tir::kDataPar);
+  tir::IterVar iv_sg_j =
+      tir::IterVar(Range(I32(0), I32(tile_z)), tir::Var("j", DataType::Int(32)), tir::kDataPar);
+  tir::IterVar iv_sg_k =
+      tir::IterVar(Range(I32(0), I32(d_qk)), tir::Var("k", DataType::Int(32)), tir::kCommReduce);
   ffi::Array<tir::IterVar> iter_vars_sg = {iv_sg_i, iv_sg_j, iv_sg_k};
-    ffi::Array<tir::BufferRegion> s_gemm_reads = {
-      tir::BufferRegion(Q_smem, ffi::Array<tvm::Range>{tvm::Range::FromMinExtent(iv_sg_i->var, I32(1)), tvm::Range::FromMinExtent(iv_sg_k->var, I32(1))}),
-      tir::BufferRegion(KV_smem, ffi::Array<tvm::Range>{tvm::Range::FromMinExtent(iv_sg_j->var, I32(1)), tvm::Range::FromMinExtent(iv_sg_k->var, I32(1))}),
-      tir::BufferRegion(S_local, ffi::Array<tvm::Range>{tvm::Range::FromMinExtent(iv_sg_i->var, I32(1)), tvm::Range::FromMinExtent(iv_sg_j->var, I32(1))})};
-    ffi::Array<tir::BufferRegion> s_gemm_writes = {
-      tir::BufferRegion(S_local, ffi::Array<tvm::Range>{tvm::Range::FromMinExtent(iv_sg_i->var, I32(1)), tvm::Range::FromMinExtent(iv_sg_j->var, I32(1))})};
-  Stmt s_gemm_inner_sblock =
-      tir::SBlockRealize(
-          ffi::Array<PrimExpr>{li_sg, lj_sg, lk_sg}, tir::const_true(),
-          tir::SBlock(iter_vars_sg, s_gemm_reads, s_gemm_writes, "S_gemm",
-              tir::BufferStore(S_local,
-                  tir::BufferLoad(S_local, ffi::Array<PrimExpr>{iv_sg_i->var, iv_sg_j->var}) +
-                  (is_f16 ? CastTo(tir::BufferLoad(Q_smem, ffi::Array<PrimExpr>{iv_sg_i->var, iv_sg_k->var}), "float32") : tir::BufferLoad(Q_smem, ffi::Array<PrimExpr>{iv_sg_i->var, iv_sg_k->var})) * (is_f16 ? CastTo(tir::BufferLoad(KV_smem, ffi::Array<PrimExpr>{iv_sg_j->var, iv_sg_k->var}), "float32") : tir::BufferLoad(KV_smem, ffi::Array<PrimExpr>{iv_sg_j->var, iv_sg_k->var})) * sm_scale * F32(log2e),
-                  ffi::Array<PrimExpr>{iv_sg_i->var, iv_sg_j->var}),
-              /*init=*/tir::BufferStore(S_local, F32(0.0),
-                  ffi::Array<PrimExpr>{iv_sg_i->var, iv_sg_j->var})));
-  Stmt s_gemm =
-      tir::SBlockRealize({}, tir::const_true(),
-          tir::SBlock({}, {}, {}, "",
-              tir::For(li_sg, I32(0), I32(tile_x), tir::ForKind::kSerial,
-                  tir::For(lj_sg, I32(0), I32(tile_z), tir::ForKind::kSerial,
-                      tir::For(lk_sg, I32(0), I32(d_qk), tir::ForKind::kSerial,
-                          s_gemm_inner_sblock)))));
+  ffi::Array<tir::BufferRegion> s_gemm_reads = {
+      tir::BufferRegion(S_local,
+                        ffi::Array<tvm::Range>{tvm::Range::FromMinExtent(iv_sg_i->var, I32(1)),
+                                               tvm::Range::FromMinExtent(iv_sg_j->var, I32(1))}),
+      tir::BufferRegion(Q_smem,
+                        ffi::Array<tvm::Range>{tvm::Range::FromMinExtent(iv_sg_i->var, I32(1)),
+                                               tvm::Range::FromMinExtent(iv_sg_k->var, I32(1))}),
+      tir::BufferRegion(KV_smem,
+                        ffi::Array<tvm::Range>{tvm::Range::FromMinExtent(iv_sg_j->var, I32(1)),
+                                               tvm::Range::FromMinExtent(iv_sg_k->var, I32(1))})};
+  ffi::Array<tir::BufferRegion> s_gemm_writes = {tir::BufferRegion(
+      S_local, ffi::Array<tvm::Range>{tvm::Range::FromMinExtent(iv_sg_i->var, I32(1)),
+                                      tvm::Range::FromMinExtent(iv_sg_j->var, I32(1))})};
+  Stmt s_gemm_inner_sblock = tir::SBlockRealize(
+      ffi::Array<PrimExpr>{li_sg, lj_sg, lk_sg}, tir::const_true(),
+      tir::SBlock(
+          iter_vars_sg, s_gemm_reads, s_gemm_writes, "S_gemm",
+          tir::BufferStore(
+              S_local,
+              tir::BufferLoad(S_local, ffi::Array<PrimExpr>{iv_sg_i->var, iv_sg_j->var}) +
+                  (is_f16 ? CastTo(tir::BufferLoad(
+                                       Q_smem, ffi::Array<PrimExpr>{iv_sg_i->var, iv_sg_k->var}),
+                                   "float32")
+                          : tir::BufferLoad(Q_smem,
+                                            ffi::Array<PrimExpr>{iv_sg_i->var, iv_sg_k->var})) *
+                      (is_f16 ? CastTo(tir::BufferLoad(KV_smem, ffi::Array<PrimExpr>{iv_sg_j->var,
+                                                                                     iv_sg_k->var}),
+                                       "float32")
+                              : tir::BufferLoad(KV_smem,
+                                                ffi::Array<PrimExpr>{iv_sg_j->var, iv_sg_k->var})) *
+                      sm_scale * F32(log2e),
+              ffi::Array<PrimExpr>{iv_sg_i->var, iv_sg_j->var}),
+          /*init=*/
+          tir::BufferStore(S_local, F32(0.0), ffi::Array<PrimExpr>{iv_sg_i->var, iv_sg_j->var})));
+  // Outer "" sblock for s_gemm: reads Q_smem[0:tile_x,0:d_qk], KV_smem[0:tile_z,0:d_qk]; writes
+  // S_local[0:tile_x,0:tile_z]
+  ffi::Array<tir::BufferRegion> s_gemm_outer_reads = {
+      tir::BufferRegion(Q_smem,
+                        ffi::Array<tvm::Range>{tvm::Range::FromMinExtent(I32(0), I32(tile_x)),
+                                               tvm::Range::FromMinExtent(I32(0), I32(d_qk))}),
+      tir::BufferRegion(KV_smem,
+                        ffi::Array<tvm::Range>{tvm::Range::FromMinExtent(I32(0), I32(tile_z)),
+                                               tvm::Range::FromMinExtent(I32(0), I32(d_qk))})};
+  ffi::Array<tir::BufferRegion> s_gemm_outer_writes = {tir::BufferRegion(
+      S_local, ffi::Array<tvm::Range>{tvm::Range::FromMinExtent(I32(0), I32(tile_x)),
+                                      tvm::Range::FromMinExtent(I32(0), I32(tile_z))})};
+  Stmt s_gemm = tir::SBlockRealize(
+      {}, tir::const_true(),
+      tir::SBlock({}, s_gemm_outer_reads, s_gemm_outer_writes, "",
+                  tir::For(li_sg, I32(0), I32(tile_x), tir::ForKind::kSerial,
+                           tir::For(lj_sg, I32(0), I32(tile_z), tir::ForKind::kSerial,
+                                    tir::For(lk_sg, I32(0), I32(d_qk), tir::ForKind::kSerial,
+                                             s_gemm_inner_sblock)))));
 
   // S_store
   tir::Var li_ss("li", DataType::Int(32)), lj_ss("lj", DataType::Int(32));
+  tir::Var vi_ss("i", DataType::Int(32)), vj_ss("j", DataType::Int(32));
+  ffi::Array<tir::BufferRegion> s_store_reads = {
+      tir::BufferRegion(S_local, ffi::Array<tvm::Range>{tvm::Range::FromMinExtent(vi_ss, I32(1)),
+                                                        tvm::Range::FromMinExtent(vj_ss, I32(1))})};
+  ffi::Array<tir::BufferRegion> s_store_writes = {
+      tir::BufferRegion(S_smem, ffi::Array<tvm::Range>{tvm::Range::FromMinExtent(vi_ss, I32(1)),
+                                                       tvm::Range::FromMinExtent(vj_ss, I32(1))})};
+  auto s_store_block = tir::SBlock(
+      ffi::Array<IterVar>{
+          IterVar(Range::FromMinExtent(I32(0), I32(tile_x)), vi_ss, tir::kDataPar, ""),
+          IterVar(Range::FromMinExtent(I32(0), I32(tile_z)), vj_ss, tir::kDataPar, "")},
+      s_store_reads, s_store_writes, "S_store",
+      tir::BufferStore(S_smem, tir::BufferLoad(S_local, ffi::Array<PrimExpr>{vi_ss, vj_ss}),
+                       ffi::Array<PrimExpr>{vi_ss, vj_ss}));
   Stmt s_store = tir::For(li_ss, I32(0), I32(tile_x), tir::ForKind::kSerial,
-      tir::For(lj_ss, I32(0), I32(tile_z), tir::ForKind::kSerial,
-          tir::SBlockRealize({}, tir::const_true(),
-              tir::SBlock({}, {}, {}, "S_store",
-                  tir::BufferStore(S_smem,
-                      tir::BufferLoad(S_local, ffi::Array<PrimExpr>{li_ss, lj_ss}), ffi::Array<PrimExpr>{li_ss, lj_ss})))));
+                          tir::For(lj_ss, I32(0), I32(tile_z), tir::ForKind::kSerial,
+                                   tir::SBlockRealize({PrimExpr(li_ss), PrimExpr(lj_ss)},
+                                                      tir::const_true(), s_store_block)));
 
   // update1
   tir::Var i_u1("i", DataType::Int(32)), row_u1("row", DataType::Int(32));
   tir::Var row__u1("row_", DataType::Int(32)), j_u1("j", DataType::Int(32));
-  Stmt update1 = tir::For(i_u1, I32(0), I32(md_sz), tir::ForKind::kSerial,
-      tir::LetStmt(row_u1, i_u1 * I32(bdx * num_warps) + ty * I32(bdx) + tx,
-          tir::IfThenElse(row_u1 < I32(tile_x),
-              tir::SBlockRealize({}, tir::const_true(),
-                  tir::SBlock({}, {}, {}, "update1",
-                      tir::SeqStmt({
-                          tir::BufferStore(m_prev_buf, tir::BufferLoad(m_smem, {row_u1}), {i_u1}),
-                          tir::BufferStore(m_new_buf,  tir::BufferLoad(m_smem, {row_u1}), {i_u1}),
-                          tir::LetStmt(row__u1, floordiv(LH_start + row_u1, I32(num_heads)),
-                              tir::For(j_u1, I32(0), I32(tile_z), tir::ForKind::kSerial,
-                                  tir::IfThenElse(
-                                      causal_mask_mla(LH_start + row_u1, L_kv_start + j_u1,
-                                                      ld0(kv_chunk_buf), qo_len_expr),
-                                      tir::BufferStore(m_new_buf,
-                                          tvm::max(tir::BufferLoad(m_new_buf, {i_u1}),
-                                                   tir::BufferLoad(S_smem, ffi::Array<PrimExpr>{row_u1, j_u1})),
-                                          {i_u1})))),
-                          tir::BufferStore(d_new_buf,
-                              tir::BufferLoad(d_smem, {row_u1}) *
-                              tvm::exp2(tir::BufferLoad(m_prev_buf, {i_u1}) -
-                                        tir::BufferLoad(m_new_buf, {i_u1})),
-                              {i_u1})}))))));
+  Stmt update1 = tir::For(
+      i_u1, I32(0), I32(md_sz), tir::ForKind::kSerial,
+      tir::LetStmt(
+          row_u1, i_u1 * I32(bdx) * I32(num_warps) + ty * I32(bdx) + tx,
+          tir::IfThenElse(
+              row_u1 < I32(tile_x),
+              tir::SBlockRealize(
+                  {}, tir::const_true(),
+                  tir::SBlock(
+                      {}, {}, {}, "update1",
+                      tir::SeqStmt(
+                          {tir::BufferStore(m_prev_buf, tir::BufferLoad(m_smem, {row_u1}), {i_u1}),
+                           tir::BufferStore(m_new_buf, tir::BufferLoad(m_smem, {row_u1}), {i_u1}),
+                           tir::LetStmt(
+                               row__u1,
+                               floordiv(LH_start + row_u1, I32(num_heads)),
+                               tir::SeqStmt(
+                                   {tir::For(j_u1, I32(0), I32(tile_z), tir::ForKind::kSerial,
+                                             tir::IfThenElse(
+                                                 causal_mask_mla(row__u1, L_kv_start + j_u1,
+                                                                 ld0(kv_chunk_buf), qo_len_expr),
+                                                 tir::BufferStore(
+                                                     m_new_buf,
+                                                     tvm::max(tir::BufferLoad(m_new_buf, {i_u1}),
+                                                              tir::BufferLoad(S_smem,
+                                                                              ffi::Array<PrimExpr>{
+                                                                                  row_u1, j_u1})),
+                                                     {i_u1}))),
+                                    tir::BufferStore(
+                                        d_new_buf,
+                                        tir::BufferLoad(d_smem, {row_u1}) *
+                                            tvm::exp2(tir::BufferLoad(m_prev_buf, {i_u1}) -
+                                                      tir::BufferLoad(m_new_buf, {i_u1})),
+                                        {i_u1})}))}),
+                      std::nullopt, {}, {}, detect_annots)))));
 
   // update2
   tir::Var i_u2("i", DataType::Int(32)), row_u2("row", DataType::Int(32));
   tir::Var row__u2("row_", DataType::Int(32)), j_u2("j", DataType::Int(32));
-  Stmt update2_sblock =
-      tir::SBlockRealize({}, tir::const_true(),
-              tir::SBlock({}, {}, {}, "update",
-                  tir::For(j_u2, I32(0), I32(tile_z), tir::ForKind::kSerial,
-                      tir::IfThenElse(row_u2 < I32(tile_x),
-                          tir::LetStmt(row__u2, floordiv(LH_start + row_u2, I32(num_heads)),
-                              tir::IfThenElse(
-                                  causal_mask_mla(LH_start + row_u2, L_kv_start + j_u2,
-                                                  ld0(kv_chunk_buf), qo_len_expr),
-                                  tir::BufferStore(S_smem,
-                                      tvm::exp2(tir::BufferLoad(S_smem, ffi::Array<PrimExpr>{row_u2, j_u2}) -
-                                                tir::BufferLoad(m_new_buf, {i_u2})), ffi::Array<PrimExpr>{row_u2, j_u2}),
-                                  tir::BufferStore(S_smem,
-                                      tvm::exp2(F32(-50000.0) -
-                                                tir::BufferLoad(m_new_buf, {i_u2})), ffi::Array<PrimExpr>{row_u2, j_u2})))))));
-  Stmt update2 = tir::For(i_u2, I32(0), I32(md_sz), tir::ForKind::kSerial,
-      tir::LetStmt(row_u2, i_u2 * I32(bdx * num_warps) + ty * I32(bdx) + tx,
-          update2_sblock));
+  Stmt update2_sblock = tir::SBlockRealize(
+      {}, tir::const_true(),
+      tir::SBlock(
+          {}, {}, {}, "update",
+          tir::For(
+              j_u2, I32(0), I32(tile_z), tir::ForKind::kSerial,
+              tir::IfThenElse(
+                  row_u2 < I32(tile_x),
+                  tir::LetStmt(
+                      row__u2, floordiv(LH_start + row_u2, I32(num_heads)),
+                      tir::IfThenElse(
+                          causal_mask_mla(row__u2, L_kv_start + j_u2, ld0(kv_chunk_buf),
+                                          qo_len_expr),
+                          tir::BufferStore(
+                              S_smem,
+                              tvm::exp2(
+                                  tir::BufferLoad(S_smem, ffi::Array<PrimExpr>{row_u2, j_u2}) -
+                                  tir::BufferLoad(m_new_buf, {i_u2})),
+                              ffi::Array<PrimExpr>{row_u2, j_u2}),
+                          tir::BufferStore(
+                              S_smem, tvm::exp2(F32(-50000.0) - tir::BufferLoad(m_new_buf, {i_u2})),
+                              ffi::Array<PrimExpr>{row_u2, j_u2}))))),
+          std::nullopt, {}, {}, detect_annots));
+  Stmt update2 = tir::For(
+      i_u2, I32(0), I32(md_sz), tir::ForKind::kSerial,
+      tir::LetStmt(row_u2, i_u2 * I32(bdx) * I32(num_warps) + ty * I32(bdx) + tx, update2_sblock));
 
   // update3
-  tir::Var i_u3("i", DataType::Int(32)), row_u3("row", DataType::Int(32)), j_u3("j", DataType::Int(32));
-  Stmt update3 = tir::For(i_u3, I32(0), I32(md_sz), tir::ForKind::kSerial,
-      tir::LetStmt(row_u3, i_u3 * I32(bdx * num_warps) + ty * I32(bdx) + tx,
-          tir::IfThenElse(row_u3 < I32(tile_x),
-              tir::SBlockRealize({}, tir::const_true(),
-                  tir::SBlock({}, {}, {}, "update",
-                      tir::SeqStmt({
-                          tir::For(j_u3, I32(0), I32(tile_z), tir::ForKind::kSerial,
-                              tir::BufferStore(d_new_buf,
-                                  tir::BufferLoad(d_new_buf, {i_u3}) +
-                                  tir::BufferLoad(S_smem, ffi::Array<PrimExpr>{row_u3, j_u3}), {i_u3})),
-                          tir::BufferStore(m_smem,      tir::BufferLoad(m_new_buf,  {i_u3}), {row_u3}),
-                          tir::BufferStore(d_smem,      tir::BufferLoad(d_new_buf,  {i_u3}), {row_u3}),
-                          tir::BufferStore(m_prev_smem, tir::BufferLoad(m_prev_buf, {i_u3}), {row_u3})}))))));
+  tir::Var i_u3("i", DataType::Int(32)), row_u3("row", DataType::Int(32)),
+      j_u3("j", DataType::Int(32));
+  Stmt update3 = tir::For(
+      i_u3, I32(0), I32(md_sz), tir::ForKind::kSerial,
+      tir::LetStmt(
+          row_u3, i_u3 * I32(bdx) * I32(num_warps) + ty * I32(bdx) + tx,
+          tir::IfThenElse(
+              row_u3 < I32(tile_x),
+              tir::SBlockRealize(
+                  {}, tir::const_true(),
+                  tir::SBlock(
+                      {}, {}, {}, "update",
+                      tir::SeqStmt(
+                          {tir::For(j_u3, I32(0), I32(tile_z), tir::ForKind::kSerial,
+                                    tir::BufferStore(
+                                        d_new_buf,
+                                        tir::BufferLoad(d_new_buf, {i_u3}) +
+                                            tir::BufferLoad(S_smem,
+                                                            ffi::Array<PrimExpr>{row_u3, j_u3}),
+                                        {i_u3})),
+                           tir::BufferStore(m_smem, tir::BufferLoad(m_new_buf, {i_u3}), {row_u3}),
+                           tir::BufferStore(d_smem, tir::BufferLoad(d_new_buf, {i_u3}), {row_u3}),
+                           tir::BufferStore(m_prev_smem, tir::BufferLoad(m_prev_buf, {i_u3}),
+                                            {row_u3})}),
+                      std::nullopt, {}, {}, detect_annots)))));
 
   // O_gemm
-  tir::Var li_og("li", DataType::Int(32)), lj_og("lj", DataType::Int(32)), lk_og("lk", DataType::Int(32));
-  PrimExpr v_elem = is_f16
-    ? CastTo(tir::BufferLoad(KV_smem, ffi::Array<PrimExpr>{lk_og, I32(qk_nope_head_dim) + lj_og}), "float32")
-    : tir::BufferLoad(KV_smem, ffi::Array<PrimExpr>{lk_og, I32(qk_nope_head_dim) + lj_og});
+  tir::Var li_og("li", DataType::Int(32)), lj_og("lj", DataType::Int(32)),
+      lk_og("lk", DataType::Int(32));
+  PrimExpr v_elem =
+      is_f16 ? CastTo(tir::BufferLoad(KV_smem,
+                                      ffi::Array<PrimExpr>{lk_og, I32(qk_nope_head_dim) + lj_og}),
+                      "float32")
+             : tir::BufferLoad(KV_smem, ffi::Array<PrimExpr>{lk_og, I32(qk_nope_head_dim) + lj_og});
 
-
-    tir::IterVar iv_og_i = tir::IterVar(Range(I32(0), I32(tile_x)), tir::Var("i", DataType::Int(32)), tir::kDataPar);
-  tir::IterVar iv_og_j = tir::IterVar(Range(I32(0), I32(d_v)), tir::Var("j", DataType::Int(32)), tir::kDataPar);
-  tir::IterVar iv_og_k = tir::IterVar(Range(I32(0), I32(tile_z)), tir::Var("k", DataType::Int(32)), tir::kCommReduce);
+  tir::IterVar iv_og_i =
+      tir::IterVar(Range(I32(0), I32(tile_x)), tir::Var("i", DataType::Int(32)), tir::kDataPar);
+  tir::IterVar iv_og_j =
+      tir::IterVar(Range(I32(0), I32(d_v)), tir::Var("j", DataType::Int(32)), tir::kDataPar);
+  tir::IterVar iv_og_k =
+      tir::IterVar(Range(I32(0), I32(tile_z)), tir::Var("k", DataType::Int(32)), tir::kCommReduce);
   ffi::Array<tir::IterVar> iter_vars_og = {iv_og_i, iv_og_j, iv_og_k};
-    ffi::Array<tir::BufferRegion> o_gemm_reads = {
-      tir::BufferRegion(S_smem, ffi::Array<tvm::Range>{tvm::Range::FromMinExtent(iv_og_i->var, I32(1)), tvm::Range::FromMinExtent(iv_og_k->var, I32(1))}),
-      tir::BufferRegion(KV_smem, ffi::Array<tvm::Range>{tvm::Range::FromMinExtent(iv_og_k->var, I32(1)), tvm::Range::FromMinExtent(iv_og_j->var, I32(1))}),
-      tir::BufferRegion(O_local, ffi::Array<tvm::Range>{tvm::Range::FromMinExtent(iv_og_i->var, I32(1)), tvm::Range::FromMinExtent(iv_og_j->var, I32(1))}),
-      tir::BufferRegion(m_prev_smem, ffi::Array<tvm::Range>{tvm::Range::FromMinExtent(iv_og_i->var, I32(1))}),
-      tir::BufferRegion(m_smem, ffi::Array<tvm::Range>{tvm::Range::FromMinExtent(iv_og_i->var, I32(1))})};
-    ffi::Array<tir::BufferRegion> o_gemm_writes = {
-      tir::BufferRegion(O_local, ffi::Array<tvm::Range>{tvm::Range::FromMinExtent(iv_og_i->var, I32(1)), tvm::Range::FromMinExtent(iv_og_j->var, I32(1))})};
-  Stmt o_gemm_inner_sblock =
-      tir::SBlockRealize(
-          ffi::Array<PrimExpr>{li_og, lj_og, lk_og}, tir::const_true(),
-          tir::SBlock(iter_vars_og, o_gemm_reads, o_gemm_writes, "O_gemm",
-              tir::BufferStore(O_local,
-                  tir::BufferLoad(O_local, ffi::Array<PrimExpr>{iv_og_i->var, iv_og_j->var}) +
-                  tir::BufferLoad(S_smem, ffi::Array<PrimExpr>{iv_og_i->var, iv_og_k->var}) * (is_f16 ? CastTo(tir::BufferLoad(KV_smem, ffi::Array<PrimExpr>{iv_og_k->var, iv_og_j->var}), "float32") : tir::BufferLoad(KV_smem, ffi::Array<PrimExpr>{iv_og_k->var, iv_og_j->var})),
-                  ffi::Array<PrimExpr>{iv_og_i->var, iv_og_j->var}),
-              /*init=*/tir::BufferStore(O_local,
-                  tir::BufferLoad(O_local, ffi::Array<PrimExpr>{iv_og_i->var, iv_og_j->var}) *
+  ffi::Array<tir::BufferRegion> o_gemm_reads = {
+      tir::BufferRegion(O_local,
+                        ffi::Array<tvm::Range>{tvm::Range::FromMinExtent(iv_og_i->var, I32(1)),
+                                               tvm::Range::FromMinExtent(iv_og_j->var, I32(1))}),
+      tir::BufferRegion(m_prev_smem,
+                        ffi::Array<tvm::Range>{tvm::Range::FromMinExtent(iv_og_i->var, I32(1))}),
+      tir::BufferRegion(m_smem,
+                        ffi::Array<tvm::Range>{tvm::Range::FromMinExtent(iv_og_i->var, I32(1))}),
+      tir::BufferRegion(S_smem,
+                        ffi::Array<tvm::Range>{tvm::Range::FromMinExtent(iv_og_i->var, I32(1)),
+                                               tvm::Range::FromMinExtent(iv_og_k->var, I32(1))}),
+      tir::BufferRegion(KV_smem,
+                        ffi::Array<tvm::Range>{tvm::Range::FromMinExtent(iv_og_k->var, I32(1)),
+                                               tvm::Range::FromMinExtent(iv_og_j->var, I32(1))})};
+  ffi::Array<tir::BufferRegion> o_gemm_writes = {tir::BufferRegion(
+      O_local, ffi::Array<tvm::Range>{tvm::Range::FromMinExtent(iv_og_i->var, I32(1)),
+                                      tvm::Range::FromMinExtent(iv_og_j->var, I32(1))})};
+  Stmt o_gemm_inner_sblock = tir::SBlockRealize(
+      ffi::Array<PrimExpr>{li_og, lj_og, lk_og}, tir::const_true(),
+      tir::SBlock(
+          iter_vars_og, o_gemm_reads, o_gemm_writes, "O_gemm",
+          tir::BufferStore(
+              O_local,
+              tir::BufferLoad(O_local, ffi::Array<PrimExpr>{iv_og_i->var, iv_og_j->var}) +
+                  tir::BufferLoad(S_smem, ffi::Array<PrimExpr>{iv_og_i->var, iv_og_k->var}) *
+                      (is_f16 ? CastTo(tir::BufferLoad(KV_smem, ffi::Array<PrimExpr>{iv_og_k->var,
+                                                                                     iv_og_j->var}),
+                                       "float32")
+                              : tir::BufferLoad(KV_smem,
+                                                ffi::Array<PrimExpr>{iv_og_k->var, iv_og_j->var})),
+              ffi::Array<PrimExpr>{iv_og_i->var, iv_og_j->var}),
+          /*init=*/
+          tir::BufferStore(
+              O_local,
+              tir::BufferLoad(O_local, ffi::Array<PrimExpr>{iv_og_i->var, iv_og_j->var}) *
                   tvm::exp2(tir::BufferLoad(m_prev_smem, {iv_og_i->var}) -
                             tir::BufferLoad(m_smem, {iv_og_i->var})),
-                  ffi::Array<PrimExpr>{iv_og_i->var, iv_og_j->var})));
-  Stmt o_gemm =
-      tir::SBlockRealize({}, tir::const_true(),
-          tir::SBlock({}, {}, {}, "",
-              tir::For(li_og, I32(0), I32(tile_x), tir::ForKind::kSerial,
-                  tir::For(lj_og, I32(0), I32(d_v), tir::ForKind::kSerial,
-                      tir::For(lk_og, I32(0), I32(tile_z), tir::ForKind::kSerial,
-                          o_gemm_inner_sblock)))));
+              ffi::Array<PrimExpr>{iv_og_i->var, iv_og_j->var})));
+  // Outer "" sblock for o_gemm: reads m_prev_smem, m_smem, S_smem, KV_smem; writes O_local
+  ffi::Array<tir::BufferRegion> o_gemm_outer_reads = {
+      tir::BufferRegion(m_prev_smem,
+                        ffi::Array<tvm::Range>{tvm::Range::FromMinExtent(I32(0), I32(tile_x))}),
+      tir::BufferRegion(m_smem,
+                        ffi::Array<tvm::Range>{tvm::Range::FromMinExtent(I32(0), I32(tile_x))}),
+      tir::BufferRegion(S_smem,
+                        ffi::Array<tvm::Range>{tvm::Range::FromMinExtent(I32(0), I32(tile_x)),
+                                               tvm::Range::FromMinExtent(I32(0), I32(tile_z))}),
+      tir::BufferRegion(KV_smem,
+                        ffi::Array<tvm::Range>{tvm::Range::FromMinExtent(I32(0), I32(tile_z)),
+                                               tvm::Range::FromMinExtent(I32(0), I32(d_v))})};
+  ffi::Array<tir::BufferRegion> o_gemm_outer_writes = {tir::BufferRegion(
+      O_local, ffi::Array<tvm::Range>{tvm::Range::FromMinExtent(I32(0), I32(tile_x)),
+                                      tvm::Range::FromMinExtent(I32(0), I32(d_v))})};
+  Stmt o_gemm = tir::SBlockRealize(
+      {}, tir::const_true(),
+      tir::SBlock({}, o_gemm_outer_reads, o_gemm_outer_writes, "",
+                  tir::For(li_og, I32(0), I32(tile_x), tir::ForKind::kSerial,
+                           tir::For(lj_og, I32(0), I32(d_v), tir::ForKind::kSerial,
+                                    tir::For(lk_og, I32(0), I32(tile_z), tir::ForKind::kSerial,
+                                             o_gemm_inner_sblock)))));
 
   // KV iterator
   Stmt kv_iter = tir::LetStmt(L_kv_start, iterator * I32(tile_z),
-      tir::SeqStmt({kv_load, Sync(), s_gemm, Sync(), s_store, Sync(),
-                    update1, update2, update3, Sync(), o_gemm}));
-  Stmt kv_loop = tir::For(iterator, I32(0),
-      floordiv(ld0(kv_chunk_buf) + I32(tile_z - 1), I32(tile_z)),
-      tir::ForKind::kSerial, kv_iter);
+                              tir::SeqStmt({kv_load, Sync(), s_gemm, Sync(), s_store, Sync(),
+                                            update1, update2, update3, Sync(), o_gemm}));
+  Stmt kv_loop =
+      tir::For(iterator, I32(0), floordiv(ld0(kv_chunk_buf) + I32(tile_z - 1), I32(tile_z)),
+               tir::ForKind::kSerial, kv_iter);
 
   // O_store: cur_L = q_indptr_val + (LH_start + i) // num_heads
   //          cur_H_qo = (LH_start + i) % num_heads
   tir::Var li_os("li", DataType::Int(32)), lj_os("lj", DataType::Int(32));
+  tir::Var vi_os("i", DataType::Int(32)), vj_os("j", DataType::Int(32));
   tir::Var cur_L_os("cur_L", DataType::Int(32)), cur_H_qo_os("cur_H_qo", DataType::Int(32));
+  auto o_store_block = tir::SBlock(
+      ffi::Array<IterVar>{
+          IterVar(Range::FromMinExtent(I32(0), I32(tile_x)), vi_os, tir::kDataPar, ""),
+          IterVar(Range::FromMinExtent(I32(0), I32(d_v)), vj_os, tir::kDataPar, "")},
+      {}, {}, "O_store",
+      tir::LetStmt(
+          cur_L_os,
+          tir::BufferLoad(q_indptr_buf, {b_idx}) + floordiv(LH_start + vi_os, I32(num_heads)),
+          tir::LetStmt(
+              cur_H_qo_os, floormod(LH_start + vi_os, I32(num_heads)),
+              tir::IfThenElse(
+                  cur_L_os < tir::BufferLoad(q_indptr_buf, {b_idx + I32(1)}),
+                  tir::BufferStore(
+                      output_buf,
+                      is_f16
+                          ? CastTo(tvm::div(
+                                       tir::BufferLoad(O_local, ffi::Array<PrimExpr>{vi_os, vj_os}),
+                                       tir::BufferLoad(d_smem, {vi_os})),
+                                   dtype)
+                          : tvm::div(tir::BufferLoad(O_local, ffi::Array<PrimExpr>{vi_os, vj_os}),
+                                     tir::BufferLoad(d_smem, {vi_os})),
+                      ffi::Array<PrimExpr>{cur_L_os, cur_H_qo_os, vj_os})))),
+      std::nullopt, {}, {}, detect_annots);
   Stmt o_store = tir::For(li_os, I32(0), I32(tile_x), tir::ForKind::kSerial,
-      tir::For(lj_os, I32(0), I32(d_v), tir::ForKind::kSerial,
-          tir::SBlockRealize({}, tir::const_true(),
-              tir::SBlock({}, {}, {}, "O_store",
-                  tir::LetStmt(cur_L_os,
-                      tir::BufferLoad(q_indptr_buf, {b_idx}) +
-                      floordiv(LH_start + li_os, I32(num_heads)),
-                      tir::LetStmt(cur_H_qo_os,
-                          floormod(LH_start + li_os, I32(num_heads)),
-                          tir::IfThenElse(
-                              cur_L_os < tir::BufferLoad(q_indptr_buf, {b_idx + I32(1)}),
-                              tir::BufferStore(output_buf,
-                                  is_f16
-                                  ? CastTo(tvm::div(tir::BufferLoad(O_local, ffi::Array<PrimExpr>{li_os, lj_os}),
-                                    tir::BufferLoad(d_smem, {li_os})), dtype)
-                                  : tvm::div(tir::BufferLoad(O_local, ffi::Array<PrimExpr>{li_os, lj_os}),
-                                    tir::BufferLoad(d_smem, {li_os})), ffi::Array<PrimExpr>{cur_L_os, cur_H_qo_os, lj_os}))))))));
+                          tir::For(lj_os, I32(0), I32(d_v), tir::ForKind::kSerial,
+                                   tir::SBlockRealize({PrimExpr(li_os), PrimExpr(lj_os)},
+                                                      tir::const_true(), o_store_block)));
 
   // lse_store
   tir::Var li_lse("li", DataType::Int(32));
+  tir::Var vi_lse("i", DataType::Int(32));
   tir::Var cur_L_lse("cur_L", DataType::Int(32)), cur_H_qo_lse("cur_H_qo", DataType::Int(32));
-  Stmt lse_store = tir::For(li_lse, I32(0), I32(tile_x), tir::ForKind::kSerial,
-      tir::SBlockRealize({}, tir::const_true(),
-          tir::SBlock({}, {}, {}, "lse_store",
-              tir::LetStmt(cur_L_lse,
-                  tir::BufferLoad(q_indptr_buf, {b_idx}) +
-                  floordiv(LH_start + li_lse, I32(num_heads)),
-                  tir::LetStmt(cur_H_qo_lse,
-                      floormod(LH_start + li_lse, I32(num_heads)),
-                      tir::IfThenElse(
-                          cur_L_lse < tir::BufferLoad(q_indptr_buf, {b_idx + I32(1)}),
-                          tir::BufferStore(lse_buf,
-                              tir::BufferLoad(m_smem, {li_lse}) +
-                              tvm::log2(tir::BufferLoad(d_smem, {li_lse})), ffi::Array<PrimExpr>{cur_L_lse, cur_H_qo_lse})))))));
+  auto lse_store_block = tir::SBlock(
+      ffi::Array<IterVar>{
+          IterVar(Range::FromMinExtent(I32(0), I32(tile_x)), vi_lse, tir::kDataPar, "")},
+      {}, {}, "lse_store",
+      tir::LetStmt(
+          cur_L_lse,
+          tir::BufferLoad(q_indptr_buf, {b_idx}) + floordiv(LH_start + vi_lse, I32(num_heads)),
+          tir::LetStmt(
+              cur_H_qo_lse, floormod(LH_start + vi_lse, I32(num_heads)),
+              tir::IfThenElse(cur_L_lse < tir::BufferLoad(q_indptr_buf, {b_idx + I32(1)}),
+                              tir::BufferStore(lse_buf,
+                                               tir::BufferLoad(m_smem, {vi_lse}) +
+                                                   tvm::log2(tir::BufferLoad(d_smem, {vi_lse})),
+                                               ffi::Array<PrimExpr>{cur_L_lse, cur_H_qo_lse})))),
+      std::nullopt, {}, {}, detect_annots);
+  Stmt lse_store =
+      tir::For(li_lse, I32(0), I32(tile_x), tir::ForKind::kSerial,
+               tir::SBlockRealize({PrimExpr(li_lse)}, tir::const_true(), lse_store_block));
 
   // tile dispatch while loop
   tir::Var b_idx2("b_idx", DataType::Int(32));
-  Stmt advance = tir::SeqStmt({
-      st0(tile_id_buf, tir::BufferLoad(tile_id_buf, {I32(0)}) - tir::BufferLoad(batch_tiles_buf, {I32(0)})),
-      st0(batch_idx_buf, tir::BufferLoad(batch_idx_buf, {I32(0)}) + I32(1)),
-      tir::IfThenElse(tir::BufferLoad(batch_idx_buf, {I32(0)}) < batch_size,
-          tir::LetStmt(b_idx2, tir::BufferLoad(batch_idx_buf, {I32(0)}),
-              tir::SeqStmt({
-                  st0(batch_rows_buf,
-                      (tir::BufferLoad(q_indptr_buf, {b_idx2 + I32(1)}) -
-                       tir::BufferLoad(q_indptr_buf, {b_idx2})) * I32(num_heads)),
-                  st0(batch_tiles_buf,
-                      floordiv(tir::BufferLoad(batch_rows_buf, {I32(0)}) + I32(tile_x - 1),
-                               I32(tile_x)))})))});
-  Stmt inner_while = tir::While(
-      logical_and(tir::BufferLoad(tile_id_buf, {I32(0)}) >= tir::BufferLoad(batch_tiles_buf, {I32(0)}),
-               tir::BufferLoad(batch_idx_buf, {I32(0)}) < batch_size),
-      advance);
+  Stmt advance = tir::SeqStmt(
+      {st0(tile_id_buf,
+           tir::BufferLoad(tile_id_buf, {I32(0)}) - tir::BufferLoad(batch_tiles_buf, {I32(0)})),
+       st0(batch_idx_buf, tir::BufferLoad(batch_idx_buf, {I32(0)}) + I32(1)),
+       tir::IfThenElse(
+           tir::BufferLoad(batch_idx_buf, {I32(0)}) < batch_size,
+           tir::LetStmt(
+               b_idx2, tir::BufferLoad(batch_idx_buf, {I32(0)}),
+               tir::SeqStmt(
+                   {st0(batch_rows_buf, (tir::BufferLoad(q_indptr_buf, {b_idx2 + I32(1)}) -
+                                         tir::BufferLoad(q_indptr_buf, {b_idx2})) *
+                                            I32(num_heads)),
+                    st0(batch_tiles_buf,
+                        floordiv(tir::BufferLoad(batch_rows_buf, {I32(0)}) + I32(tile_x) - I32(1),
+                                 I32(tile_x)))})))});
+  Stmt inner_while = tir::While(logical_and(tir::BufferLoad(tile_id_buf, {I32(0)}) >=
+                                                tir::BufferLoad(batch_tiles_buf, {I32(0)}),
+                                            tir::BufferLoad(batch_idx_buf, {I32(0)}) < batch_size),
+                                advance);
 
-  Stmt tile_body = tir::LetStmt(b_idx, tir::BufferLoad(batch_idx_buf, {I32(0)}),
-      tir::LetStmt(LH_start, tir::BufferLoad(tile_id_buf, {I32(0)}) * I32(tile_x),
-          tir::LetStmt(q_indptr_val, tir::BufferLoad(q_indptr_buf, {b_idx}),
-              tir::LetStmt(cur_begin, tir::BufferLoad(page_indptr_buf, {b_idx}),
-                  tir::LetStmt(cur_end, tir::BufferLoad(page_indptr_buf, {b_idx + I32(1)}),
-                      tir::SeqStmt({
-                          st0(kv_chunk_buf, kv_len_expr),
-                          Sync(),
-                          init_md, o_init, Sync(),
-                          q_load, Sync(),
-                          kv_loop,
-                          o_store, lse_store,
-                          st0(tile_id_buf,
-                              tir::BufferLoad(tile_id_buf, {I32(0)}) + I32(NUM_BLKS))}))))));
+  Stmt tile_body = tir::LetStmt(
+      b_idx, tir::BufferLoad(batch_idx_buf, {I32(0)}),
+      tir::LetStmt(
+          LH_start, tir::BufferLoad(tile_id_buf, {I32(0)}) * I32(tile_x),
+          tir::LetStmt(
+              q_indptr_val, tir::BufferLoad(q_indptr_buf, {b_idx}),
+              tir::LetStmt(
+                  cur_begin, tir::BufferLoad(page_indptr_buf, {b_idx}),
+                  tir::LetStmt(
+                      cur_end, tir::BufferLoad(page_indptr_buf, {b_idx + I32(1)}),
+                      tir::SeqStmt({st0(kv_chunk_buf, kv_len_expr), Sync(), init_md, o_init, Sync(),
+                                    q_load, Sync(), kv_loop, o_store, lse_store,
+                                    st0(tile_id_buf, tir::BufferLoad(tile_id_buf, {I32(0)}) +
+                                                         I32(NUM_BLKS))}))))));
 
   Stmt outer_while = tir::While(
       tir::Call(DataType::Bool(), tir::builtin::tvm_thread_invariant(),
                 ffi::Array<PrimExpr>{tir::BufferLoad(batch_idx_buf, {I32(0)}) < batch_size}),
-      tir::SeqStmt({inner_while,
-                    tir::IfThenElse(
-                        tir::Call(DataType::Bool(), tir::builtin::tvm_thread_invariant(),
-                                  ffi::Array<PrimExpr>{
-                                      tir::BufferLoad(batch_idx_buf, {I32(0)}) < batch_size}),
-                        tile_body)}));
+      tir::SeqStmt(
+          {inner_while,
+           tir::IfThenElse(tir::Call(DataType::Bool(), tir::builtin::tvm_thread_invariant(),
+                                     ffi::Array<PrimExpr>{tir::BufferLoad(batch_idx_buf, {I32(0)}) <
+                                                          batch_size}),
+                           tile_body)}));
 
-  Stmt sblock_init = tir::SeqStmt({
-      st0(tile_id_buf, bx),
-      st0(batch_idx_buf, I32(0)),
-      st0(batch_rows_buf,
-          (tir::BufferLoad(q_indptr_buf, {I32(1)}) -
-           tir::BufferLoad(q_indptr_buf, {I32(0)})) * I32(num_heads)),
-      st0(batch_tiles_buf,
-          floordiv(tir::BufferLoad(batch_rows_buf, {I32(0)}) + I32(tile_x - 1), I32(tile_x)))});
+  Stmt sblock_init =
+      tir::SeqStmt({st0(tile_id_buf, bx), st0(batch_idx_buf, I32(0)),
+                    st0(batch_rows_buf, (tir::BufferLoad(q_indptr_buf, {I32(1)}) -
+                                         tir::BufferLoad(q_indptr_buf, {I32(0)})) *
+                                            I32(num_heads)),
+                    st0(batch_tiles_buf,
+                        floordiv(tir::BufferLoad(batch_rows_buf, {I32(0)}) + I32(tile_x) - I32(1),
+                                 I32(tile_x)))});
 
   ffi::Array<tir::Buffer> alloc_bufs = {
       tile_id_buf, batch_idx_buf, batch_tiles_buf, batch_rows_buf, iterator_buf, kv_chunk_buf,
-      Q_smem, KV_smem, S_smem, S_local, O_local,
-      m_smem, m_prev_smem, d_smem, m_new_buf, m_prev_buf, d_new_buf};
-  // MLA: no blockIdx.y
-  IterVar bx_iv(Range(nullptr), tir::Var("iter", DataType::Int(32)), tir::kThreadIndex, "blockIdx.x");
-  IterVar ty_iv(Range(nullptr), tir::Var("iter", DataType::Int(32)), tir::kThreadIndex, "threadIdx.y");
-  IterVar tx_iv(Range(nullptr), tir::Var("iter", DataType::Int(32)), tir::kThreadIndex, "threadIdx.x");
+      Q_smem,      KV_smem,       S_smem,          S_local,        O_local,      m_smem,
+      m_prev_smem, d_smem,        m_new_buf,       m_prev_buf,     d_new_buf};
+  // MLA: no blockIdx.y — attn sblock uses T.axis.remap("SSS", [lbx, lty, ltx])
+  IterVar bx_iv(Range(I32(0), I32(NUM_BLKS)), bx, tir::kDataPar, "");
+  IterVar ty_iv(Range(I32(0), I32(num_warps)), ty, tir::kDataPar, "");
+  IterVar tx_iv(Range(I32(0), I32(bdx)), tx, tir::kDataPar, "");
+  // Thread-binding IterVars for the For loops
+  IterVar lbx_iv(Range(nullptr), tir::Var("iter", DataType::Int(32)), tir::kThreadIndex,
+                 "blockIdx.x");
+  IterVar lty_iv(Range(nullptr), tir::Var("iter", DataType::Int(32)), tir::kThreadIndex,
+                 "threadIdx.y");
+  IterVar ltx_iv(Range(nullptr), tir::Var("iter", DataType::Int(32)), tir::kThreadIndex,
+                 "threadIdx.x");
 
-  Stmt body = tir::SBlockRealize({}, tir::const_true(),
-      tir::SBlock({}, {}, {}, "root",
-          tir::For(lbx, I32(0), I32(NUM_BLKS), tir::ForKind::kThreadBinding,
-              tir::For(lty, I32(0), I32(num_warps), tir::ForKind::kThreadBinding,
+  Stmt body = tir::SBlockRealize(
+      {}, tir::const_true(),
+      tir::SBlock(
+          {}, {}, {}, "root",
+          tir::For(
+              lbx, I32(0), I32(NUM_BLKS), tir::ForKind::kThreadBinding,
+              tir::For(
+                  lty, I32(0), I32(num_warps), tir::ForKind::kThreadBinding,
                   tir::For(ltx, I32(0), I32(bdx), tir::ForKind::kThreadBinding,
-                      tir::SBlockRealize({}, tir::const_true(),
-                          tir::SBlock({}, {}, {}, "attn",
-                              tir::LetStmt(bx, lbx,
-                                  tir::LetStmt(ty, lty,
-                                      tir::LetStmt(tx, ltx,
-                                          tir::SeqStmt({sblock_init, outer_while})))),
-                              std::nullopt, alloc_bufs, {}, {})),
-                      tx_iv), ty_iv), bx_iv)));
+                           tir::SBlockRealize(
+                               ffi::Array<PrimExpr>{PrimExpr(lbx), PrimExpr(lty), PrimExpr(ltx)},
+                               tir::const_true(),
+                               tir::SBlock(ffi::Array<IterVar>{bx_iv, ty_iv, tx_iv}, {}, {}, "attn",
+                                           tir::SeqStmt({sblock_init, outer_while}), std::nullopt,
+                                           alloc_bufs, {}, {})),
+                           ltx_iv),
+                  lty_iv),
+              lbx_iv)));
 
   ffi::Map<tir::Var, tir::Buffer> buf_map;
   buf_map.Set(h_q_h, q_buf);
@@ -526,26 +718,30 @@ tir::PrimFunc AttentionPrefillMLA(int64_t num_heads, int64_t v_head_dim,
   buf_map.Set(h_output_h, output_buf);
   buf_map.Set(h_lse_h, lse_buf);
 
-  ffi::Array<tir::Var> params = {
-      h_q_h, h_q_indptr_h, h_pages_h, h_page_indptr_h, h_page_values_h,
-      h_length_info_h, h_output_h, h_lse_h, causal, sm_scale};
+  ffi::Array<tir::Var> params = {h_q_h,           h_q_indptr_h,    h_pages_h,  h_page_indptr_h,
+                                 h_page_values_h, h_length_info_h, h_output_h, h_lse_h,
+                                 causal,          sm_scale};
 
   tir::PrimFunc fn(params, body, VoidType(), buf_map);
-  fn = WithAttr(fn, "global_symbol", ffi::Any(ffi::String("batch_prefill_paged_kv_mla")));
+  std::string global_symbol = "batch_prefill_paged_kv_mla";
+  if (causal_flag) global_symbol += "_sliding_window";
+  fn = WithAttr(fn, "global_symbol", ffi::Any(ffi::String(global_symbol)));
   fn = tir::ScriptComplete(fn, {});
+  // MLA: schedule uses d_v (not d_qk) as tile_y for O_gemm/O_init
+  PrefillKernelConfig mla_cfg = cfg;
+  mla_cfg.tile_y = d_v;
   // merged_qk_load=true: uses KV_load block instead of K_load+V_load
-  return SchedulePrefillKernel(fn, cfg, /*transform_k_load=*/false, /*merged_qk_load=*/true);
+  return SchedulePrefillKernel(fn, mla_cfg, /*transform_k_load=*/false, /*merged_qk_load=*/true);
 }
 
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def(
-      "relax.frontend.nn.llm.kv_cache.attention_prefill_mla",
-      [](int64_t num_heads, int64_t v_head_dim, int64_t qk_nope_head_dim,
-         ffi::String dtype, bool causal_flag, Target target) -> tir::PrimFunc {
-        return AttentionPrefillMLA(num_heads, v_head_dim, qk_nope_head_dim,
-                                   std::string(dtype), causal_flag, target);
-      });
+  refl::GlobalDef().def("relax.frontend.nn.llm.kv_cache.attention_prefill_mla",
+                        [](int64_t num_heads, int64_t v_head_dim, int64_t qk_nope_head_dim,
+                           ffi::String dtype, bool causal_flag, Target target) -> tir::PrimFunc {
+                          return AttentionPrefillMLA(num_heads, v_head_dim, qk_nope_head_dim,
+                                                     std::string(dtype), causal_flag, target);
+                        });
 }
 
 }  // namespace llm

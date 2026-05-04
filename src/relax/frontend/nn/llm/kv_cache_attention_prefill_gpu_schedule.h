@@ -29,9 +29,9 @@
 #ifndef TVM_RELAX_FRONTEND_NN_LLM_KV_CACHE_ATTENTION_PREFILL_GPU_SCHEDULE_H_
 #define TVM_RELAX_FRONTEND_NN_LLM_KV_CACHE_ATTENTION_PREFILL_GPU_SCHEDULE_H_
 
-#include "kv_cache_attention_prefill_gpu_helpers.h"
-
 #include <tvm/tir/function.h>
+
+#include "kv_cache_attention_prefill_gpu_helpers.h"
 
 namespace tvm {
 namespace relax {

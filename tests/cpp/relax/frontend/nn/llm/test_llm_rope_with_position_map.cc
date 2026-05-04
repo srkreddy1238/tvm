@@ -122,7 +122,8 @@ TEST(RopeWithPositionMap, DocumentationLongropeScaling) {
   // For rope_type='longrope', should:
   // 1. Compute scaling_factor based on max_position_embeddings ratio
   // 2. Accept ext_factors buffer parameter
-  // 3. Generate conditional code: if seq_len > original_max then use long_factors else short_factors
+  // 3. Generate conditional code: if seq_len > original_max then use long_factors else
+  // short_factors
   // 4. Apply ext_factors[d % (d_range // 2)] to frequency divisor
   // 5. Multiply cos/sin by scaling_factor
 

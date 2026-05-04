@@ -34,16 +34,15 @@ to the previous pure-Python implementation so all call-sites remain unchanged.
 from collections.abc import Callable
 from typing import Any
 
+import tvm.relax.frontend.nn.llm._ffi_api_llm_position_embedding as _ffi  # C++ FFI bridge
 from tvm import tir
 from tvm.relax.frontend.nn import Tensor
-
-import tvm.relax.frontend.nn.llm._ffi_api_llm_position_embedding as _ffi  # C++ FFI bridge
 
 # pylint: disable=invalid-name
 
 
 # ---------------------------------------------------------------------------
-# switch_rope_freq_func – thin wrapper around the C++ implementation
+# switch_rope_freq_func - thin wrapper around the C++ implementation
 #
 # kv_cache.py and tree_attn.py call this as:
 #
@@ -77,8 +76,8 @@ def switch_rope_freq_func(rope_scaling: dict[str, Any]) -> Callable:
         result = _ffi.switch_rope_freq_func(rope_scaling, s, d, int(d_range), theta, dtype)
         cos_freq = result[0]
         sin_freq = result[1]
-        keys = result[2]   # Array<tir.Var>
-        vals = result[3]   # Array<tir.PrimExpr>
+        keys = result[2]  # Array<tir.Var>
+        vals = result[3]  # Array<tir.PrimExpr>
         var_map = {k: v for k, v in zip(keys, vals)}
         return cos_freq, sin_freq, var_map
 

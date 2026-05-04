@@ -67,12 +67,8 @@ inline PrimExpr CastTo(PrimExpr e, const std::string& dtype) {
 // SizeVar helpers
 // ---------------------------------------------------------------------------
 
-inline tir::Var SizeVar32(const std::string& name) {
-  return tir::SizeVar(name, DataType::Int(32));
-}
-inline tir::Var SizeVar64(const std::string& name) {
-  return tir::SizeVar(name, DataType::Int(64));
-}
+inline tir::Var SizeVar32(const std::string& name) { return tir::SizeVar(name, DataType::Int(32)); }
+inline tir::Var SizeVar64(const std::string& name) { return tir::SizeVar(name, DataType::Int(64)); }
 
 // ---------------------------------------------------------------------------
 // Buffer helpers
@@ -99,8 +95,9 @@ inline std::pair<tir::Var, tir::Buffer> MakeElemOffsetBuffer32(
 /*!
  * \brief Create a buffer with an int64 elem_offset symbolic var.
  */
-inline std::pair<tir::Var, tir::Buffer> MakeElemOffsetBuffer64(
-    const std::string& name, ffi::Array<PrimExpr> shape, const std::string& dtype) {
+inline std::pair<tir::Var, tir::Buffer> MakeElemOffsetBuffer64(const std::string& name,
+                                                               ffi::Array<PrimExpr> shape,
+                                                               const std::string& dtype) {
   tir::SizeVar elem_offset_var(name + "_elem_offset", DataType::Int(64));
   DataType dt = DataType(runtime::StringToDLDataType(dtype));
   tir::Buffer buf = tir::decl_buffer(shape, dt, name);
@@ -127,8 +124,7 @@ inline tir::Buffer MakeOffsetFactor1Buffer(const std::string& name, ffi::Array<P
 inline Stmt ThreadBindingFor(PrimExpr extent, const std::string& thread_tag, tir::Var loop_var,
                              Stmt body) {
   IterVar thread_iv(Range::FromMinExtent(I32(0), extent), loop_var, tir::kThreadIndex, thread_tag);
-  return tir::For(loop_var, I32(0), extent, tir::ForKind::kThreadBinding, body,
-                  thread_iv);
+  return tir::For(loop_var, I32(0), extent, tir::ForKind::kThreadBinding, body, thread_iv);
 }
 
 // ---------------------------------------------------------------------------
@@ -194,8 +190,7 @@ inline PrimExpr BuildRopeAppliedF32(PrimExpr elem_expr, PrimExpr pos_expr, tir::
  * Matches T.alloc_buffer((n,)) in TVMScript.
  */
 inline tir::Buffer AllocBuf(const std::string& name, ffi::Array<PrimExpr> shape,
-                            const std::string& dtype = "float32",
-                            const std::string& scope = "") {
+                            const std::string& dtype = "float32", const std::string& scope = "") {
   DataType dt = DataType(runtime::StringToDLDataType(dtype));
   // decl_buffer(shape, dtype, name, storage_scope) sets the scope on the data Var.
   return tir::decl_buffer(shape, dt, name, scope);
