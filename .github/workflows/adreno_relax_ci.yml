@@ -188,11 +188,13 @@ jobs:
            cmake .. -G "Visual Studio 17 2022" -A x64
            cmake --build . --config Release --parallel $env:NUMBER_OF_PROCESSORS
            Pop-Location
-      #- name: Check x86 Build Status
-      #  shell: powershell
-      #  run: |
-      #     $env:PYTHONPATH = "$pwd\python"
-      #     python -c "import tvm; print(tvm.__path__)"
+      - name: Check x86 Build Status
+        shell: powershell
+        run: |
+           $env:PYTHONPATH = "$pwd\python"
+           python -m pip uninstall apache-tvm-ffi -y
+           python3 -m pip install  -v --target=python ./3rdparty/tvm-ffi/
+           python -c "import tvm; print(tvm.__path__)"
       - name: Compile Arm64
         shell: powershell
         run: |

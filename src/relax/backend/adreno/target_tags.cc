@@ -60,8 +60,7 @@ TVM_REGISTER_TARGET_TAG("qcom/adreno-opencl-texture-clml")
          {"keys", ffi::Array<ffi::String>({"adreno", "opencl", "gpu", "texture", "clml"})}}));
 
 TVM_REGISTER_TARGET_TAG("qcom/adreno-vulkan")
-    .set_config(ffi::Map<ffi::String, Any>({{"from_device", 0},
-                                            {"kind", "vulkan"},
+    .set_config(ffi::Map<ffi::String, Any>({{"kind", "vulkan"},
                                             {"device", "adreno"},
                                             {"relax_pipeline", "adreno"},
                                             {"tir_pipeline", "adreno"},
@@ -70,8 +69,7 @@ TVM_REGISTER_TARGET_TAG("qcom/adreno-vulkan")
 
 TVM_REGISTER_TARGET_TAG("qcom/adreno-vulkan-texture")
     .set_config(ffi::Map<ffi::String, Any>(
-        {{"from_device", 0},
-         {"kind", "vulkan"},
+        {{"kind", "vulkan"},
          {"device", "adreno"},
          {"relax_pipeline", "adreno"},
          {"tir_pipeline", "adreno"},
