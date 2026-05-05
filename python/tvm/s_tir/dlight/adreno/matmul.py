@@ -402,7 +402,9 @@ class DequantMatmulTensorization(AdrenoScheduleRule):
         )
         sch.compute_inline(compute_blk)
         pada_block = None
-        if not (isinstance(ms, tir.IntImm) and ms % config.intrin_tile_m == 0):
+        if not (
+            isinstance(ms, tir.IntImm) and ms % (config.intrin_tile_m * config.splits_m[1]) == 0
+        ):
             pada_block = sch.get_producers(main_block)[0]
             align_fc = sch.get(sch.get_loops(pada_block)[-1]).extent.value
             sch.storage_align(pada_block, buffer_index=0, axis=-2, factor=align_fc, offset=64)

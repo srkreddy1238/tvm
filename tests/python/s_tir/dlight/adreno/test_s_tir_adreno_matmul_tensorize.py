@@ -356,6 +356,174 @@ def test_dequant_matmul_qcom():
     tvm.ir.assert_structural_equal(mod["main"], expected)
 
 
+def test_dequant_matmul_const_qcom():
+    # fmt: off
+    @T.prim_func
+    def before(quant: T.Buffer((T.int64(512), T.int64(12288)), "uint32"), scale: T.Buffer((T.int64(128), T.int64(12288)), "float16"), rms_norm130: T.Buffer((T.int64(1), T.int64(576), T.int64(4096)), "float16"), transformer_h_0_attn_c_attn_bias3: T.Buffer((T.int64(12288),), "float16"), T_add_intermediate_intermediate: T.Buffer((T.int64(1), T.int64(576), T.int64(12288)), "float16")):
+        T.func_attr({"tir.noalias": T.bool(True)})
+        compute = T.alloc_buffer((T.int64(4096), T.int64(12288)), "float16")
+        dequantize_intermediate_intermediate = T.alloc_buffer((T.int64(4096), T.int64(12288)), "float16")
+        matmul_intermediate = T.alloc_buffer((T.int64(1), T.int64(576), T.int64(12288)), "float16")
+        for i0, i1 in T.grid(T.int64(4096), T.int64(12288)):
+            with T.sblock("compute"):
+                v_i0, v_i1 = T.axis.remap("SS", [i0, i1])
+
+                T.writes(compute[v_i0, v_i1])
+                compute[v_i0, v_i1] = T.Cast("float16", T.bitwise_and(T.shift_right(quant[v_i0 // T.int64(8), v_i1], T.Cast("uint32", v_i0 % T.int64(8) * T.int64(4))), T.uint32(15)))
+        for i0, i1 in T.grid(T.int64(4096), T.int64(12288)):
+            with T.sblock("dequantize"):
+                v_i0, v_i1 = T.axis.remap("SS", [i0, i1])
+                T.reads(compute[v_i0, v_i1], scale[v_i0 // T.int64(32), v_i1])
+                T.writes(dequantize_intermediate_intermediate[v_i0, v_i1])
+                dequantize_intermediate_intermediate[v_i0, v_i1] = (compute[v_i0, v_i1] - T.float16(7)) * scale[v_i0 // T.int64(32), v_i1]
+        for i0, i1, i2, k in T.grid(T.int64(1), T.int64(576), T.int64(12288), T.int64(4096)):
+            with T.sblock("matmul"):
+                v_i0, v_i1, v_i2, v_k = T.axis.remap("SSSR", [i0, i1, i2, k])
+                T.reads(rms_norm130[v_i0, v_i1, v_k], dequantize_intermediate_intermediate[v_k, v_i2])
+                T.writes(matmul_intermediate[v_i0, v_i1, v_i2])
+                with T.init():
+                    matmul_intermediate[v_i0, v_i1, v_i2] = T.float16(0)
+                matmul_intermediate[v_i0, v_i1, v_i2] = matmul_intermediate[v_i0, v_i1, v_i2] + rms_norm130[v_i0, v_i1, v_k] * dequantize_intermediate_intermediate[v_k, v_i2]
+        for ax0, ax1, ax2 in T.grid(T.int64(1), T.int64(576), T.int64(12288)):
+            with T.sblock("T_add"):
+                v_ax0, v_ax1, v_ax2 = T.axis.remap("SSS", [ax0, ax1, ax2])
+                T.reads(matmul_intermediate[v_ax0, v_ax1, v_ax2], transformer_h_0_attn_c_attn_bias3[v_ax2])
+                T.writes(T_add_intermediate_intermediate[v_ax0, v_ax1, v_ax2])
+                T_add_intermediate_intermediate[v_ax0, v_ax1, v_ax2] = matmul_intermediate[v_ax0, v_ax1, v_ax2] + transformer_h_0_attn_c_attn_bias3[v_ax2]
+
+    @T.prim_func
+    def expected(quant_handle: T.handle, scale_handle: T.handle, rms_norm130_handle: T.handle, transformer_h_0_attn_c_attn_bias3_handle: T.handle, T_add_intermediate_intermediate_handle: T.handle):
+        T.func_attr({"global_symbol": "before", "tir.is_scheduled": True, "tir.noalias": T.bool(True)})
+        quant = T.match_buffer(quant_handle, (T.int64(512), T.int64(12288)), "uint32")
+        scale = T.match_buffer(scale_handle, (T.int64(128), T.int64(12288)), "float16")
+        rms_norm130 = T.match_buffer(rms_norm130_handle, (T.int64(1), T.int64(576), T.int64(4096)), "float16")
+        transformer_h_0_attn_c_attn_bias3 = T.match_buffer(transformer_h_0_attn_c_attn_bias3_handle, (T.int64(12288),), "float16")
+        T_add_intermediate_intermediate = T.match_buffer(T_add_intermediate_intermediate_handle, (T.int64(1), T.int64(576), T.int64(12288)), "float16")
+        with T.sblock("root"):
+            T.reads()
+            T.writes()
+            dequantize_intermediate_intermediate_local_wmma_matrix_b = T.alloc_buffer((T.int64(12288), T.int64(4096)), "float16", scope="wmma.matrix_b")
+            quant_local = T.alloc_buffer((T.int64(12288), T.int64(512)), "uint32", scope="local")
+            rms_norm130_pad = T.alloc_buffer((T.int64(1), T.int64(640), T.int64(4096)), "float16")
+            matmul_intermediate_pad_wmma_accumulator = T.alloc_buffer((T.int64(1), T.int64(640), T.int64(12288)), "float16", scope="wmma.accumulator")
+            rms_norm130_pad_global_wmma_matrix_a = T.alloc_buffer((T.int64(1), T.int64(640), T.int64(4096)), "float16", scope="wmma.matrix_a")
+            matmul_intermediate_pad_local = T.alloc_buffer((T.int64(1), T.int64(640), T.int64(12288)), "float16", scope="local")
+            dequantize_intermediate_intermediate_local_local = T.alloc_buffer((T.int64(12288), T.int64(4096)), "float16", scope="local")
+            for i0 in T.thread_binding(T.int64(1), thread="blockIdx.y"):
+                for i1_i2_0_fused_0 in T.thread_binding(T.int64(5120), thread="blockIdx.x"):
+                    for i1_i2_0_fused_1 in T.thread_binding(T.int64(4), thread="threadIdx.y"):
+                        for i2_1 in T.thread_binding(T.int64(32), thread="threadIdx.x"):
+                            for i2_2 in T.vectorized(T.int64(4)):
+                                with T.sblock("rms_norm130_pad"):
+                                    v0 = T.axis.spatial(T.int64(1), i0)
+                                    v1 = T.axis.spatial(T.int64(640), (i1_i2_0_fused_0 * T.int64(4) + i1_i2_0_fused_1) // T.int64(32))
+                                    v2 = T.axis.spatial(T.int64(4096), (i1_i2_0_fused_0 * T.int64(4) + i1_i2_0_fused_1) % T.int64(32) * T.int64(128) + i2_1 * T.int64(4) + i2_2)
+                                    T.reads(rms_norm130[v0, v1, v2])
+                                    T.writes(rms_norm130_pad[v0, v1, v2])
+                                    T.sblock_attr({"buffer_dim_align": [[0, 1, 4096, 64]]})
+                                    rms_norm130_pad[v0, v1, v2] = T.if_then_else(v1 < T.int64(576), rms_norm130[v0, v1, v2], T.float16(0.0))
+            for ax0 in T.thread_binding(T.int64(1), thread="blockIdx.z"):
+                for ax1_0 in T.thread_binding(T.int64(5), thread="blockIdx.x"):
+                    for ax2_0 in T.thread_binding(T.int64(96), thread="blockIdx.y"):
+                        for ax1_2 in T.thread_binding(T.int64(1), thread="vthread.x"):
+                            for ax2_2 in T.thread_binding(T.int64(1), thread="vthread.y"):
+                                for ax1_1 in T.thread_binding(T.int64(2), thread="threadIdx.y"):
+                                    for ax2_1 in T.thread_binding(T.int64(2), thread="threadIdx.z", annotations={"pragma_auto_unroll_max_step": 8, "pragma_unroll_explicit": 1}):
+                                        with T.sblock("matmul_init_o"):
+                                            v0_o = T.axis.spatial(T.int64(1), ax0)
+                                            v1_o = T.axis.spatial(T.int64(10), ax1_0 * T.int64(2) + ax1_1 + ax1_2)
+                                            v2_o = T.axis.spatial(T.int64(192), ax2_0 * T.int64(2) + ax2_1 + ax2_2)
+                                            T.reads()
+                                            T.writes(matmul_intermediate_pad_wmma_accumulator[T.int64(0), v1_o * T.int64(64):v1_o * T.int64(64) + T.int64(64), v2_o * T.int64(64):v2_o * T.int64(64) + T.int64(64)])
+                                            C = T.match_buffer(matmul_intermediate_pad_wmma_accumulator[T.int64(0), v1_o * T.int64(64):v1_o * T.int64(64) + T.int64(64), v2_o * T.int64(64):v2_o * T.int64(64) + T.int64(64)], (T.int64(64), T.int64(64)), "float16", strides=("C_s0", "C_s1"), scope="wmma.accumulator", offset_factor=64)
+                                            T.tvm_fill_fragment(C.data, 64, 64, 16, C.elem_offset // C.strides[0] // T.int64(64) * (C.strides[0] // T.int64(64)) + C.elem_offset % C.strides[0] // T.int64(64), T.float32(0.0))
+                                        for ax3_0 in range(T.int64(128)):
+                                            for ax3_1 in range(T.int64(2)):
+                                                for ax0_1 in T.thread_binding(T.int64(64), thread="threadIdx.x"):
+                                                    for ax1 in T.unroll(T.int64(2)):
+                                                        with T.sblock("quant_local"):
+                                                            v0 = T.axis.spatial(T.int64(12288), ax2_0 * T.int64(128) + ax2_1 * T.int64(64) + ax0_1)
+                                                            v1 = T.axis.spatial(T.int64(512), ax3_0 * T.int64(4) + ax3_1 * T.int64(2) + ax1)
+                                                            T.reads(quant[v1, v0])
+                                                            T.writes(quant_local[v0, v1])
+                                                            quant_local[v0, v1] = quant[v1, v0]
+                                                for ax3_2 in range(T.int64(1)):
+                                                    with T.sblock("rms_norm130_pad_global_wmma.matrix_a_o"):
+                                                        v0_o = T.axis.spatial(T.int64(1), T.int64(0))
+                                                        v1_o = T.axis.spatial(T.int64(10), ax1_0 * T.int64(2) + ax1_1)
+                                                        v2_o = T.axis.spatial(T.int64(256), ax3_0 * T.int64(2) + ax3_1)
+                                                        T.reads(rms_norm130_pad[v0_o, v1_o * T.int64(64):v1_o * T.int64(64) + T.int64(64), v2_o * T.int64(16):v2_o * T.int64(16) + T.int64(16)])
+                                                        T.writes(rms_norm130_pad_global_wmma_matrix_a[v0_o, v1_o * T.int64(64):v1_o * T.int64(64) + T.int64(64), v2_o * T.int64(16):v2_o * T.int64(16) + T.int64(16)])
+                                                        A = T.match_buffer(rms_norm130_pad[v0_o, v1_o * T.int64(64):v1_o * T.int64(64) + T.int64(64), v2_o * T.int64(16):v2_o * T.int64(16) + T.int64(16)], (T.int64(64), T.int64(16)), "float16", strides=("A_s0", "A_s1"), offset_factor=16)
+                                                        C = T.match_buffer(rms_norm130_pad_global_wmma_matrix_a[v0_o, v1_o * T.int64(64):v1_o * T.int64(64) + T.int64(64), v2_o * T.int64(16):v2_o * T.int64(16) + T.int64(16)], (T.int64(64), T.int64(16)), "float16", strides=("C_s0", "C_s1"), scope="wmma.matrix_a", offset_factor=16)
+                                                        for _ in T.thread_binding(T.int64(64), thread="threadIdx.x"):
+                                                            T.tvm_load_matrix_sync(C.data, 64, 64, 16, C.elem_offset // C.strides[0] // T.int64(64) * (C.strides[0] // T.int64(16)) + C.elem_offset % C.strides[0] // T.int64(16), T.tvm_access_ptr(T.type_annotation("float16"), A.data, A.elem_offset, A.strides[0] * T.int64(64), 1), A.strides[0], "row_major")
+                                                    for ax0_1 in T.thread_binding(T.int64(64), thread="threadIdx.x"):
+                                                        for ax1 in T.unroll(T.int64(16)):
+                                                            with T.sblock("dequantize"):
+                                                                v0 = T.axis.spatial(T.int64(12288), ax2_0 * T.int64(128) + ax2_1 * T.int64(64) + ax0_1)
+                                                                v1 = T.axis.spatial(T.int64(4096), ax3_0 * T.int64(32) + ax3_1 * T.int64(16) + ax1)
+                                                                T.reads(quant_local[v0, v1 // T.int64(8)], scale[v1 // T.int64(32), v0])
+                                                                T.writes(dequantize_intermediate_intermediate_local_local[v0, v1])
+                                                                dequantize_intermediate_intermediate_local_local[v0, v1] = (T.Cast("float16", T.bitwise_and(T.shift_right(quant_local[v0, v1 // T.int64(8)], T.Cast("uint32", v1 % T.int64(8) * T.int64(4))), T.uint32(15))) - T.float16(7.0)) * scale[v1 // T.int64(32), v0]
+                                                    for ax0_1 in T.thread_binding(T.int64(64), thread="threadIdx.x"):
+                                                        with T.sblock("dequantize_intermediate_intermediate_local_local_o"):
+                                                            v0_o = T.axis.spatial(T.int64(12288), ax2_0 * T.int64(128) + ax2_1 * T.int64(64) + ax0_1)
+                                                            v1_o = T.axis.spatial(T.int64(256), ax3_0 * T.int64(2) + ax3_1)
+                                                            T.reads(dequantize_intermediate_intermediate_local_local[v0_o, v1_o * T.int64(16):v1_o * T.int64(16) + T.int64(16)])
+                                                            T.writes(dequantize_intermediate_intermediate_local_wmma_matrix_b[v0_o, v1_o * T.int64(16):v1_o * T.int64(16) + T.int64(16)])
+                                                            A = T.match_buffer(dequantize_intermediate_intermediate_local_local[v0_o, v1_o * T.int64(16):v1_o * T.int64(16) + T.int64(16)], (T.int64(16),), "float16", scope="local", offset_factor=16)
+                                                            C = T.match_buffer(dequantize_intermediate_intermediate_local_wmma_matrix_b[v0_o, v1_o * T.int64(16):v1_o * T.int64(16) + T.int64(16)], (T.int64(16),), "float16", scope="wmma.matrix_b", offset_factor=16)
+                                                            T.tvm_construct_coopmat_qcom(C.data, 64, 64, 16, A.data)
+                                                    with T.sblock("matmul_update_o"):
+                                                        v0_o = T.axis.spatial(T.int64(1), ax0)
+                                                        v1_o = T.axis.spatial(T.int64(10), ax1_0 * T.int64(2) + ax1_1 + ax1_2)
+                                                        v2_o = T.axis.spatial(T.int64(192), ax2_0 * T.int64(2) + ax2_1 + ax2_2)
+                                                        v3_o = T.axis.reduce(T.int64(256), ax3_0 * T.int64(2) + ax3_1 + ax3_2)
+                                                        T.reads(matmul_intermediate_pad_wmma_accumulator[T.int64(0), v1_o * T.int64(64):v1_o * T.int64(64) + T.int64(64), v2_o * T.int64(64):v2_o * T.int64(64) + T.int64(64)], rms_norm130_pad_global_wmma_matrix_a[T.int64(0), v1_o * T.int64(64):v1_o * T.int64(64) + T.int64(64), v3_o * T.int64(16):v3_o * T.int64(16) + T.int64(16)], dequantize_intermediate_intermediate_local_wmma_matrix_b[v2_o * T.int64(64):v2_o * T.int64(64) + T.int64(64), v3_o * T.int64(16):v3_o * T.int64(16) + T.int64(16)])
+                                                        T.writes(matmul_intermediate_pad_wmma_accumulator[T.int64(0), v1_o * T.int64(64):v1_o * T.int64(64) + T.int64(64), v2_o * T.int64(64):v2_o * T.int64(64) + T.int64(64)])
+                                                        A = T.match_buffer(rms_norm130_pad_global_wmma_matrix_a[T.int64(0), v1_o * T.int64(64):v1_o * T.int64(64) + T.int64(64), v3_o * T.int64(16):v3_o * T.int64(16) + T.int64(16)], (T.int64(64), T.int64(16)), "float16", strides=("A_s0", "A_s1"), scope="wmma.matrix_a", offset_factor=16)
+                                                        B = T.match_buffer(dequantize_intermediate_intermediate_local_wmma_matrix_b[v2_o * T.int64(64):v2_o * T.int64(64) + T.int64(64), v3_o * T.int64(16):v3_o * T.int64(16) + T.int64(16)], (T.int64(64), T.int64(16)), "float16", strides=("B_s0", "B_s1"), scope="wmma.matrix_b", offset_factor=16)
+                                                        C = T.match_buffer(matmul_intermediate_pad_wmma_accumulator[T.int64(0), v1_o * T.int64(64):v1_o * T.int64(64) + T.int64(64), v2_o * T.int64(64):v2_o * T.int64(64) + T.int64(64)], (T.int64(64), T.int64(64)), "float16", strides=("C_s0", "C_s1"), scope="wmma.accumulator", offset_factor=64)
+                                                        T.tvm_mma_sync(C.data, C.elem_offset // C.strides[0] // T.int64(64) * (C.strides[0] // T.int64(64)) + C.elem_offset % C.strides[0] // T.int64(64), A.data, A.elem_offset // A.strides[0] // T.int64(64) * (A.strides[0] // T.int64(16)) + A.elem_offset % A.strides[0] // T.int64(16), B.data, B.elem_offset // B.strides[0] // T.int64(64) * (B.strides[0] // T.int64(16)) + B.elem_offset % B.strides[0] // T.int64(16), C.data, C.elem_offset // C.strides[0] // T.int64(64) * (C.strides[0] // T.int64(64)) + C.elem_offset % C.strides[0] // T.int64(64))
+                                        for ax0_1 in range(T.int64(1)):
+                                            for ax1 in T.thread_binding(T.int64(64), thread="threadIdx.x"):
+                                                with T.sblock("matmul_intermediate_pad_local_o"):
+                                                    v0_o = T.axis.spatial(T.int64(1), ax0_1)
+                                                    v1_o = T.axis.spatial(T.int64(640), ax1_0 * T.int64(128) + ax1_1 * T.int64(64) + ax1_2 * T.int64(64) + ax1)
+                                                    v2_o = T.axis.spatial(T.int64(192), ax2_0 * T.int64(2) + ax2_1 + ax2_2)
+                                                    T.reads(matmul_intermediate_pad_wmma_accumulator[v0_o, v1_o, v2_o * T.int64(64):v2_o * T.int64(64) + T.int64(64)])
+                                                    T.writes(matmul_intermediate_pad_local[v0_o, v1_o, v2_o * T.int64(64):v2_o * T.int64(64) + T.int64(64)])
+                                                    A = T.match_buffer(matmul_intermediate_pad_wmma_accumulator[v0_o, v1_o, v2_o * T.int64(64):v2_o * T.int64(64) + T.int64(64)], (T.int64(64),), "float16", scope="wmma.accumulator", offset_factor=64)
+                                                    C = T.match_buffer(matmul_intermediate_pad_local[v0_o, v1_o, v2_o * T.int64(64):v2_o * T.int64(64) + T.int64(64)], (T.int64(64),), "float16", scope="local", offset_factor=64)
+                                                    T.tvm_deconstruct_coopmat_qcom(A.data, 64, 64, 16, C.data)
+                                        for ax0_1 in T.thread_binding(T.int64(64), thread="threadIdx.x"):
+                                            for ax1_0_1 in T.unroll(T.int64(16)):
+                                                for ax1_1_1 in range(T.int64(4)):
+                                                    with T.sblock("matmul_intermediate_pad"):
+                                                        v0 = T.axis.spatial(T.int64(1), T.int64(0))
+                                                        v1 = T.axis.spatial(T.int64(576), (ax1_0 * T.int64(2) + ax1_1) * T.int64(64) + ax0_1)
+                                                        v2 = T.axis.spatial(T.int64(12288), ax2_0 * T.int64(128) + ax2_1 * T.int64(64) + ax1_0_1 * T.int64(4) + ax1_1_1)
+                                                        T.where(ax1_0 * T.int64(2) + ax1_1 < T.int64(9))
+                                                        T.reads(matmul_intermediate_pad_local[v0, v1, v2], transformer_h_0_attn_c_attn_bias3[v2])
+                                                        T.writes(T_add_intermediate_intermediate[v0, v1, v2])
+                                                        T_add_intermediate_intermediate[v0, v1, v2] = matmul_intermediate_pad_local[v0, v1, v2] + transformer_h_0_attn_c_attn_bias3[v2]
+    # fmt: on
+
+    mod = IRModule({"main": before})
+    vk_target = {
+        "kind": "vulkan",
+        "keys": ["adreno", "gpu"],
+        "supports_khr_cooperative_matrix": True,
+        "supports_qcom_cooperative_matrix_conversion": True,
+    }
+    with Target(vk_target):
+        mod = dl.ApplyDefaultSchedule(dl.adreno.DequantMatmulTensorization()).transform_module(
+            mod, False
+        )
+    tvm.ir.assert_structural_equal(mod["main"], expected)
+
+
 def test_dequant_matmul_trans_khr():
     # fmt: off
     @T.prim_func
