@@ -18,7 +18,6 @@
 """Default legalization function for quantized neural network operators."""
 
 from tvm import topi
-from tvm.topi.qnn.utils import get_int_scale
 
 from ....block_builder import BlockBuilder
 from ....expr import Call, Expr
@@ -33,8 +32,7 @@ def _qnn_add(bb: BlockBuilder, call: Call) -> Expr:
         return call
     lhs, rhs, l_sc, l_zp, r_sc, r_zp, o_sc, o_zp = res
 
-    l_sc_i, r_sc_i, rsh, corr = get_int_scale(l_sc, r_sc, o_sc, l_zp, r_zp, o_zp, "qadd")
-    return bb.call_te(topi.qnn.add, lhs, rhs, l_sc_i, r_sc_i, rsh, corr)
+    return bb.call_te(topi.qnn.add, lhs, rhs, l_sc, l_zp, r_sc, r_zp, o_sc, o_zp)
 
 
 @register_legalize("relax.qnn.subtract")
@@ -44,8 +42,7 @@ def _qnn_subtract(bb: BlockBuilder, call: Call) -> Expr:
         return call
     lhs, rhs, l_sc, l_zp, r_sc, r_zp, o_sc, o_zp = res
 
-    l_sc_i, r_sc_i, rsh, corr = get_int_scale(l_sc, r_sc, o_sc, l_zp, r_zp, o_zp, "qsubtract")
-    return bb.call_te(topi.qnn.subtract, lhs, rhs, l_sc_i, r_sc_i, rsh, corr)
+    return bb.call_te(topi.qnn.subtract, lhs, rhs, l_sc, l_zp, r_sc, r_zp, o_sc, o_zp)
 
 
 @register_legalize("relax.qnn.multiply")
@@ -55,5 +52,4 @@ def _qnn_mul(bb: BlockBuilder, call: Call) -> Expr:
         return call
     lhs, rhs, l_sc, l_zp, r_sc, r_zp, o_sc, o_zp = res
 
-    scale_i, rsh, corr = get_int_scale(l_sc, r_sc, o_sc, l_zp, r_zp, o_zp, "qmul")
-    return bb.call_te(topi.qnn.mul, lhs, rhs, l_zp, r_zp, scale_i, rsh, corr)
+    return bb.call_te(topi.qnn.mul, lhs, rhs, l_sc, l_zp, r_sc, r_zp, o_sc, o_zp)

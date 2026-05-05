@@ -110,47 +110,6 @@ def create_qnn_module(
     return mod
 
 
-def create_qnn_inputs(
-    lhs_shape,
-    rhs_shape,
-    lhs_scale,
-    rhs_scale,
-    lhs_zero_point,
-    rhs_zero_point,
-    out_scale,
-    out_zero_point,
-    dtype="int8",
-    zp_dtype="int8",
-    scale_dtype="float32",
-):
-    """
-    Create input variables and constants for QNN operations.
-
-    """
-    lhs = relax.Var("lhs", TensorStructInfo(shape=lhs_shape, dtype=dtype))
-    rhs = relax.Var("rhs", TensorStructInfo(shape=rhs_shape, dtype=dtype))
-
-    lhs_scale_const = relax.const(lhs_scale, dtype=scale_dtype)
-    rhs_scale_const = relax.const(rhs_scale, dtype=scale_dtype)
-
-    lhs_zero_point_const = relax.const(lhs_zero_point, dtype=zp_dtype)
-    rhs_zero_point_const = relax.const(rhs_zero_point, dtype=zp_dtype)
-
-    out_scale_const = relax.const(out_scale, dtype=scale_dtype)
-    out_zero_point_const = relax.const(out_zero_point, dtype=zp_dtype)
-
-    return (
-        lhs,
-        rhs,
-        lhs_scale_const,
-        lhs_zero_point_const,
-        rhs_scale_const,
-        rhs_zero_point_const,
-        out_scale_const,
-        out_zero_point_const,
-    )
-
-
 def build_and_run(mod, input_arrays, target="llvm"):
     """
     Build and run a Relax module.
@@ -193,15 +152,30 @@ def _test_qnn_operation(
         max(-128, rhs_zero_point - 10), min(127, rhs_zero_point + 10), size=rhs_shape
     ).astype("int8")
 
-    inputs = create_qnn_inputs(
-        lhs_shape,
-        rhs_shape,
-        lhs_scale,
-        rhs_scale,
-        lhs_zero_point,
-        rhs_zero_point,
-        out_scale,
-        out_zero_point,
+    dtype = "int8"
+    zp_dtype = "int8"
+    scale_dtype = "float32"
+    lhs = relax.Var("lhs", TensorStructInfo(shape=lhs_shape, dtype=dtype))
+    rhs = relax.Var("rhs", TensorStructInfo(shape=rhs_shape, dtype=dtype))
+
+    lhs_scale_const = relax.const(lhs_scale, dtype=scale_dtype)
+    rhs_scale_const = relax.const(rhs_scale, dtype=scale_dtype)
+
+    lhs_zero_point_const = relax.const(lhs_zero_point, dtype=zp_dtype)
+    rhs_zero_point_const = relax.const(rhs_zero_point, dtype=zp_dtype)
+
+    out_scale_const = relax.const(out_scale, dtype=scale_dtype)
+    out_zero_point_const = relax.const(out_zero_point, dtype=zp_dtype)
+
+    inputs = (
+        lhs,
+        rhs,
+        lhs_scale_const,
+        lhs_zero_point_const,
+        rhs_scale_const,
+        rhs_zero_point_const,
+        out_scale_const,
+        out_zero_point_const,
     )
 
     mod = create_qnn_module(op_name, *inputs)
@@ -217,15 +191,22 @@ def _test_qnn_operation(
 
 
 QNN_TEST_PARAMS = [
-    ("add", (1, 64, 224, 224), (1, 1, 1, 224), 0.3289, 0.4156, 90, 5, 1.5, 2),
-    ("add", (1, 64, 224, 224), (1, 1, 1, 224), 0.3289, 0.4156, 90, 5, 1.5, 2),
-    ("add", (1, 128, 112, 112), (1, 1, 1, 112), 0.2567, 0.3678, 80, 10, 1.2, 5),
+    ("add", (1, 64, 224, 224), (224,), 0.3289, 0.4156, 90, 5, 1.5, 2),
+    ("add", (1, 64, 224, 224), (224, 224), 0.3289, 0.4156, 90, 5, 1.5, 2),
+    ("add", (1, 64, 224, 224), (64, 224, 224), 0.3289, 0.4156, 90, 5, 1.5, 2),
+    ("add", (1, 64, 224, 224), (224,), 0.3289, 0.4156, 90, 5, 1.5, 2),
+    ("add", (1, 128, 112, 112), (1, 1, 112, 112), 0.2567, 0.3678, 80, 10, 1.2, 5),
+    ("add", (1, 128, 112, 112), (1, 112), 0.2567, 0.3678, 80, 10, 1.2, 5),
     ("subtract", (1, 64, 224, 224), (1, 1, 1, 224), 0.3289, 0.4156, 90, 5, 1.5, 2),
     ("subtract", (1, 64, 224, 224), (1, 1, 1, 224), 0.3289, 0.4156, 90, 5, 1.5, 2),
+    ("subtract", (1, 64, 224, 224), (224, 224), 0.3289, 0.4156, 90, 5, 1.5, 2),
+    ("subtract", (1, 64, 224, 224), (64, 224, 224), 0.3289, 0.4156, 90, 5, 1.5, 2),
     ("subtract", (1, 128, 112, 112), (1, 1, 1, 112), 0.2567, 0.3678, 80, 10, 1.2, 5),
     ("multiply", (1, 64, 224, 224), (1, 1, 1, 224), 0.3289, 0.4156, 90, 5, 1.5, 2),
     ("multiply", (1, 64, 224, 224), (1, 1, 1, 224), 0.3289, 0.4156, 90, 5, 1.5, 2),
     ("multiply", (1, 128, 112, 112), (1, 1, 1, 112), 0.2567, 0.3678, 80, 10, 1.2, 5),
+    ("multiply", (1, 64, 224, 224), (224, 224), 0.3289, 0.4156, 90, 5, 1.5, 2),
+    ("multiply", (1, 64, 224, 224), (64, 224, 224), 0.3289, 0.4156, 90, 5, 1.5, 2),
 ]
 
 

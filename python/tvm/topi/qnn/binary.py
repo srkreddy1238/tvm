@@ -21,108 +21,101 @@
 
 from tvm import te
 
-from .utils import broadcast_axis, saturate
+from .utils import broadcast_axis, build_broadcast_compute, saturate
 
 
 def add(
     lhs,
     rhs,
     lhs_scale,
+    lhs_zero_point,
     rhs_scale,
-    rsh,
-    corr,
+    rhs_zero_point,
+    output_scale,
+    output_zero_point,
 ):
-    """Compute quantized add with broadcasting"""
+    """Compute quantized add"""
     A_broadcast, B_broadcast = broadcast_axis(lhs, rhs)
-    n_a, h_a, w_a, c_a = A_broadcast
-    n_b, h_b, w_b, c_b = B_broadcast
+    output_shape, lhs_idx, rhs_idx = build_broadcast_compute(lhs, rhs, A_broadcast, B_broadcast)
 
     dtype = lhs.dtype
-    output_shape = []
-    for i in range(len(lhs.shape)):
-        output_shape.append(te.max(lhs.shape[i], rhs.shape[i]))
 
-    return te.compute(
-        output_shape,
-        lambda n, h, w, c: saturate(
+    def compute_fn(*indices):
+        lhs_val = lhs(*lhs_idx(indices))
+        rhs_val = rhs(*rhs_idx(indices))
+        return saturate(
             (
-                (
-                    (lhs[n * n_a, h * h_a, w * w_a, c * c_a] * lhs_scale)
-                    + (rhs[n * n_b, h * h_b, w * w_b, c * c_b] * rhs_scale)
-                    + corr
-                )
-                >> rsh
-            ),
+                (lhs_val.astype("float32") - lhs_zero_point) * lhs_scale
+                + (rhs_val.astype("float32") - rhs_zero_point) * rhs_scale
+            )
+            / output_scale
+            + output_zero_point,
             dtype,
-        ).astype(dtype),
-    )
+        ).astype(dtype)
+
+    return te.compute(output_shape, compute_fn, name="qnn_add")
 
 
 def subtract(
     lhs,
     rhs,
     lhs_scale,
+    lhs_zero_point,
     rhs_scale,
-    rsh,
-    corr,
+    rhs_zero_point,
+    output_scale,
+    output_zero_point,
 ):
-    """Compute quantized subtract with broadcasting"""
+    """Compute quantized subtract"""
     A_broadcast, B_broadcast = broadcast_axis(lhs, rhs)
-    n_a, h_a, w_a, c_a = A_broadcast
-    n_b, h_b, w_b, c_b = B_broadcast
+    output_shape, lhs_idx, rhs_idx = build_broadcast_compute(lhs, rhs, A_broadcast, B_broadcast)
 
     dtype = lhs.dtype
-    output_shape = []
-    for i in range(len(lhs.shape)):
-        output_shape.append(te.max(lhs.shape[i], rhs.shape[i]))
 
-    return te.compute(
-        output_shape,
-        lambda n, h, w, c: saturate(
+    def compute_fn(*indices):
+        lhs_val = lhs(*lhs_idx(indices))
+        rhs_val = rhs(*rhs_idx(indices))
+        return saturate(
             (
-                (
-                    (lhs[n * n_a, h * h_a, w * w_a, c * c_a] * lhs_scale)
-                    - (rhs[n * n_b, h * h_b, w * w_b, c * c_b] * rhs_scale)
-                    + corr
-                )
-                >> rsh
-            ),
+                (lhs_val.astype("float32") - lhs_zero_point) * lhs_scale
+                - (rhs_val.astype("float32") - rhs_zero_point) * rhs_scale
+            )
+            / output_scale
+            + output_zero_point,
             dtype,
-        ).astype(dtype),
-    )
+        ).astype(dtype)
+
+    return te.compute(output_shape, compute_fn, name="qnn_subtract")
 
 
 def mul(
     lhs,
     rhs,
-    lhs_zp_val,
-    rhs_zp_val,
-    scale_int,
-    rsh,
-    corr,
+    lhs_scale,
+    lhs_zero_point,
+    rhs_scale,
+    rhs_zero_point,
+    output_scale,
+    output_zero_point,
 ):
-    """Compute quantized multiply with broadcasting"""
+    """Compute quantized multiply"""
     A_broadcast, B_broadcast = broadcast_axis(lhs, rhs)
-    n_a, h_a, w_a, c_a = A_broadcast
-    n_b, h_b, w_b, c_b = B_broadcast
+    output_shape, lhs_idx, rhs_idx = build_broadcast_compute(lhs, rhs, A_broadcast, B_broadcast)
 
     dtype = lhs.dtype
-    output_shape = []
-    for i in range(len(lhs.shape)):
-        output_shape.append(te.max(lhs.shape[i], rhs.shape[i]))
 
-    return te.compute(
-        output_shape,
-        lambda n, h, w, c: saturate(
+    def compute_fn(*indices):
+        lhs_val = lhs(*lhs_idx(indices))
+        rhs_val = rhs(*rhs_idx(indices))
+        return saturate(
             (
-                (
-                    scale_int
-                    * (lhs[n * n_a, h * h_a, w * w_a, c * c_a] - lhs_zp_val)
-                    * (rhs[n * n_b, h * h_b, w * w_b, c * c_b] - rhs_zp_val)
-                    + corr
-                )
-                >> rsh
-            ),
+                (lhs_val.astype("float32") - lhs_zero_point)
+                * (rhs_val.astype("float32") - rhs_zero_point)
+                * (lhs_scale * rhs_scale)
+                / output_scale
+            )
+            + output_zero_point,
             dtype,
-        ).astype(dtype),
-    )
+        ).astype(dtype)
+
+    return te.compute(output_shape, compute_fn, name="qnn_multiply")

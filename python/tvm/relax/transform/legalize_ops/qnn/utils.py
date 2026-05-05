@@ -44,8 +44,6 @@ def qnn_binary_ops_extract_params(call: Call, op_name: str):
 
     if l_sinfo.shape is None or r_sinfo.shape is None:
         return None
-    if len(l_sinfo.shape.values) != len(r_sinfo.shape.values):
-        return None
 
     dtype = l_sinfo.dtype
     if dtype not in ["int8", "uint8"] and dtype != r_sinfo.dtype:

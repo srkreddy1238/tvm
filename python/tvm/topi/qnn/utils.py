@@ -59,20 +59,36 @@ def subtract_zero_point(
 
 
 def broadcast_axis(tensor_A, tensor_B):
-    """Find out the indices that will have broadcasting"""
+    """Find out the broadcast multipliers for each axis.
+
+    Both tensors are right-aligned and the shorter one is implicitly padded with
+    size-1 dimensions on the left.  For each aligned position the function returns
+    a multiplier of 1 (use the real index) or 0 (broadcast always index 0).
+
+    Returns two lists whose length equals ``max(ndim_A, ndim_B)``.
+    """
+    ndim_a = len(tensor_A.shape)
+    ndim_b = len(tensor_B.shape)
+    max_ndim = max(ndim_a, ndim_b)
+
+    # Pad the shorter shape on the left with implicit size-1 dims.
+    shape_a = [1] * (max_ndim - ndim_a) + list(tensor_A.shape)
+    shape_b = [1] * (max_ndim - ndim_b) + list(tensor_B.shape)
+
     A_broadcast = []
     B_broadcast = []
 
-    for i in range(len(tensor_A.shape)):
-        if tensor_A.shape[i] == tensor_B.shape[i]:
+    for sa, sb in zip(shape_a, shape_b):
+        if sa == sb:
             A_broadcast.append(1)
             B_broadcast.append(1)
-        elif tensor_A.shape[i] == 1:
+        elif sa == 1:
             A_broadcast.append(0)
             B_broadcast.append(1)
-        elif tensor_B.shape[i] == 1:
+        else:  # sb == 1
             A_broadcast.append(1)
             B_broadcast.append(0)
+
     return A_broadcast, B_broadcast
 
 
@@ -287,3 +303,30 @@ def get_int_scale(
         )
 
     return scale_fixed_point_a, scale_fixed_point_b, rsh, corr
+
+
+def build_broadcast_compute(lhs, rhs, A_broadcast, B_broadcast):
+    """
+    Return (output_shape, lhs_index_fn, rhs_index_fn).
+
+    """
+    ndim_a = len(lhs.shape)
+    ndim_b = len(rhs.shape)
+    max_ndim = max(ndim_a, ndim_b)
+
+    padded_shape_a = [1] * (max_ndim - ndim_a) + list(lhs.shape)
+    padded_shape_b = [1] * (max_ndim - ndim_b) + list(rhs.shape)
+
+    output_shape = [te.max(sa, sb) for sa, sb in zip(padded_shape_a, padded_shape_b)]
+
+    # Number of leading virtual dims added to each tensor
+    lhs_offset = max_ndim - ndim_a
+    rhs_offset = max_ndim - ndim_b
+
+    def lhs_idx(indices):
+        return [idx * m for idx, m in zip(indices[lhs_offset:], A_broadcast[lhs_offset:])]
+
+    def rhs_idx(indices):
+        return [idx * m for idx, m in zip(indices[rhs_offset:], B_broadcast[rhs_offset:])]
+
+    return output_shape, lhs_idx, rhs_idx
