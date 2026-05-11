@@ -23,5 +23,6 @@ from .pool import Pool2D
 from .convolution import Conv2D, Conv2DTensorization
 from .matmul import DequantMatmulTensorization, MatmulTensorization
 from .layout_transform import LayoutTransform
+from .attention import attention_prefill_ragged_adreno, attention_prefill_paged_adreno
 
 from .fallback import Fallback

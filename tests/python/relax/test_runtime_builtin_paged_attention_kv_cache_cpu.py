@@ -44,7 +44,7 @@ from tvm.s_tir import dlight as dl
 reserved_nseq = 32
 maximum_total_seq_length = 2048
 prefill_chunk_size = 512
-page_size = 16
+page_size = 64
 num_layers = 4
 num_qo_heads = 32
 num_kv_heads = 4
@@ -134,7 +134,13 @@ def set_global_func(head_dim, dtype):
         ),
         _merge_state_inplace_cpu(dtype),
         llama_rope_with_position_map(
-            rope_theta, rope_scale, head_dim, num_qo_heads, num_kv_heads, dtype, rope_scaling
+            rope_theta,
+            rope_scale,
+            head_dim,
+            num_qo_heads,
+            num_kv_heads,
+            dtype,
+            rope_scaling,
         ),
         _copy_single_page_cpu(num_kv_heads, page_size, head_dim, dtype),
         _compact_kv_copy_cpu(num_kv_heads, head_dim, dtype),
@@ -557,7 +563,12 @@ def test_paged_attention_kv_cache_prefill_and_decode(kv_cache_and_config):
     # Prefill.
     operation_seq = [[(0, 6)], [(1, 8)], [(2, 11)], [(3, 16)], [(4, 19), (5, 20)]]
     operation_seq += [[(6, 21), (7, 24)], [(2, 5), (4, 7), (8, 24)]]
-    operation_seq += [[(6, 13)], [(8, 19)], [(0, 1)], [(1, 3), (3, 8), (5, 12), (7, 11)]]
+    operation_seq += [
+        [(6, 13)],
+        [(8, 19)],
+        [(0, 1)],
+        [(1, 3), (3, 8), (5, 12), (7, 11)],
+    ]
     # Decode
     operation_seq += [[(0, 1), (1, 1), (2, 1), (3, 1), (4, 1), (5, 1), (6, 1), (7, 1), (8, 1)]]
     operation_seq += [[(0, 1), (1, 1), (2, 1), (3, 1), (4, 1), (5, 1), (6, 1), (7, 1), (8, 1)]]
@@ -889,9 +900,40 @@ def test_paged_attention_kv_cache_tree_attn(kv_cache_and_config):
         cached_v,
         token_tree_parent_ptr_list=[
             [-1, 0, 0, 1, 1, 2, 2],  # complete binary tree of height 3
-            [-1, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6],  # complete binary tree of height 4
+            [
+                -1,
+                0,
+                0,
+                1,
+                1,
+                2,
+                2,
+                3,
+                3,
+                4,
+                4,
+                5,
+                5,
+                6,
+                6,
+            ],  # complete binary tree of height 4
             [-1, 0, 1, 2, 3, 4, 5, 6, 7, 8],  # chain of length 10
-            [-1, 0, 0, 1, 1, 2, 2, -1, 7, 7, 8, 8, 9, 9],  # two complete binary trees of height 3
+            [
+                -1,
+                0,
+                0,
+                1,
+                1,
+                2,
+                2,
+                -1,
+                7,
+                7,
+                8,
+                8,
+                9,
+                9,
+            ],  # two complete binary trees of height 3
         ],
         accepted_leaf_indices=[6, 11, 6, 13],
     )

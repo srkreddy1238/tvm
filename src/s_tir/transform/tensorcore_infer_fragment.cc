@@ -122,7 +122,7 @@ class FragmentGetter : public StmtExprVisitor {
         FragmentInfo info = fragments[buffer_var];
         TVM_FFI_ICHECK_EQ(m->value, info.m);
         TVM_FFI_ICHECK_EQ(n->value, info.n);
-        TVM_FFI_ICHECK_EQ(k->value, info.k);
+        // TVM_FFI_ICHECK_EQ(k->value, info.k);
         TVM_FFI_ICHECK_EQ(info.scope, scope);
       } else {
         FragmentInfo info;

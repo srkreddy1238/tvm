@@ -61,7 +61,7 @@ comm, rank = get_comm_rank()
 reserved_nseq = 32
 maximum_total_seq_length = 2048
 prefill_chunk_size = 512
-page_size = 16
+page_size = 64
 num_layers = 4
 num_qo_heads = 32
 num_kv_heads = 4
@@ -165,7 +165,13 @@ def set_global_func(head_dim, dtype):
         ),
         _merge_state_inplace(num_qo_heads, head_dim, dtype, target),
         llama_rope_with_position_map(
-            rope_theta, rope_scale, head_dim, num_qo_heads, num_kv_heads, dtype, rope_scaling
+            rope_theta,
+            rope_scale,
+            head_dim,
+            num_qo_heads,
+            num_kv_heads,
+            dtype,
+            rope_scaling,
         ),
         _copy_single_page(num_kv_heads, page_size, head_dim, dtype, target),
         _compact_kv_copy(num_kv_heads, head_dim, dtype, target),
@@ -270,10 +276,16 @@ def verify_cached_kv(kv_cache, seq_ids, expected_k, expected_v):
         values = tvm.runtime.empty(values_expected.shape, dtype=dtype, device=device)
         fdebug_get_kv(kv_cache, seq_id, 0, seq_length, keys, values)
         torch.testing.assert_close(
-            torch.from_numpy(keys.numpy()).to(device_torch), keys_expected, rtol=1e-3, atol=1e-3
+            torch.from_numpy(keys.numpy()).to(device_torch),
+            keys_expected,
+            rtol=1e-3,
+            atol=1e-3,
         )
         torch.testing.assert_close(
-            torch.from_numpy(values.numpy()).to(device_torch), values_expected, rtol=1e-3, atol=1e-3
+            torch.from_numpy(values.numpy()).to(device_torch),
+            values_expected,
+            rtol=1e-3,
+            atol=1e-3,
         )
 
 
@@ -342,10 +354,14 @@ def apply_attention(
             if not only_update_host and not skip_add_sequence:
                 fadd_sequence(kv_cache, seq_id)
             cached_k[seq_id] = torch.zeros(
-                (num_layers, 0, num_kv_heads, head_dim), dtype=dtype_torch, device=device_torch
+                (num_layers, 0, num_kv_heads, head_dim),
+                dtype=dtype_torch,
+                device=device_torch,
             )
             cached_v[seq_id] = torch.zeros(
-                (num_layers, 0, num_kv_heads, head_dim), dtype=dtype_torch, device=device_torch
+                (num_layers, 0, num_kv_heads, head_dim),
+                dtype=dtype_torch,
+                device=device_torch,
             )
 
     flattened_token_tree_parent_ptr = None
@@ -525,7 +541,8 @@ def apply_attention(
             length_diff = softmax_shape[-1] - softmax_shape[-2]
             assert length_diff >= 0
             mask = torch.tril(
-                torch.full_like(softmax_input, torch.finfo(torch.float32).max), diagonal=length_diff
+                torch.full_like(softmax_input, torch.finfo(torch.float32).max),
+                diagonal=length_diff,
             ) + torch.triu(
                 torch.full_like(softmax_input, torch.finfo(torch.float32).min),
                 diagonal=length_diff + 1,
@@ -637,7 +654,12 @@ def test_paged_attention_kv_cache_prefill_and_decode(kv_cache_and_config):
     # Prefill.
     operation_seq = [[(0, 6)], [(1, 8)], [(2, 11)], [(3, 16)], [(4, 19), (5, 20)]]
     operation_seq += [[(6, 21), (7, 24)], [(2, 5), (4, 7), (8, 24)]]
-    operation_seq += [[(6, 13)], [(8, 19)], [(0, 1)], [(1, 3), (3, 8), (5, 12), (7, 11)]]
+    operation_seq += [
+        [(6, 13)],
+        [(8, 19)],
+        [(0, 1)],
+        [(1, 3), (3, 8), (5, 12), (7, 11)],
+    ]
     # Decode
     operation_seq += [[(0, 1), (1, 1), (2, 1), (3, 1), (4, 1), (5, 1), (6, 1), (7, 1), (8, 1)]]
     operation_seq += [[(0, 1), (1, 1), (2, 1), (3, 1), (4, 1), (5, 1), (6, 1), (7, 1), (8, 1)]]
@@ -659,9 +681,20 @@ def test_paged_attention_kv_cache_transfer(kv_cache_and_config):
     np.random.seed(0)
     fclear(kv_cache)
     # Prefill.
-    prefill_operation_seq = [[(0, 6)], [(1, 8)], [(2, 11)], [(3, 16)], [(4, 19), (5, 20)]]
+    prefill_operation_seq = [
+        [(0, 6)],
+        [(1, 8)],
+        [(2, 11)],
+        [(3, 16)],
+        [(4, 19), (5, 20)],
+    ]
     prefill_operation_seq += [[(6, 21), (7, 24)], [(2, 5), (4, 7), (8, 24)]]
-    prefill_operation_seq += [[(6, 13)], [(8, 19)], [(0, 1)], [(1, 3), (3, 8), (5, 12), (7, 11)]]
+    prefill_operation_seq += [
+        [(6, 13)],
+        [(8, 19)],
+        [(0, 1)],
+        [(1, 3), (3, 8), (5, 12), (7, 11)],
+    ]
     prefill_len = {i: 0 for i in range(9)}
     for batch in prefill_operation_seq:
         for seq_id, append_length in batch:

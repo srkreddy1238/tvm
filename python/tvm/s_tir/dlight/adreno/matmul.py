@@ -270,6 +270,8 @@ class DequantMatmulTensorization(AdrenoScheduleRule):
         tile_m, tile_n, tile_k = tiles
         dtypes = analysis.get_in_out_dtypes(block_info.block_stmt)
         n = block_info.block_stmt.writes[0].buffer.shape[-1]
+        if n % tile_n != 0:
+            return None
         tile_n_factor = n // tile_n
         thread_size_x, thread_size_y, thread_size_z = (
             tile_m,

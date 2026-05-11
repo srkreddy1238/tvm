@@ -700,7 +700,7 @@ class TIRPagedKVCache(PagedKVCache):  # pylint: disable=too-few-public-methods
 # pylint: disable=too-many-locals
 
 
-def _kv_cache_transpose_append(num_key_value_heads, head_dim, dtype, page_size: int = 16):
+def _kv_cache_transpose_append(num_key_value_heads, head_dim, dtype, page_size: int = 64):
     """Return the TIR function that appends new k/v data to PagedKVCache."""
 
     # pylint: disable=line-too-long
@@ -743,7 +743,7 @@ def _kv_cache_transpose_append(num_key_value_heads, head_dim, dtype, page_size: 
     return tir_kv_cache_transpose_append
 
 
-def _kv_cache_transpose_append_mla(d_qk: int, dtype, page_size: int = 16):
+def _kv_cache_transpose_append_mla(d_qk: int, dtype, page_size: int = 64):
     """Return the TIR function that appends new compressed KV data to PagedKVCache for MLA."""
 
     # pylint: disable=line-too-long
@@ -929,7 +929,7 @@ def _attention_prefill_cpu(
     dtype,
     sliding_window: bool,
     rope_scaling: dict[str, Any],
-    page_size: int = 16,
+    page_size: int = 64,
 ):
     global_symbol = "batch_prefill_paged_kv_cpu"
     if sliding_window:
@@ -1242,8 +1242,22 @@ def _attention_prefill(
     sliding_window: bool,
     rope_scaling: dict[str, Any],
     target: Target,
-    page_size: int = 16,
+    page_size: int = 64,
 ):
+    if (
+        (
+            (target.kind.name == "vulkan")
+            and target.attrs.get("supports_khr_cooperative_matrix", False)
+            and target.attrs.get("supports_qcom_cooperative_matrix_conversion", False)
+        )
+        and not sliding_window
+        and (page_size == 64)
+        and (("android" in str(target.host)) or ("adreno" in str(target.attrs)))
+    ):
+        return tvm.s_tir.dlight.adreno.attention_prefill_paged_adreno(
+            h_kv, h_q, d, dtype, rope_scaling, page_size
+        )
+
     (
         NUM_BLKS,
         LOAD_VEC,
@@ -1543,7 +1557,7 @@ def _attention_decode_cpu(
     qkv_dtype,
     sliding_window: bool,
     rope_scaling: dict[str, Any],
-    page_size: int = 16,
+    page_size: int = 64,
 ):
     H_qo = num_qo_heads
     H_kv = num_kv_heads
@@ -1700,7 +1714,7 @@ def _attention_decode(
     sliding_window: bool,
     rope_scaling: dict[str, Any],
     target: Target,
-    page_size: int = 16,
+    page_size: int = 64,
 ):
     qkv_dtype_bytes = 2
     H_qo = num_qo_heads
@@ -2453,6 +2467,15 @@ def _attention_prefill_ragged_cpu(h_kv, h_q, d_qk, d_v, dtype, rope_scaling: dic
 def _attention_prefill_ragged(
     h_kv, h_q, d_qk, d_v, dtype, rope_scaling: dict[str, Any], target: Target
 ):
+    if (
+        (target.kind.name == "vulkan")
+        and target.attrs.get("supports_khr_cooperative_matrix", False)
+        and target.attrs.get("supports_qcom_cooperative_matrix_conversion", False)
+    ) and (("android" in str(target.host)) or ("adreno" in str(target.attrs))):
+        return tvm.s_tir.dlight.adreno.attention_prefill_ragged_adreno(
+            h_kv, h_q, d_qk, d_v, dtype, rope_scaling
+        )
+
     # pylint: disable=line-too-long
     (
         NUM_BLKS,
@@ -2718,7 +2741,7 @@ def _attention_prefill_mla(
     dtype,
     sliding_window: bool,
     target: Target,
-    page_size: int = 16,
+    page_size: int = 64,
 ):
     d_qk = d_latent + d_rope
     (
@@ -3097,7 +3120,7 @@ def _copy_single_page_cpu(num_heads, page_size, head_dim, dtype):
     return copy_single_page_cpu
 
 
-def _compact_kv_copy(num_heads, head_dim, dtype, target: Target, page_size: int = 16):
+def _compact_kv_copy(num_heads, head_dim, dtype, target: Target, page_size: int = 64):
     tx = get_max_num_threads_per_block(target)
 
     @T.prim_func
@@ -3154,7 +3177,7 @@ def _compact_kv_copy(num_heads, head_dim, dtype, target: Target, page_size: int 
     return compact_kv_copy
 
 
-def _compact_kv_copy_cpu(num_heads, head_dim, dtype, page_size: int = 16):
+def _compact_kv_copy_cpu(num_heads, head_dim, dtype, page_size: int = 64):
     tx = 8
 
     @T.prim_func

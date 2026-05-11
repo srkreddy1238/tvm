@@ -678,6 +678,7 @@ def tree_attn_with_paged_kv_cache_cpu(h_kv, h_q, d, dtype, rope_scaling: dict[st
     global_symbol = "tree_attn_paged_kv_cpu"
     sliding_window = False
     group_size = h_q // h_kv
+    page_size = 64
 
     # pylint: disable=line-too-long,too-many-branches
     # fmt: off
@@ -716,7 +717,7 @@ def tree_attn_with_paged_kv_cache_cpu(h_kv, h_q, d, dtype, rope_scaling: dict[st
 
         q = T.match_buffer(var_q, (total_len, h_q, d), dtype)
         q_indptr = T.match_buffer(var_q_indptr, (batch_size + 1,), "int32", elem_offset=q_indptr_elem_offset)
-        pages = T.match_buffer(var_pages, (max_num_pages, 2, h_kv, 16, d), dtype)
+        pages = T.match_buffer(var_pages, (max_num_pages, 2, h_kv, page_size, d), dtype)
         page_indptr = T.match_buffer(var_page_indptr, (batch_size + 1,), "int32", elem_offset=page_indptr_elem_offset)
         page_values = T.match_buffer(var_page_values, (nnz_pages,), "int32", elem_offset=page_values_elem_offset)
         k_rope_pos_offset = T.match_buffer(var_k_rope_pos_offset, (batch_size,), "int32", elem_offset=k_rope_pos_offset_elem_offset)
@@ -773,7 +774,7 @@ def tree_attn_with_paged_kv_cache_cpu(h_kv, h_q, d, dtype, rope_scaling: dict[st
                     cur_page_indptr_end: T.int32 = page_indptr[b_idx + 1]
                     kv_chunk_len[0] = T.if_then_else(
                         cur_page_indptr_begin != cur_page_indptr_end,
-                        _get_kv_chunk_len(cur_page_indptr_end - cur_page_indptr_begin, 16, b_idx, length_info, sliding_window),
+                        _get_kv_chunk_len(cur_page_indptr_end - cur_page_indptr_begin, page_size, b_idx, length_info, sliding_window),
                         0
                     )
 
@@ -791,10 +792,10 @@ def tree_attn_with_paged_kv_cache_cpu(h_kv, h_q, d, dtype, rope_scaling: dict[st
                                 _rope(q, q_rope_position[curl_q], d, rope_theta, rope_scale, (curl_q, h_qo, d_idx), dtype, rope_scaling),
                                 q[curl_q, h_qo, d_idx]
                             )
-                        for row_idx in T.serial(max_num_pages * 16):
+                        for row_idx in T.serial(max_num_pages * page_size):
                             if row_idx < kv_chunk_len[0]:
-                                page_no: T.int32(is_size_var=True) = page_values[cur_page_indptr_begin + (_get_seq_offset(row_idx, b_idx, length_info, sliding_window) // 16)]
-                                page_offset: T.int32(is_size_var=True) = _get_seq_offset(row_idx, b_idx, length_info, sliding_window) % 16
+                                page_no: T.int32(is_size_var=True) = page_values[cur_page_indptr_begin + (_get_seq_offset(row_idx, b_idx, length_info, sliding_window) // page_size)]
+                                page_offset: T.int32(is_size_var=True) = _get_seq_offset(row_idx, b_idx, length_info, sliding_window) % page_size
 
                                 # Load KV
                                 for d_idx in T.serial(d):
@@ -881,6 +882,7 @@ def tree_attn_with_paged_kv_cache(
     NUM_BLKS = 16
     LOAD_VEC = 8 // ((DataType(dtype).bits + 7) // 8)  # 8 bytes
     group_size = h_q // h_kv
+    page_size = 64
 
     bdx = 32
     num_warps = 4
@@ -947,7 +949,7 @@ def tree_attn_with_paged_kv_cache(
         q_indptr = T.match_buffer(
             var_q_indptr, (batch_size + 1,), "int32", elem_offset=q_indptr_elem_offset
         )
-        pages = T.match_buffer(var_pages, (max_num_pages, 2, h_kv, 16, d), dtype)
+        pages = T.match_buffer(var_pages, (max_num_pages, 2, h_kv, page_size, d), dtype)
         page_indptr = T.match_buffer(
             var_page_indptr, (batch_size + 1,), "int32", elem_offset=page_indptr_elem_offset
         )
@@ -1059,7 +1061,7 @@ def tree_attn_with_paged_kv_cache(
                                         cur_page_indptr_begin != cur_page_indptr_end,
                                         _get_kv_chunk_len(
                                             cur_page_indptr_end - cur_page_indptr_begin,
-                                            16,
+                                            page_size,
                                             b_idx,
                                             length_info,
                                             sliding_window,
@@ -1118,8 +1120,8 @@ def tree_attn_with_paged_kv_cache(
                                                 cur_L = L_kv_start + i
                                                 if cur_L < kv_chunk_len[0]:
                                                     seq_offset: T.int32(is_size_var=True) = _get_seq_offset(cur_L, b_idx, length_info, sliding_window)  # type: ignore
-                                                    page_no: T.int32(is_size_var=True) = page_values[cur_page_indptr_begin + T.floordiv(seq_offset, 16)]  # type: ignore
-                                                    page_offset: T.int32(is_size_var=True) = T.floormod(seq_offset, 16)  # type: ignore
+                                                    page_no: T.int32(is_size_var=True) = page_values[cur_page_indptr_begin + T.floordiv(seq_offset, page_size)]  # type: ignore
+                                                    page_offset: T.int32(is_size_var=True) = T.floormod(seq_offset, page_size)  # type: ignore
                                                     K_smem[i, j] = pages[
                                                         page_no, 0, by, page_offset, j
                                                     ]
@@ -1135,8 +1137,8 @@ def tree_attn_with_paged_kv_cache(
                                                 cur_L = L_kv_start + i
                                                 if cur_L < kv_chunk_len[0]:
                                                     seq_offset: T.int32(is_size_var=True) = _get_seq_offset(cur_L, b_idx, length_info, sliding_window)  # type: ignore
-                                                    page_no: T.int32(is_size_var=True) = page_values[cur_page_indptr_begin + T.floordiv(seq_offset, 16)]  # type: ignore
-                                                    page_offset: T.int32(is_size_var=True) = T.floormod(seq_offset, 16)  # type: ignore
+                                                    page_no: T.int32(is_size_var=True) = page_values[cur_page_indptr_begin + T.floordiv(seq_offset, page_size)]  # type: ignore
+                                                    page_offset: T.int32(is_size_var=True) = T.floormod(seq_offset, page_size)  # type: ignore
                                                     V_smem[i, j] = pages[
                                                         page_no, 1, by, page_offset, j
                                                     ]

@@ -38,7 +38,7 @@ from tvm.s_tir import dlight as dl
 reserved_nseq = 32
 maximum_total_seq_length = 2048
 prefill_chunk_size = 512
-page_size = 16
+page_size = 64
 num_layers = 4
 num_qo_heads = 32
 num_kv_heads = 4
@@ -209,10 +209,16 @@ def verify_cached_kv(kv_cache, seq_ids, expected_k, expected_v):
         values = tvm.runtime.empty(values_expected.shape, dtype=dtype, device=device)
         fdebug_get_kv(kv_cache, seq_id, 0, seq_length, keys, values)
         torch.testing.assert_close(
-            torch.from_numpy(keys.numpy()).to(device_torch), keys_expected, rtol=1e-3, atol=1e-3
+            torch.from_numpy(keys.numpy()).to(device_torch),
+            keys_expected,
+            rtol=1e-3,
+            atol=1e-3,
         )
         torch.testing.assert_close(
-            torch.from_numpy(values.numpy()).to(device_torch), values_expected, rtol=1e-3, atol=1e-3
+            torch.from_numpy(values.numpy()).to(device_torch),
+            values_expected,
+            rtol=1e-3,
+            atol=1e-3,
         )
 
 
@@ -269,10 +275,14 @@ def apply_attention(
         elif seq_id not in cached_k:
             fadd_sequence(kv_cache, seq_id)
             cached_k[seq_id] = torch.zeros(
-                (num_layers, 0, num_kv_heads, head_dim), dtype=dtype_torch, device=device_torch
+                (num_layers, 0, num_kv_heads, head_dim),
+                dtype=dtype_torch,
+                device=device_torch,
             )
             cached_v[seq_id] = torch.zeros(
-                (num_layers, 0, num_kv_heads, head_dim), dtype=dtype_torch, device=device_torch
+                (num_layers, 0, num_kv_heads, head_dim),
+                dtype=dtype_torch,
+                device=device_torch,
             )
 
     fbegin_forward(kv_cache, ShapeTuple(seq_ids), ShapeTuple(append_lengths))
@@ -327,7 +337,10 @@ def apply_attention(
                             new_k[l]
                             if rope_mode != RopeMode.NORMAL
                             else f_apply_rotary(
-                                new_k[l], cached_k[seq_id].shape[1], rope_scale, rope_theta
+                                new_k[l],
+                                cached_k[seq_id].shape[1],
+                                rope_scale,
+                                rope_theta,
                             )
                         )
                         for l in range(num_layers)
@@ -383,7 +396,8 @@ def apply_attention(
             length_diff = softmax_shape[-1] - softmax_shape[-2]
             assert length_diff >= 0
             mask = torch.tril(
-                torch.full_like(softmax_input, torch.finfo(torch.float32).max), diagonal=length_diff
+                torch.full_like(softmax_input, torch.finfo(torch.float32).max),
+                diagonal=length_diff,
             ) + torch.triu(
                 torch.full_like(softmax_input, torch.finfo(torch.float32).min),
                 diagonal=length_diff + 1,
@@ -418,7 +432,12 @@ def test_paged_attention_kv_cache_prefill_and_decode(kv_cache_and_rope_mode):
     # Prefill.
     operation_seq = [[(0, 6)], [(1, 8)], [(2, 11)], [(3, 16)], [(4, 19), (5, 20)]]
     operation_seq += [[(6, 21), (7, 24)], [(2, 5), (4, 7), (8, 24)]]
-    operation_seq += [[(6, 13)], [(8, 19)], [(0, 1)], [(1, 3), (3, 8), (5, 12), (7, 11)]]
+    operation_seq += [
+        [(6, 13)],
+        [(8, 19)],
+        [(0, 1)],
+        [(1, 3), (3, 8), (5, 12), (7, 11)],
+    ]
     # Decode
     operation_seq += [[(0, 1), (1, 1), (2, 1), (3, 1), (4, 1), (5, 1), (6, 1), (7, 1), (8, 1)]]
     operation_seq += [[(0, 1), (1, 1), (2, 1), (3, 1), (4, 1), (5, 1), (6, 1), (7, 1), (8, 1)]]

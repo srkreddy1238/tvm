@@ -39,7 +39,7 @@ np.random.seed(0)
 reserved_nseq = 32
 maximum_total_seq_length = 2048
 prefill_chunk_size = 512
-page_size = 16
+page_size = 64
 num_layers = 4
 num_attention_heads = 128
 qk_nope_head_dim = 128
@@ -238,7 +238,10 @@ def verify_cached_kv(kv_cache, seq_ids, expected_kv):
         kv_actual = tvm.runtime.empty(kv_expected.shape, dtype=dtype, device=device)
         fdebug_get_kv(kv_cache, seq_id, 0, seq_length, kv_actual)
         torch.testing.assert_close(
-            torch.from_numpy(kv_actual.numpy()).to(device_torch), kv_expected, rtol=1e-3, atol=1e-3
+            torch.from_numpy(kv_actual.numpy()).to(device_torch),
+            kv_expected,
+            rtol=1e-3,
+            atol=1e-3,
         )
 
 
@@ -347,7 +350,16 @@ def apply_attention(
             keys = torch.cat([keys, k_pe_expanded], dim=2)
             keys_tvm = tvm.runtime.tensor(keys.cpu().numpy(), device)
             values_tvm = tvm.runtime.tensor(values.cpu().numpy(), device)
-            fself_attn(kv_cache, layer_id, sm_scale, queries, keys_tvm, values_tvm, outputs1, lse1)
+            fself_attn(
+                kv_cache,
+                layer_id,
+                sm_scale,
+                queries,
+                keys_tvm,
+                values_tvm,
+                outputs1,
+                lse1,
+            )
 
         if not all_new_sequences or is_decode_request:
             # Part 2. cross-attention
@@ -355,13 +367,18 @@ def apply_attention(
                 global_new_q[layer_id], [qk_nope_head_dim, qk_rope_head_dim], dim=2
             )
             queries_lora_np = torch.cat(
-                [torch.bmm(queries_lora_np.permute(1, 0, 2), w_uk).permute(1, 0, 2), q_pe], dim=2
+                [
+                    torch.bmm(queries_lora_np.permute(1, 0, 2), w_uk).permute(1, 0, 2),
+                    q_pe,
+                ],
+                dim=2,
             )
             queries_lora = tvm.runtime.tensor(queries_lora_np.cpu().numpy(), device)
             fcross_attn(kv_cache, layer_id, sm_scale, queries_lora, outputs2, lse2)
             cross_attn_output = tvm.runtime.tensor(
                 torch.bmm(
-                    torch.from_numpy(outputs2.numpy()).to(device_torch).permute(1, 0, 2), w_uv
+                    torch.from_numpy(outputs2.numpy()).to(device_torch).permute(1, 0, 2),
+                    w_uv,
                 )
                 .permute(1, 0, 2)
                 .cpu()
@@ -437,7 +454,12 @@ def test_paged_attention_kv_cache_prefill_and_decode(kv_cache_and_config):
     # Prefill.
     operation_seq = [[(0, 6)], [(1, 8)], [(2, 11)], [(3, 16)], [(4, 19), (5, 20)]]
     operation_seq += [[(6, 21), (7, 24)], [(2, 5), (4, 7), (8, 24)]]
-    operation_seq += [[(6, 13)], [(8, 19)], [(0, 1)], [(1, 3), (3, 8), (5, 12), (7, 11)]]
+    operation_seq += [
+        [(6, 13)],
+        [(8, 19)],
+        [(0, 1)],
+        [(1, 3), (3, 8), (5, 12), (7, 11)],
+    ]
     # Decode
     operation_seq += [[(0, 1), (1, 1), (2, 1), (3, 1), (4, 1), (5, 1), (6, 1), (7, 1), (8, 1)]]
     operation_seq += [[(0, 1), (1, 1), (2, 1), (3, 1), (4, 1), (5, 1), (6, 1), (7, 1), (8, 1)]]
