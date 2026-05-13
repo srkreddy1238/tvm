@@ -83,6 +83,7 @@ def attention_prefill_ragged_adreno(h_kv, h_q, d_qk, d_v, dtype, rope_scaling: d
         kv_len = T.int32(is_size_var=True)
         q_indptr_elem_offset = T.int32(is_size_var=True)
         kv_indptr_elem_offset = T.int32(is_size_var=True)
+        k_rope_pos_offset_elem_offset = T.int32(is_size_var=True)
 
         q = T.match_buffer(var_q, (qo_len, h_q, d_qk), "float16")
         q_indptr = T.match_buffer(
@@ -92,6 +93,12 @@ def attention_prefill_ragged_adreno(h_kv, h_q, d_qk, d_v, dtype, rope_scaling: d
         v = T.match_buffer(var_v, (kv_len, h_kv, d_v), "float16")
         kv_indptr = T.match_buffer(
             var_kv_indptr, (batch_size + 1,), "int32", elem_offset=kv_indptr_elem_offset
+        )
+        k_rope_pos_offset = T.match_buffer(  # noqa: F841
+            var_k_rope_pos_offset,
+            (batch_size,),
+            "int32",
+            elem_offset=k_rope_pos_offset_elem_offset,
         )
         output = T.match_buffer(var_output, (qo_len, h_q, d_v), "float16")
         lse = T.match_buffer(var_lse, (qo_len, h_q), "float32")  # pylint: disable=unused-variable
@@ -674,10 +681,8 @@ def attention_prefill_ragged_adreno(h_kv, h_q, d_qk, d_v, dtype, rope_scaling: d
                                                                             "float32",
                                                                             S_local[i, j],
                                                                         )
-                                                                        * T.float32(0.125)
-                                                                        * T.float32(
-                                                                            1.4426950408889634
-                                                                        )
+                                                                        * sm_scale
+                                                                        * math.log2(math.exp(1))
                                                                     )
                                                     for i in range(1):
                                                         row: T.int32 = i * tile_x + tz * 64 + tx
@@ -1211,7 +1216,10 @@ def attention_prefill_paged_adreno(
         q_indptr = T.match_buffer(var_q_indptr, (batch_size + 1,), "int32", offset_factor=0)
         max_num_pages = T.int32(is_size_var=True)
         pages = T.match_buffer(
-            var_pages, (max_num_pages, 2, h_kv, page_size, d), "float16", offset_factor=0
+            var_pages,
+            (max_num_pages, 2, h_kv, page_size, d),
+            "float16",
+            offset_factor=0,
         )
         page_indptr = T.match_buffer(var_page_indptr, (batch_size + 1,), "int32", offset_factor=0)
         nnz_pages = T.int32(is_size_var=True)
@@ -1221,7 +1229,11 @@ def attention_prefill_paged_adreno(
         lse = T.match_buffer(var_lse, (total_len, h_q))
         with T.sblock("root"):
             Q_mem_pad = T.alloc_buffer(
-                (T.int64(h_q), T.int64(((total_len + tile_x - 1) // tile_x) * tile_x), T.int64(d)),
+                (
+                    T.int64(h_q),
+                    T.int64(((total_len + tile_x - 1) // tile_x) * tile_x),
+                    T.int64(d),
+                ),
                 "float16",
                 scope="global",
             )
@@ -1292,13 +1304,17 @@ def attention_prefill_paged_adreno(
                                         batch_rows = T.alloc_buffer((1,), "int32", scope="local")
                                         kv_chunk_len = T.alloc_buffer((1,), "int32", scope="local")
                                         Q_frag = T.alloc_buffer(
-                                            (tile_x, 16), "float16", scope="wmma.matrix_a"
+                                            (tile_x, 16),
+                                            "float16",
+                                            scope="wmma.matrix_a",
                                         )
                                         K_frag = T.alloc_buffer(
                                             (64, 16), "float16", scope="wmma.matrix_b"
                                         )
                                         S_frag = T.alloc_buffer(
-                                            (tile_x, 64), "float16", scope="wmma.accumulator"
+                                            (tile_x, 64),
+                                            "float16",
+                                            scope="wmma.accumulator",
                                         )
                                         O_local = T.alloc_buffer(
                                             (tile_x, d), "float16", scope="local"
@@ -1401,15 +1417,22 @@ def attention_prefill_paged_adreno(
                                                         with T.sblock("S_frag_init"):
                                                             T.reads()
                                                             T.writes(
-                                                                S_frag[tz * 64 : tz * 64 + 64, 0:64]
+                                                                S_frag[
+                                                                    tz * 64 : tz * 64 + 64,
+                                                                    0:64,
+                                                                ]
                                                             )
                                                             C = T.match_buffer(
                                                                 S_frag[
-                                                                    tz * 64 : tz * 64 + 64, 0:64
+                                                                    tz * 64 : tz * 64 + 64,
+                                                                    0:64,
                                                                 ],
                                                                 (64, 64),
                                                                 "float16",
-                                                                strides=("C_s0", "C_s1"),
+                                                                strides=(
+                                                                    "C_s0",
+                                                                    "C_s1",
+                                                                ),
                                                                 scope="wmma.accumulator",
                                                                 offset_factor=64,
                                                             )
@@ -1446,17 +1469,24 @@ def attention_prefill_paged_adreno(
                                                                     ],
                                                                     (64, 16),
                                                                     "float16",
-                                                                    strides=("A_s0", "A_s1"),
+                                                                    strides=(
+                                                                        "A_s0",
+                                                                        "A_s1",
+                                                                    ),
                                                                     scope="global",
                                                                     offset_factor=16,
                                                                 )
                                                                 A_dst = T.match_buffer(
                                                                     Q_frag[
-                                                                        tz * 64 : tz * 64 + 64, 0:16
+                                                                        tz * 64 : tz * 64 + 64,
+                                                                        0:16,
                                                                     ],
                                                                     (64, 16),
                                                                     "float16",
-                                                                    strides=("C_s0", "C_s1"),
+                                                                    strides=(
+                                                                        "C_s0",
+                                                                        "C_s1",
+                                                                    ),
                                                                     scope="wmma.matrix_a",
                                                                     offset_factor=16,
                                                                 )
@@ -1498,7 +1528,10 @@ def attention_prefill_paged_adreno(
                                                                     ],
                                                                     (64, 16),
                                                                     "float16",
-                                                                    strides=("B_s0", "B_s1"),
+                                                                    strides=(
+                                                                        "B_s0",
+                                                                        "B_s1",
+                                                                    ),
                                                                     scope="global",
                                                                     offset_factor=16,
                                                                 )
@@ -1506,7 +1539,10 @@ def attention_prefill_paged_adreno(
                                                                     K_frag[0:64, 0:16],
                                                                     (64, 16),
                                                                     "float16",
-                                                                    strides=("C_s0", "C_s1"),
+                                                                    strides=(
+                                                                        "C_s0",
+                                                                        "C_s1",
+                                                                    ),
                                                                     scope="wmma.matrix_b",
                                                                     offset_factor=16,
                                                                 )
@@ -1550,7 +1586,10 @@ def attention_prefill_paged_adreno(
                                                                         ],
                                                                         (64, 64),
                                                                         "float16",
-                                                                        strides=("C_s0", "C_s1"),
+                                                                        strides=(
+                                                                            "C_s0",
+                                                                            "C_s1",
+                                                                        ),
                                                                         scope="wmma.accumulator",
                                                                         offset_factor=64,
                                                                     )
@@ -1561,7 +1600,10 @@ def attention_prefill_paged_adreno(
                                                                         ],
                                                                         (64, 16),
                                                                         "float16",
-                                                                        strides=("A_s0", "A_s1"),
+                                                                        strides=(
+                                                                            "A_s0",
+                                                                            "A_s1",
+                                                                        ),
                                                                         scope="wmma.matrix_a",
                                                                         offset_factor=16,
                                                                     )
@@ -1569,7 +1611,10 @@ def attention_prefill_paged_adreno(
                                                                         K_frag[0:64, 0:16],
                                                                         (64, 16),
                                                                         "float16",
-                                                                        strides=("B_s0", "B_s1"),
+                                                                        strides=(
+                                                                            "B_s0",
+                                                                            "B_s1",
+                                                                        ),
                                                                         scope="wmma.matrix_b",
                                                                         offset_factor=16,
                                                                     )
@@ -1612,11 +1657,15 @@ def attention_prefill_paged_adreno(
                                                     ):
                                                         with T.sblock("S_frag_store_local"):
                                                             T.reads(
-                                                                S_frag[tz * 64 : tz * 64 + 64, 0:64]
+                                                                S_frag[
+                                                                    tz * 64 : tz * 64 + 64,
+                                                                    0:64,
+                                                                ]
                                                             )
                                                             T.writes(
                                                                 S_local[
-                                                                    tz * 64 : tz * 64 + 64, 0:64
+                                                                    tz * 64 : tz * 64 + 64,
+                                                                    0:64,
                                                                 ]
                                                             )
                                                             i = T.axis.spatial(
@@ -1637,7 +1686,11 @@ def attention_prefill_paged_adreno(
                                                                 offset_factor=64,
                                                             )
                                                             T.tvm_deconstruct_coopmat_qcom(
-                                                                C.data, 64, 64, 16, L.data
+                                                                C.data,
+                                                                64,
+                                                                64,
+                                                                16,
+                                                                L.data,
                                                             )
                                                     for li_0_lj_0_fused_0 in T.thread_binding(
                                                         1, thread="threadIdx.y"
@@ -1683,7 +1736,9 @@ def attention_prefill_paged_adreno(
                                                                     m_prev[i],
                                                                 )
                                                                 T.writes(
-                                                                    m_prev[i], m_new[i], d_new[i]
+                                                                    m_prev[i],
+                                                                    m_new[i],
+                                                                    d_new[i],
                                                                 )
                                                                 m_prev[i] = m_smem[row]
                                                                 m_new[i] = m_smem[row]
@@ -1704,7 +1759,10 @@ def attention_prefill_paged_adreno(
                                                                     ):
                                                                         m_new[i] = T.max(
                                                                             m_new[i],
-                                                                            S_local[row, j],
+                                                                            S_local[
+                                                                                row,
+                                                                                j,
+                                                                            ],
                                                                         )
                                                                 d_new[i] = d_smem[row] * T.exp2(
                                                                     m_prev[i] - m_new[i]
@@ -1782,7 +1840,8 @@ def attention_prefill_paged_adreno(
                                                                 )
                                                                 C = T.match_buffer(
                                                                     O_frag[
-                                                                        i, bz * 64 : bz * 64 + 64
+                                                                        i,
+                                                                        bz * 64 : bz * 64 + 64,
                                                                     ],
                                                                     (64,),
                                                                     "float16",
@@ -1791,7 +1850,8 @@ def attention_prefill_paged_adreno(
                                                                 )
                                                                 L = T.match_buffer(
                                                                     O_local[
-                                                                        i, bz * 64 : bz * 64 + 64
+                                                                        i,
+                                                                        bz * 64 : bz * 64 + 64,
                                                                     ],
                                                                     (64,),
                                                                     "float16",
@@ -1799,7 +1859,11 @@ def attention_prefill_paged_adreno(
                                                                     offset_factor=64,
                                                                 )
                                                                 T.tvm_deconstruct_coopmat_qcom(
-                                                                    C.data, 64, 64, 16, L.data
+                                                                    C.data,
+                                                                    64,
+                                                                    64,
+                                                                    16,
+                                                                    L.data,
                                                                 )
                                                         for li_0_init in T.thread_binding(
                                                             64, thread="threadIdx.x"
@@ -1838,7 +1902,8 @@ def attention_prefill_paged_adreno(
                                                                 )
                                                                 C = T.match_buffer(
                                                                     O_frag[
-                                                                        i, bz * 64 : bz * 64 + 64
+                                                                        i,
+                                                                        bz * 64 : bz * 64 + 64,
                                                                     ],
                                                                     (64,),
                                                                     "float16",
@@ -1847,7 +1912,8 @@ def attention_prefill_paged_adreno(
                                                                 )
                                                                 L = T.match_buffer(
                                                                     O_local[
-                                                                        i, bz * 64 : bz * 64 + 64
+                                                                        i,
+                                                                        bz * 64 : bz * 64 + 64,
                                                                     ],
                                                                     (64,),
                                                                     "float16",
@@ -1855,7 +1921,11 @@ def attention_prefill_paged_adreno(
                                                                     offset_factor=64,
                                                                 )
                                                                 T.tvm_construct_coopmat_qcom(
-                                                                    C.data, 64, 64, 64, L.data
+                                                                    C.data,
+                                                                    64,
+                                                                    64,
+                                                                    64,
+                                                                    L.data,
                                                                 )
                                                         for lv_11 in range(4):
                                                             for (
@@ -1871,7 +1941,8 @@ def attention_prefill_paged_adreno(
                                                                             + li_0_lj_0_fused_1,
                                                                         )
                                                                         j = T.axis.spatial(
-                                                                            64, lv_11 * 16 + i_01
+                                                                            64,
+                                                                            lv_11 * 16 + i_01,
                                                                         )
                                                                         jk = T.axis.spatial(
                                                                             16, i_01
@@ -1929,17 +2000,24 @@ def attention_prefill_paged_adreno(
                                                                     ],
                                                                     (16, 64),
                                                                     "float16",
-                                                                    strides=("B_s0", "B_s1"),
+                                                                    strides=(
+                                                                        "B_s0",
+                                                                        "B_s1",
+                                                                    ),
                                                                     scope="global",
                                                                     offset_factor=64,
                                                                 )
                                                                 B_dst = T.match_buffer(
                                                                     V_frag[
-                                                                        0:16, bz * 64 : bz * 64 + 64
+                                                                        0:16,
+                                                                        bz * 64 : bz * 64 + 64,
                                                                     ],
                                                                     (16, 64),
                                                                     "float16",
-                                                                    strides=("C_s0", "C_s1"),
+                                                                    strides=(
+                                                                        "C_s0",
+                                                                        "C_s1",
+                                                                    ),
                                                                     scope="wmma.matrix_b",
                                                                     offset_factor=64,
                                                                 )
@@ -1973,11 +2051,15 @@ def attention_prefill_paged_adreno(
                                                                 T.writes(O_frag[0:64, 0:64])
                                                                 C = T.match_buffer(
                                                                     O_frag[
-                                                                        0:64, bz * 64 : bz * 64 + 64
+                                                                        0:64,
+                                                                        bz * 64 : bz * 64 + 64,
                                                                     ],
                                                                     (64, 64),
                                                                     "float16",
-                                                                    strides=("C_s0", "C_s1"),
+                                                                    strides=(
+                                                                        "C_s0",
+                                                                        "C_s1",
+                                                                    ),
                                                                     scope="wmma.accumulator",
                                                                     offset_factor=64,
                                                                 )
@@ -1985,17 +2067,24 @@ def attention_prefill_paged_adreno(
                                                                     Smem_frag[0:64, 0:16],
                                                                     (64, 16),
                                                                     "float16",
-                                                                    strides=("A_s0", "A_s1"),
+                                                                    strides=(
+                                                                        "A_s0",
+                                                                        "A_s1",
+                                                                    ),
                                                                     scope="wmma.matrix_a",
                                                                     offset_factor=16,
                                                                 )
                                                                 B = T.match_buffer(
                                                                     V_frag[
-                                                                        0:16, bz * 64 : bz * 64 + 64
+                                                                        0:16,
+                                                                        bz * 64 : bz * 64 + 64,
                                                                     ],
                                                                     (16, 64),
                                                                     "float16",
-                                                                    strides=("B_s0", "B_s1"),
+                                                                    strides=(
+                                                                        "B_s0",
+                                                                        "B_s1",
+                                                                    ),
                                                                     scope="wmma.matrix_b",
                                                                     offset_factor=64,
                                                                 )
@@ -2040,17 +2129,24 @@ def attention_prefill_paged_adreno(
                                                         T.reads(O_frag[0:64, 0:64])
                                                         T.writes(O_local[0:64, 0:64])
                                                         i = T.axis.spatial(
-                                                            tile_x, tz * 64 + li_0_lj_0_fused_1
+                                                            tile_x,
+                                                            tz * 64 + li_0_lj_0_fused_1,
                                                         )
                                                         C = T.match_buffer(
-                                                            O_frag[i, bz * 64 : bz * 64 + 64],
+                                                            O_frag[
+                                                                i,
+                                                                bz * 64 : bz * 64 + 64,
+                                                            ],
                                                             (64,),
                                                             "float16",
                                                             scope="wmma.accumulator",
                                                             offset_factor=64,
                                                         )
                                                         L = T.match_buffer(
-                                                            O_local[i, bz * 64 : bz * 64 + 64],
+                                                            O_local[
+                                                                i,
+                                                                bz * 64 : bz * 64 + 64,
+                                                            ],
                                                             (64,),
                                                             "float16",
                                                             scope="local",
@@ -2096,7 +2192,9 @@ def attention_prefill_paged_adreno(
                                                                     cur_H_qo: T.int32 = by
                                                                     if cur_L < q_indptr[b_idx + 1]:
                                                                         output[
-                                                                            cur_L, cur_H_qo, j
+                                                                            cur_L,
+                                                                            cur_H_qo,
+                                                                            j,
                                                                         ] = T.Cast(
                                                                             "float16",
                                                                             O_local[i, j]
