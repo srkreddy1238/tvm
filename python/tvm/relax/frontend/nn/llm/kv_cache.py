@@ -1252,6 +1252,7 @@ def _attention_prefill(
         )
         and not sliding_window
         and (page_size == 64)
+        and (d % 64 == 0)  # skip for now - As adreno supports 64x64 for CoopMAT
         and (("android" in str(target.host)) or ("adreno" in str(target.attrs)))
     ):
         return tvm.s_tir.dlight.adreno.attention_prefill_paged_adreno(
@@ -2468,10 +2469,14 @@ def _attention_prefill_ragged(
     h_kv, h_q, d_qk, d_v, dtype, rope_scaling: dict[str, Any], target: Target
 ):
     if (
-        (target.kind.name == "vulkan")
-        and target.attrs.get("supports_khr_cooperative_matrix", False)
-        and target.attrs.get("supports_qcom_cooperative_matrix_conversion", False)
-    ) and (("android" in str(target.host)) or ("adreno" in str(target.attrs))):
+        (
+            (target.kind.name == "vulkan")
+            and target.attrs.get("supports_khr_cooperative_matrix", False)
+            and target.attrs.get("supports_qcom_cooperative_matrix_conversion", False)
+        )
+        and (d_v % 64 == 0)  # skip for now - As adreno supports 64x64 for CoopMAT
+        and (("android" in str(target.host)) or ("adreno" in str(target.attrs)))
+    ):
         return tvm.s_tir.dlight.adreno.attention_prefill_ragged_adreno(
             h_kv, h_q, d_qk, d_v, dtype, rope_scaling
         )

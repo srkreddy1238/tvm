@@ -27,10 +27,6 @@ from tvm.relax.frontend.nn.llm.kv_cache import (
     _attention_prefill,
     _attention_prefill_ragged,
 )
-from tvm.s_tir.dlight.adreno import (
-    attention_prefill_paged_adreno,
-    attention_prefill_ragged_adreno,
-)
 
 TARGET_SUPPORTS_EXTENSION = os.getenv("ADRENO_TARGET_COOP", "").strip().lower() == "yes"
 vk_target = tvm.target.Target(
@@ -87,7 +83,7 @@ def build_and_run_func(mod, inputs_np, target, out_id):
 @pytest.mark.skipif(not TARGET_SUPPORTS_EXTENSION, reason="Device not supported.")
 @pytest.mark.parametrize(
     "h_q, h_kv, d_qk, d_v, seq_len",
-    [(32, 32, 64, 64, 256), (32, 8, 64, 128, 1024), (32, 8, 64, 128, 1500)],
+    [(32, 32, 64, 64, 256), (32, 8, 64, 128, 1024), (32, 8, 64, 256, 1500), (32, 32, 96, 96, 256)],
 )
 def test_prefill_ragged_attention(h_q, h_kv, d_qk, d_v, seq_len):
     np.random.seed(42)
@@ -95,7 +91,7 @@ def test_prefill_ragged_attention(h_q, h_kv, d_qk, d_v, seq_len):
     mod_ref = IRModule(
         {"main": _attention_prefill_ragged(h_kv, h_q, d_qk, d_v, "float16", {}, ref_target)}
     )
-    func = attention_prefill_ragged_adreno(h_kv, h_q, d_qk, d_v, "float16", {})
+    func = _attention_prefill_ragged(h_kv, h_q, d_qk, d_v, "float16", {}, vk_target)
     sch = s_tir.Schedule(func)
     func = sch.mod["main"].with_attr("global_symbol", "main")
     mod_org = IRModule({"main": func})
@@ -146,7 +142,7 @@ def test_prefill_pagged_attention(h_q, h_kv, d, seq_len, kv_len):
     mod_ref = IRModule(
         {"main": _attention_prefill(h_kv, h_q, d, "float16", False, {}, ref_target, 64)}
     )
-    func = attention_prefill_paged_adreno(h_kv, h_q, d, "float16", {}, 64)
+    func = _attention_prefill(h_kv, h_q, d, "float16", False, {}, vk_target, 64)
     sch = s_tir.Schedule(func)
     func = sch.mod["main"].with_attr("global_symbol", "main")
     mod_org = IRModule({"main": func})
