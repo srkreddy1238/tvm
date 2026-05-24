@@ -678,7 +678,6 @@ def tree_attn_with_paged_kv_cache_cpu(h_kv, h_q, d, dtype, rope_scaling: dict[st
     global_symbol = "tree_attn_paged_kv_cpu"
     sliding_window = False
     group_size = h_q // h_kv
-    page_size = 64
 
     # pylint: disable=line-too-long,too-many-branches
     # fmt: off
@@ -705,6 +704,7 @@ def tree_attn_with_paged_kv_cache_cpu(h_kv, h_q, d, dtype, rope_scaling: dict[st
         batch_size = T.int32(is_size_var=True)
         total_len = T.int32(is_size_var=True)
         nnz_pages = T.int32(is_size_var=True)
+        page_size = T.int32(is_size_var=True)
         max_num_pages = T.int32(is_size_var=True)
         q_indptr_elem_offset = T.int32(is_size_var=True)
         page_indptr_elem_offset = T.int32(is_size_var=True)
@@ -882,7 +882,6 @@ def tree_attn_with_paged_kv_cache(
     NUM_BLKS = 16
     LOAD_VEC = 8 // ((DataType(dtype).bits + 7) // 8)  # 8 bytes
     group_size = h_q // h_kv
-    page_size = 64
 
     bdx = 32
     num_warps = 4
@@ -935,6 +934,7 @@ def tree_attn_with_paged_kv_cache(
         batch_size = T.int32(is_size_var=True)
         total_len = T.int32(is_size_var=True)
         nnz_pages = T.int32(is_size_var=True)
+        page_size = T.int32(is_size_var=True)
         max_num_pages = T.int32(is_size_var=True)
         q_indptr_elem_offset = T.int32(is_size_var=True)
         k_rope_pos_offset_elem_offset = T.int32(is_size_var=True)

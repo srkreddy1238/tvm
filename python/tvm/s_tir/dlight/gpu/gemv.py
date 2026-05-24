@@ -622,13 +622,13 @@ class GEMV(GPUScheduleRule):
             return None
 
         if not isinstance(len_s, int):
-            TS, TR = 256, 1
-            LOAD_V_SHARED = True
+            return None
 
         if isinstance(len_s, int) and len_s > 96000:
             return None
 
-        TS = min(get_max_factor(len_s, [8, 16, 32, 64]), TS)
+        if isinstance(len_s, int):
+            TS = min(get_max_factor(len_s, [8, 16, 32, 64]), TS)
 
         _, TILE_R = (
             1,

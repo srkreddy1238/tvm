@@ -139,10 +139,8 @@ def test_prefill_ragged_attention(h_q, h_kv, d_qk, d_v, seq_len):
 def test_prefill_pagged_attention(h_q, h_kv, d, seq_len, kv_len):
     np.random.seed(42)
     page_size = 64
-    mod_ref = IRModule(
-        {"main": _attention_prefill(h_kv, h_q, d, "float16", False, {}, ref_target, 64)}
-    )
-    func = _attention_prefill(h_kv, h_q, d, "float16", False, {}, vk_target, 64)
+    mod_ref = IRModule({"main": _attention_prefill(h_kv, h_q, d, "float16", False, {}, ref_target)})
+    func = _attention_prefill(h_kv, h_q, d, "float16", False, {}, vk_target)
     sch = s_tir.Schedule(func)
     func = sch.mod["main"].with_attr("global_symbol", "main")
     mod_org = IRModule({"main": func})

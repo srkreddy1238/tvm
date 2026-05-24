@@ -595,7 +595,6 @@ void LLMPatterns(ffi::Array<FusionPattern>* clml_patterns) {
         auto context = args[0].cast<PatternCheckContext>();
         tvm::arith::Analyzer analyzer;
         *ret = true;
-
         if (context->annotated_expr.find("root") == context->annotated_expr.end() ||
             context->annotated_expr.find("lhs") == context->annotated_expr.end() ||
             context->annotated_expr.find("w_decoded") == context->annotated_expr.end() ||
@@ -614,7 +613,7 @@ void LLMPatterns(ffi::Array<FusionPattern>* clml_patterns) {
 
         if (auto wdq_call = wdq.as<CallNode>()) {
           if (auto g_var = wdq_call->args[0].as<GlobalVarNode>()) {
-            if (g_var->name_hint != "dequantize") {
+            if (g_var->name_hint.find("dequantize") == std::string::npos) {
               RET_FALSE
             }
           } else {
@@ -649,7 +648,6 @@ void LLMPatterns(ffi::Array<FusionPattern>* clml_patterns) {
   DFPattern x = Wildcard();
   DFPattern w_packed = Wildcard();
   DFPattern g_var = GlobalVarPattern("dequantize");
-
   auto w_decoded = IsOp("relax.call_tir")(g_var, TuplePattern({w_packed, scales}));
   auto matmul = IsOp("relax.matmul")(x, w_decoded);
 
@@ -718,7 +716,7 @@ Pass OpenCLMLOffLoadForLLM() {
   auto pass_func = [=](IRModule mod, PassContext pc) {
     ffi::Array<FusionPattern> patterns = CreateLLMPatterns();
     mod = relax::transform::Normalize()(mod);
-    mod = relax::transform::FuseOpsByPattern(patterns)(mod);
+    mod = relax::transform::FuseOpsByPattern(patterns, false, true)(mod);
     mod = relax::transform::RunCodegen(std::nullopt, {})(mod);
     return mod;
   };

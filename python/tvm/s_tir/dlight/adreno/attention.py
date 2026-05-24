@@ -54,7 +54,9 @@ def _get_kv_chunk_len(num_pages, page_size, seq_id, length_info, sliding_window)
     )
 
 
-def attention_prefill_ragged_adreno(h_kv, h_q, d_qk, d_v, dtype, rope_scaling: dict[str, Any]):
+def attention_prefill_ragged_adreno(
+    h_kv, h_q, d_qk, d_v, dtype, rope_scaling: dict[str, Any], _rope
+):
     tile_x = 256
     NUM_BLKS = 16
     group_size = h_q // h_kv
@@ -83,6 +85,7 @@ def attention_prefill_ragged_adreno(h_kv, h_q, d_qk, d_v, dtype, rope_scaling: d
         kv_len = T.int32(is_size_var=True)
         q_indptr_elem_offset = T.int32(is_size_var=True)
         kv_indptr_elem_offset = T.int32(is_size_var=True)
+        q_rope_position_elem_offset = T.int32(is_size_var=True)
         k_rope_pos_offset_elem_offset = T.int32(is_size_var=True)
 
         q = T.match_buffer(var_q, (qo_len, h_q, d_qk), "float16")
@@ -94,7 +97,10 @@ def attention_prefill_ragged_adreno(h_kv, h_q, d_qk, d_v, dtype, rope_scaling: d
         kv_indptr = T.match_buffer(
             var_kv_indptr, (batch_size + 1,), "int32", elem_offset=kv_indptr_elem_offset
         )
-        k_rope_pos_offset = T.match_buffer(  # noqa: F841
+        q_rope_position = T.match_buffer(
+            var_q_rope_position, (qo_len,), "int32", elem_offset=q_rope_position_elem_offset
+        )
+        k_rope_pos_offset = T.match_buffer(
             var_k_rope_pos_offset,
             (batch_size,),
             "int32",
@@ -164,13 +170,27 @@ def attention_prefill_ragged_adreno(h_kv, h_q, d_qk, d_v, dtype, rope_scaling: d
                                                             LH_start + i
                                                         )
                                                         cur_H_qo: T.int32 = by
-                                                        Q_mem_pad[cur_H_qo, cur_L, j] = (
-                                                            T.if_then_else(
-                                                                cur_L < q_indptr[b_idx + 1],
-                                                                q[cur_L, cur_H_qo, j],
-                                                                T.float16(0.0),
+
+                                                        if cur_L < q_indptr[b_idx + 1]:
+                                                            Q_mem_pad[cur_H_qo, cur_L, j] = (
+                                                                T.if_then_else(
+                                                                    rotary_mode == 1,
+                                                                    _rope(
+                                                                        q,
+                                                                        q_rope_position[cur_L],
+                                                                        d_qk,
+                                                                        rope_theta,
+                                                                        rope_scale,
+                                                                        (cur_L, cur_H_qo, j),
+                                                                        dtype,
+                                                                        rope_scaling,
+                                                                    ),
+                                                                    q[cur_L, cur_H_qo, j],
+                                                                )
+                                                                * sm_scale
                                                             )
-                                                        )
+                                                        else:
+                                                            Q_mem_pad[cur_H_qo, cur_L, j] = 0.0
                                 tile_id[0] += NUM_BLKS
 
             for lbx in T.thread_binding(NUM_BLKS, thread="blockIdx.x"):
@@ -184,6 +204,7 @@ def attention_prefill_ragged_adreno(h_kv, h_q, d_qk, d_v, dtype, rope_scaling: d
                             batch_idx = T.alloc_buffer((1,), "int32", scope="local")
                             batch_tiles = T.alloc_buffer((1,), "int32", scope="local")
                             batch_rows = T.alloc_buffer((1,), "int32", scope="local")
+                            kv_chunk_len = T.alloc_buffer((1,), "int32", scope="local")
                             tile_id[0] = bx
                             batch_idx[0] = 0
                             batch_rows[0] = kv_indptr[1] - kv_indptr[0]
@@ -200,6 +221,8 @@ def attention_prefill_ragged_adreno(h_kv, h_q, d_qk, d_v, dtype, rope_scaling: d
                                     b_idx: T.int32 = batch_idx[0]
                                     kv_indptr_val: T.int32 = kv_indptr[b_idx]
                                     LH_start: T.int32 = tile_id[0] * 64
+                                    L_kv_base: T.int32 = kv_indptr[b_idx]
+                                    kv_chunk_len[0] = kv_indptr[b_idx + 1] - kv_indptr[b_idx]
                                     for ty in T.thread_binding(4, thread="threadIdx.y"):
                                         for tx in T.thread_binding(64, thread="threadIdx.x"):
                                             for lv in T.vectorized(4):
@@ -210,11 +233,27 @@ def attention_prefill_ragged_adreno(h_kv, h_q, d_qk, d_v, dtype, rope_scaling: d
                                                     T.writes()
                                                     cur_L: T.int32 = LH_start + i
                                                     cur_H_qo: T.int32 = by
-                                                    K_mem_pad[cur_H_qo, cur_L, j] = T.if_then_else(
-                                                        cur_L < kv_indptr[b_idx + 1],
-                                                        k[cur_L, cur_H_qo, j],
-                                                        T.float16(0.0),
-                                                    )
+                                                    if cur_L < kv_chunk_len[0]:
+                                                        K_mem_pad[
+                                                            cur_H_qo, L_kv_base + cur_L, j
+                                                        ] = T.if_then_else(
+                                                            rotary_mode == 1,
+                                                            _rope(
+                                                                k,
+                                                                k_rope_pos_offset[b_idx] + cur_L,
+                                                                d_qk,
+                                                                rope_theta,
+                                                                rope_scale,
+                                                                (L_kv_base + cur_L, by, j),
+                                                                dtype,
+                                                                rope_scaling,
+                                                            ),
+                                                            k[L_kv_base + cur_L, by, j],
+                                                        )
+                                                    else:
+                                                        K_mem_pad[
+                                                            cur_H_qo, L_kv_base + cur_L, j
+                                                        ] = 0.0
                                 tile_id[0] += NUM_BLKS
 
             for lbx in T.thread_binding(NUM_BLKS, thread="blockIdx.x"):
@@ -228,6 +267,7 @@ def attention_prefill_ragged_adreno(h_kv, h_q, d_qk, d_v, dtype, rope_scaling: d
                             batch_idx = T.alloc_buffer((1,), "int32", scope="local")
                             batch_tiles = T.alloc_buffer((1,), "int32", scope="local")
                             batch_rows = T.alloc_buffer((1,), "int32", scope="local")
+                            kv_chunk_len = T.alloc_buffer((1,), "int32", scope="local")
                             tile_id[0] = bx
                             batch_idx[0] = 0
                             batch_rows[0] = kv_indptr[1] - kv_indptr[0]
@@ -244,6 +284,8 @@ def attention_prefill_ragged_adreno(h_kv, h_q, d_qk, d_v, dtype, rope_scaling: d
                                     b_idx: T.int32 = batch_idx[0]
                                     kv_indptr_val: T.int32 = kv_indptr[b_idx]
                                     LH_start: T.int32 = tile_id[0] * 64
+                                    L_kv_base: T.int32 = kv_indptr[b_idx]
+                                    kv_chunk_len[0] = kv_indptr[b_idx + 1] - kv_indptr[b_idx]
                                     for ty in T.thread_binding(4, thread="threadIdx.y"):
                                         for tx in T.thread_binding(64, thread="threadIdx.x"):
                                             for lv in T.vectorized(4):
@@ -254,10 +296,12 @@ def attention_prefill_ragged_adreno(h_kv, h_q, d_qk, d_v, dtype, rope_scaling: d
                                                     T.writes()
                                                     cur_L: T.int32 = kv_indptr_val + (LH_start + i)
                                                     cur_H_qo: T.int32 = by
-                                                    V_mem_pad[cur_H_qo, cur_L, j] = T.if_then_else(
-                                                        cur_L < kv_indptr[b_idx + 1],
-                                                        v[cur_L, cur_H_qo, j],
-                                                        T.float16(0.0),
+                                                    V_mem_pad[cur_H_qo, L_kv_base + cur_L, j] = (
+                                                        T.if_then_else(
+                                                            cur_L < kv_chunk_len[0],
+                                                            v[L_kv_base + cur_L, cur_H_qo, j],
+                                                            T.float16(0.0),
+                                                        )
                                                     )
                                 tile_id[0] += NUM_BLKS
 
@@ -294,7 +338,7 @@ def attention_prefill_ragged_adreno(h_kv, h_q, d_qk, d_v, dtype, rope_scaling: d
                                             (tile_x, 64), "float16", scope="local"
                                         )
                                         S_local_1 = T.alloc_buffer(
-                                            (64, 64), "float16", scope="local"
+                                            (64, 16), "float16", scope="local"
                                         )
                                         O_local = T.alloc_buffer(
                                             (tile_x, d_v), "float16", scope="local"
@@ -676,14 +720,10 @@ def attention_prefill_ragged_adreno(h_kv, h_q, d_qk, d_v, dtype, rope_scaling: d
                                                                     )
                                                                     T.reads(S_local[i, j])
                                                                     T.writes(S_local[i, j])
-                                                                    S_local[i, j] = (
-                                                                        T.Cast(
-                                                                            "float32",
-                                                                            S_local[i, j],
-                                                                        )
-                                                                        * sm_scale
-                                                                        * math.log2(math.exp(1))
-                                                                    )
+                                                                    S_local[i, j] = T.Cast(
+                                                                        "float32",
+                                                                        S_local[i, j],
+                                                                    ) * math.log2(math.exp(1))
                                                     for i in range(1):
                                                         row: T.int32 = i * tile_x + tz * 64 + tx
                                                         if row < tile_x:
@@ -1184,7 +1224,6 @@ def attention_prefill_paged_adreno(
     d,
     dtype,
     rope_scaling: dict[str, Any],
-    page_size: int = 64,
 ):
     tile_x = 256
     NUM_BLKS = 16
@@ -1215,6 +1254,7 @@ def attention_prefill_paged_adreno(
         batch_size = T.int32(is_size_var=True)
         q_indptr = T.match_buffer(var_q_indptr, (batch_size + 1,), "int32", offset_factor=0)
         max_num_pages = T.int32(is_size_var=True)
+        page_size = T.int32(is_size_var=True)
         pages = T.match_buffer(
             var_pages,
             (max_num_pages, 2, h_kv, page_size, d),
@@ -1283,7 +1323,7 @@ def attention_prefill_paged_adreno(
                                                                 q[cur_L, cur_H_qo, j],
                                                                 T.float16(0.0),
                                                             )
-                                                        )
+                                                        ) * sm_scale
                                 tile_id[0] += NUM_BLKS
 
             for lbx in T.thread_binding(NUM_BLKS, thread="blockIdx.x"):
@@ -1383,27 +1423,30 @@ def attention_prefill_paged_adreno(
                                                     if row < tile_x:
                                                         m_smem[row] = T.float32(-50000.0)
                                                         d_smem[row] = T.float32(1.0)
-                                                for li_0_lj_0_fused_1 in T.thread_binding(
-                                                    64, thread="threadIdx.x"
-                                                ):
-                                                    for li_1 in range(4):
-                                                        for lj_1_0 in T.unroll(4):
-                                                            for lj_1_1 in T.vectorized(4):
-                                                                with T.sblock("O_init"):
-                                                                    i = T.axis.spatial(
-                                                                        tile_x,
-                                                                        tz * 64 + li_0_lj_0_fused_1,
-                                                                    )
-                                                                    j = T.axis.spatial(
-                                                                        d,
-                                                                        bz * 64
-                                                                        + li_1 * 16
-                                                                        + lj_1_0 * 4
-                                                                        + lj_1_1,
-                                                                    )
-                                                                    T.reads()
-                                                                    T.writes(O_local[i, j])
-                                                                    O_local[i, j] = T.float32(0.0)
+                                                with T.sblock("O_frag_init"):
+                                                    T.reads()
+                                                    T.writes(O_frag[0:64, bz * 64 : bz * 64 + 64])
+                                                    C = T.match_buffer(
+                                                        O_frag[0:64, bz * 64 : bz * 64 + 64],
+                                                        (64, 64),
+                                                        "float16",
+                                                        strides=("C_s0", "C_s1"),
+                                                        scope="wmma.accumulator",
+                                                        offset_factor=64,
+                                                    )
+                                                    # zero the accumulator fragment
+                                                    T.tvm_fill_fragment(
+                                                        C.data,
+                                                        64,
+                                                        64,
+                                                        16,
+                                                        C.elem_offset
+                                                        // C.strides[0]
+                                                        // 64
+                                                        * (C.strides[0] // 64)
+                                                        + C.elem_offset % C.strides[0] // 64,
+                                                        T.float32(0.0),
+                                                    )
                                                 for iterator_1 in range(
                                                     (kv_chunk_len[0] + 64 - 1) // 64
                                                 ):
@@ -1715,12 +1758,10 @@ def attention_prefill_paged_adreno(
                                                                             )
                                                                             T.reads(S_local[i, j])
                                                                             T.writes(S_local[i, j])
-                                                                            S_local[i, j] = (
-                                                                                S_local[i, j]
-                                                                                * sm_scale
-                                                                                * math.log2(
-                                                                                    math.exp(1)
-                                                                                )
+                                                                            S_local[i, j] = S_local[
+                                                                                i, j
+                                                                            ] * math.log2(
+                                                                                math.exp(1)
                                                                             )
                                                     for i in range(1):
                                                         row: T.int32 = i * tile_x + tz * 64 + tx

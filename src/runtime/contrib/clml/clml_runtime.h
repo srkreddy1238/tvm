@@ -120,6 +120,9 @@
       case 4:                                                                                  \
         V4_API(API, __VA_ARGS__);                                                              \
         break;                                                                                 \
+      case 5:                                                                                  \
+        V5_API(API, __VA_ARGS__);                                                              \
+        break;                                                                                 \
       default:                                                                                 \
         TVM_FFI_THROW(InternalError) << "CLML Error:" #API " - Unsupported target version \n"; \
     }                                                                                          \

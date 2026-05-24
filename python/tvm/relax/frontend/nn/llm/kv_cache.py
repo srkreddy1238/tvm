@@ -700,7 +700,7 @@ class TIRPagedKVCache(PagedKVCache):  # pylint: disable=too-few-public-methods
 # pylint: disable=too-many-locals
 
 
-def _kv_cache_transpose_append(num_key_value_heads, head_dim, dtype, page_size: int = 64):
+def _kv_cache_transpose_append(num_key_value_heads, head_dim, dtype):
     """Return the TIR function that appends new k/v data to PagedKVCache."""
 
     # pylint: disable=line-too-long
@@ -715,6 +715,7 @@ def _kv_cache_transpose_append(num_key_value_heads, head_dim, dtype, page_size: 
         T.func_attr({"tir.noalias": True})
         ntoken = T.SizeVar("num_tokens_excluding_cache", "int64")
         num_pages = T.int64()
+        page_size = T.int64()
         pages_elem_offset = T.int64()
         position_map_elem_offset = T.int32()
         pages = T.match_buffer(var_pages, (num_pages, 2, num_key_value_heads, page_size, head_dim), dtype, elem_offset=pages_elem_offset)
@@ -743,7 +744,7 @@ def _kv_cache_transpose_append(num_key_value_heads, head_dim, dtype, page_size: 
     return tir_kv_cache_transpose_append
 
 
-def _kv_cache_transpose_append_mla(d_qk: int, dtype, page_size: int = 64):
+def _kv_cache_transpose_append_mla(d_qk: int, dtype):
     """Return the TIR function that appends new compressed KV data to PagedKVCache for MLA."""
 
     # pylint: disable=line-too-long
@@ -757,6 +758,7 @@ def _kv_cache_transpose_append_mla(d_qk: int, dtype, page_size: int = 64):
         T.func_attr({"tir.noalias": True})
         ntoken = T.SizeVar("num_tokens_excluding_cache", "int64")
         num_pages = T.int64()
+        page_size = T.int64()
         pages_elem_offset = T.int64()
         position_map_elem_offset = T.int32()
         pages = T.match_buffer(var_pages, (num_pages, page_size, d_qk), dtype, elem_offset=pages_elem_offset)
@@ -929,7 +931,6 @@ def _attention_prefill_cpu(
     dtype,
     sliding_window: bool,
     rope_scaling: dict[str, Any],
-    page_size: int = 64,
 ):
     global_symbol = "batch_prefill_paged_kv_cpu"
     if sliding_window:
@@ -961,6 +962,7 @@ def _attention_prefill_cpu(
         batch_size = T.int32(is_size_var=True)
         total_len = T.int32(is_size_var=True)
         nnz_pages = T.int32(is_size_var=True)
+        page_size = T.int32(is_size_var=True)
         max_num_pages = T.int32(is_size_var=True)
         q_indptr_elem_offset = T.int32(is_size_var=True)
         page_indptr_elem_offset = T.int32(is_size_var=True)
@@ -1242,7 +1244,6 @@ def _attention_prefill(
     sliding_window: bool,
     rope_scaling: dict[str, Any],
     target: Target,
-    page_size: int = 64,
 ):
     if (
         (
@@ -1251,12 +1252,11 @@ def _attention_prefill(
             and target.attrs.get("supports_qcom_cooperative_matrix_conversion", False)
         )
         and not sliding_window
-        and (page_size == 64)
         and (d % 64 == 0)  # skip for now - As adreno supports 64x64 for CoopMAT
         and (("android" in str(target.host)) or ("adreno" in str(target.attrs)))
     ):
         return tvm.s_tir.dlight.adreno.attention_prefill_paged_adreno(
-            h_kv, h_q, d, dtype, rope_scaling, page_size
+            h_kv, h_q, d, dtype, rope_scaling
         )
 
     (
@@ -1298,6 +1298,7 @@ def _attention_prefill(
         batch_size = T.int32(is_size_var=True)
         total_len = T.int32(is_size_var=True)
         nnz_pages = T.int32(is_size_var=True)
+        page_size = T.int32(is_size_var=True)
         max_num_pages = T.int32(is_size_var=True)
         pages_elem_offset = T.int64(is_size_var=True)
         q_indptr_elem_offset = T.int32(is_size_var=True)
@@ -1558,7 +1559,6 @@ def _attention_decode_cpu(
     qkv_dtype,
     sliding_window: bool,
     rope_scaling: dict[str, Any],
-    page_size: int = 64,
 ):
     H_qo = num_qo_heads
     H_kv = num_kv_heads
@@ -1590,6 +1590,7 @@ def _attention_decode_cpu(
         T.func_attr({"tir.is_scheduled": True, "global_symbol": global_symbol})
         B = T.int32(is_size_var=True)
         nnz_pages = T.int32(is_size_var=True)
+        page_size = T.int32(is_size_var=True)
         max_num_pages = T.int32(is_size_var=True)
         page_indptr_elem_offset = T.int32(is_size_var=True)
         page_values_elem_offset = T.int32(is_size_var=True)
@@ -1715,7 +1716,6 @@ def _attention_decode(
     sliding_window: bool,
     rope_scaling: dict[str, Any],
     target: Target,
-    page_size: int = 64,
 ):
     qkv_dtype_bytes = 2
     H_qo = num_qo_heads
@@ -1724,6 +1724,14 @@ def _attention_decode(
 
     THREAD_LIMIT = 512
     TILE_SIZE_PER_BDX = 2
+    VEC_SIZE = min(max(8 // qkv_dtype_bytes, D // 32), 4)
+    max_num_threads_per_block = get_max_num_threads_per_block(target)
+
+    GROUP_SIZE = H_qo // H_kv
+    bdx = D // VEC_SIZE
+    bdy = GROUP_SIZE
+
+    KV_Scope = "shared"
     if ((target.kind.name == "opencl") or (target.kind.name == "vulkan")) and (
         ("android" in str(target.host)) or ("adreno" in str(target.keys))
     ):
@@ -1731,14 +1739,10 @@ def _attention_decode(
         # to avoid register spill
         THREAD_LIMIT = 256
         TILE_SIZE_PER_BDX = 1
+        bdy = 1
+        KV_Scope = "local"
 
-    VEC_SIZE = min(max(8 // qkv_dtype_bytes, D // 32), 4)
-    max_num_threads_per_block = get_max_num_threads_per_block(target)
     thread_limit = min(max_num_threads_per_block, THREAD_LIMIT)
-
-    GROUP_SIZE = H_qo // H_kv
-    bdx = D // VEC_SIZE
-    bdy = GROUP_SIZE
     while bdx * bdy > thread_limit and bdy > 1:
         bdy //= 2
     gdz = GROUP_SIZE // bdy
@@ -1772,6 +1776,7 @@ def _attention_decode(
         T.func_attr({"tir.is_scheduled": True, "global_symbol": global_symbol})
         B = T.int32(is_size_var=True)
         nnz_pages = T.int32(is_size_var=True)
+        page_size = T.int32(is_size_var=True)
         max_num_pages = T.int32(is_size_var=True)
         pages_elem_offset = T.int64(is_size_var=True)
         page_indptr_elem_offset = T.int32(is_size_var=True)
@@ -1808,8 +1813,8 @@ def _attention_decode(
                             with T.sblock("attn"):
                                 Q_local = T.alloc_buffer((VEC_SIZE,), qkv_dtype, scope="local")
                                 kv_chunk_len = T.alloc_buffer((1,), "int32", scope="local")
-                                K_smem = T.alloc_buffer((bdz * bdy * tile_size_per_bdx, D), qkv_dtype, scope="shared")
-                                V_smem = T.alloc_buffer((bdz * bdy * tile_size_per_bdx, D), qkv_dtype, scope="shared")
+                                K_smem = T.alloc_buffer((bdz * bdy * tile_size_per_bdx, D), qkv_dtype, scope=KV_Scope)
+                                V_smem = T.alloc_buffer((bdz * bdy * tile_size_per_bdx, D), qkv_dtype, scope=KV_Scope)
                                 O_allreduce = T.alloc_buffer((bdz, bdy, D), "float32", scope="shared")
                                 md_allreduce = T.alloc_buffer((bdz, bdy, 2), "float32", scope="shared")
                                 S_reduce_local = T.alloc_buffer((1,), "float32", scope="local")
@@ -1817,7 +1822,6 @@ def _attention_decode(
 
                                 S_local = T.alloc_buffer((bdy * tile_size_per_bdx), "float32", scope="local")
                                 QK_local = T.alloc_buffer((VEC_SIZE,), "float32", scope="local")
-                                V_local = T.alloc_buffer((VEC_SIZE,), qkv_dtype, scope="local")
                                 m_prev = T.alloc_buffer((1,), "float32", scope="local")
                                 d_prev = T.alloc_buffer((1,), "float32", scope="local")
                                 other_m = T.alloc_buffer((1,), "float32", scope="local")
@@ -1918,9 +1922,7 @@ def _attention_decode(
                                     # compute O
                                     for j in T.serial(bdy * tile_size_per_bdx):
                                         for vec in T.vectorized(VEC_SIZE):
-                                            V_local[vec] = V_smem[tz * bdy * tile_size_per_bdx + j, tx * VEC_SIZE + vec]
-                                        for vec in T.vectorized(VEC_SIZE):
-                                            O_local[vec] += T.cast(V_local[vec], "float32") * S_local[j]
+                                            O_local[vec] += T.cast(V_smem[tz * bdy * tile_size_per_bdx + j, tx * VEC_SIZE + vec], "float32") * S_local[j]
 
                                 if bdz > 1:
                                     # allreduce over bdz
@@ -2478,7 +2480,7 @@ def _attention_prefill_ragged(
         and (("android" in str(target.host)) or ("adreno" in str(target.attrs)))
     ):
         return tvm.s_tir.dlight.adreno.attention_prefill_ragged_adreno(
-            h_kv, h_q, d_qk, d_v, dtype, rope_scaling
+            h_kv, h_q, d_qk, d_v, dtype, rope_scaling, _rope
         )
 
     # pylint: disable=line-too-long
@@ -2746,7 +2748,6 @@ def _attention_prefill_mla(
     dtype,
     sliding_window: bool,
     target: Target,
-    page_size: int = 64,
 ):
     d_qk = d_latent + d_rope
     (
@@ -2783,6 +2784,7 @@ def _attention_prefill_mla(
         batch_size = T.int32(is_size_var=True)
         total_len = T.int32(is_size_var=True)
         nnz_pages = T.int32(is_size_var=True)
+        page_size = T.int32(is_size_var=True)
         max_num_pages = T.int32(is_size_var=True)
         pages_elem_offset = T.int64(is_size_var=True)
         q_indptr_elem_offset = T.int32(is_size_var=True)
@@ -3125,7 +3127,7 @@ def _copy_single_page_cpu(num_heads, page_size, head_dim, dtype):
     return copy_single_page_cpu
 
 
-def _compact_kv_copy(num_heads, head_dim, dtype, target: Target, page_size: int = 64):
+def _compact_kv_copy(num_heads, head_dim, dtype, target: Target):
     tx = get_max_num_threads_per_block(target)
 
     @T.prim_func
@@ -3137,6 +3139,7 @@ def _compact_kv_copy(num_heads, head_dim, dtype, target: Target, page_size: int 
     ):
         T.func_attr({"tir.is_scheduled": True})
         num_pages = T.int32()
+        page_size = T.int32()
         total_copy_length = T.int32()
         copy_length_indptr_elem_offset = T.int32()
         copy_src_dst_pos_elem_offset = T.int32()
@@ -3182,7 +3185,7 @@ def _compact_kv_copy(num_heads, head_dim, dtype, target: Target, page_size: int 
     return compact_kv_copy
 
 
-def _compact_kv_copy_cpu(num_heads, head_dim, dtype, page_size: int = 64):
+def _compact_kv_copy_cpu(num_heads, head_dim, dtype):
     tx = 8
 
     @T.prim_func
@@ -3194,6 +3197,7 @@ def _compact_kv_copy_cpu(num_heads, head_dim, dtype, page_size: int = 64):
     ):
         T.func_attr({"tir.is_scheduled": True})
         num_pages = T.int32()
+        page_size = T.int32()
         total_copy_length = T.int32()
         copy_length_indptr_elem_offset = T.int32()
         copy_src_dst_pos_elem_offset = T.int32()
