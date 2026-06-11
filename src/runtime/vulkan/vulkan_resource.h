@@ -43,21 +43,24 @@ class VulkanMemory {
   /*!
    * \brief Constructor to create a VulkanMemory instance.
    *
+   * \param device The Vulkan device that owns this allocation, needed to free it.
    * \param mem The Vulkan device memory handle.
    * \param mem_reqs The memory requirements associated with this allocation.
    */
-  VulkanMemory(VkDeviceMemory mem, const VkMemoryRequirements& mem_reqs)
-      : memory_(mem), mem_reqs_(mem_reqs) {}
+  VulkanMemory(VkDevice device, VkDeviceMemory mem, const VkMemoryRequirements& mem_reqs)
+      : device_(device), memory_(mem), mem_reqs_(mem_reqs) {}
 
   /*!
    * \brief Destructor to free the Vulkan device memory.
    */
   ~VulkanMemory() {
     if (memory_ != VK_NULL_HANDLE) {
+      vkFreeMemory(device_, memory_, nullptr);
       memory_ = VK_NULL_HANDLE;
     }
   }
 
+  VkDevice device_{VK_NULL_HANDLE};
   VkDeviceMemory memory_;
   VkMemoryRequirements mem_reqs_;
 };
