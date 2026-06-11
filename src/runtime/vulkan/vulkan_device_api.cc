@@ -432,32 +432,29 @@ void VulkanDeviceAPI::FreeDataSpaceView(Device dev, void* ptr) {
 }
 
 void VulkanDeviceAPI::FreeDataSpace(Device dev, void* ptr) {
-  // Get Vulkan stream associated with the device
-  VulkanStream& stream = device(dev.device_id).ThreadLocalStream();
+  // Ensure all GPU work referencing this resource has completed before destroying it.
+  StreamSync(dev, nullptr);
   const auto* res = static_cast<const VulkanResource*>(ptr);
-
   if (const auto* buf_res = dynamic_cast<const VulkanBuffer*>(res)) {
-    // Defer buffer destruction by scheduling it in VulkanStream
-    stream.Launch([buf_res](VulkanStreamState* state) { delete buf_res; });
+    delete buf_res;
   } else if (const auto* img_res = dynamic_cast<const VulkanImage*>(res)) {
-    // Defer image destruction in VulkanStream
-    stream.Launch([img_res](VulkanStreamState* state) { delete img_res; });
+    delete img_res;
   }
 }
 
 void* VulkanDeviceAPI::AllocWorkspace(Device dev, size_t size, DLDataType type_hint) {
-  // Use MemoryManager to allocate workspace memory.
-  auto buffer = MemoryManager::GetOrCreateAllocator(dev, AllocatorType::kPooled)
-                    ->Alloc(dev, size, kTempAllocaAlignment, type_hint);
-  return buffer.data;
+  // Use a per-thread WorkspacePool. The pooled MemoryManager allocator keys its free
+  // list by Buffer::size, but FreeWorkspace only receives the data pointer, so freed
+  // workspaces would land in the size-0 bucket and never be reused.
+  auto& pool = pool_per_thread.GetOrMake(kDLVulkan, this);
+  return pool.AllocWorkspace(dev, size);
 }
 
 void VulkanDeviceAPI::FreeWorkspace(Device dev, void* data) {
-  // Use MemoryManager to free workspace memory.
-  Allocator* allocator = MemoryManager::GetAllocator(dev, AllocatorType::kPooled);
-  Buffer buffer;
-  buffer.data = data;
-  allocator->Free(buffer);
+  auto* pool = pool_per_thread.Get();
+  ICHECK(pool) << "Attempted to free a vulkan workspace on a CPU-thread "
+               << "that has never allocated a workspace";
+  pool->FreeWorkspace(dev, data);
 }
 
 TVMStreamHandle VulkanDeviceAPI::CreateStream(Device dev) { return nullptr; }
