@@ -78,7 +78,7 @@ void VulkanImage::AllocateMemory(const VkMemoryRequirements& mem_reqs, uint32_t 
   VULKAN_CALL(vkAllocateMemory(device_, &mem_info, nullptr, &raw_memory));
 
   // Store the allocated memory along with its requirements
-  memory = std::make_shared<VulkanMemory>(raw_memory, mem_reqs);
+  memory = std::make_shared<VulkanMemory>(device_, raw_memory, mem_reqs);
 }
 
 VulkanImage::~VulkanImage() {

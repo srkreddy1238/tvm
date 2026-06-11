@@ -432,16 +432,13 @@ void VulkanDeviceAPI::FreeDataSpaceView(Device dev, void* ptr) {
 }
 
 void VulkanDeviceAPI::FreeDataSpace(Device dev, void* ptr) {
-  // Get Vulkan stream associated with the device
-  VulkanStream& stream = device(dev.device_id).ThreadLocalStream();
+  // Ensure all GPU work referencing this resource has completed before destroying it.
+  StreamSync(dev, nullptr);
   const auto* res = static_cast<const VulkanResource*>(ptr);
-
   if (const auto* buf_res = dynamic_cast<const VulkanBuffer*>(res)) {
-    // Defer buffer destruction by scheduling it in VulkanStream
-    stream.Launch([buf_res](VulkanStreamState* state) { delete buf_res; });
+    delete buf_res;
   } else if (const auto* img_res = dynamic_cast<const VulkanImage*>(res)) {
-    // Defer image destruction in VulkanStream
-    stream.Launch([img_res](VulkanStreamState* state) { delete img_res; });
+    delete img_res;
   }
 }
 
