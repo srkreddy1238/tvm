@@ -61,10 +61,11 @@ IRModule GPURelaxPipeline::Dataflow(IRModule mod) {
 IRModule GPURelaxPipeline::Finalize(IRModule mod) {
   mod = relax::transform::StaticPlanBlockMemory()(mod);
   mod = relax::transform::LowerAllocTensor()(mod);
-  mod = relax::transform::KillAfterLastUse()(mod);
   mod = relax::transform::LowerRuntimeBuiltin()(mod);
   mod = relax::transform::ComputePrimValue()(mod);
   mod = relax::transform::VMShapeLower()(mod);
+  mod = relax::transform::KillAfterLastUse()(mod);
+  mod = relax::transform::LowerRuntimeBuiltin()(mod);
   mod = relax::transform::AttachGlobalSymbol()(mod);
   return mod;
 }

@@ -146,6 +146,13 @@ class DataflowReshapeRewriter : public ExprMutator {
     if (!arith::Analyzer().CanProveEqual(inp_count, res_count)) {
       return false;
     }
+    // Skip reshape if src or dst does't have global scope - textures
+    if (inp_sinfo->vdevice.defined() && inp_sinfo->vdevice.value()->memory_scope != "global") {
+      return false;
+    }
+    if (res_sinfo->vdevice.defined() && res_sinfo->vdevice.value()->memory_scope != "global") {
+      return false;
+    }
 
     return true;
   }
