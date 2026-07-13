@@ -18,12 +18,10 @@
 # pylint: disable=unused-argument, redefined-builtin
 """TOPI implementations of quantized neural network operators."""
 
-import tvm
-from tvm import te
 from tvm.topi.nn import conv, conv2d_transpose_nchw, conv2d_transpose_nhwc
 
 from ..utils import get_const_tuple
-from .utils import is_scalar_tensor, subtract_zero_point
+from .utils import subtract_zero_point
 
 
 def conv2d(  # Conv2d inputs
@@ -63,38 +61,12 @@ def conv2d(  # Conv2d inputs
             f"Can't handle legalization for the given layouts {data_layout} and {kernel_layout}"
         )
 
-    # Handle Scale if supplied
-    if input_scale is not None:
-        assert is_scalar_tensor(input_scale)
-        out = te.compute(
-            out.shape,
-            lambda *indices: tvm.tir.multiply(out(*indices), input_scale).astype(out_dtype),
-            name="input_scale",
-        )
-
-    if kernel_scale is not None:
-        if is_scalar_tensor(kernel_scale):
-            out = te.compute(
-                out.shape,
-                lambda *indices: tvm.tir.multiply(out(*indices), kernel_scale).astype(out_dtype),
-                name="kernel_scale",
-            )
-        else:
-            oc_idx = tvm.s_tir.layout(data_layout).index_of("C")
-            out = te.compute(
-                out.shape,
-                lambda *indices: tvm.tir.multiply(
-                    out(*indices), kernel_scale[indices[oc_idx]]
-                ).astype(out_dtype),
-                name="kernel_scale",
-            )
-
     return out
 
 
 def conv2d_transpose(
-    data,
-    weight,
+    input,
+    kernel,
     input_zero_point,
     kernel_zero_point,
     input_scale,
@@ -111,10 +83,29 @@ def conv2d_transpose(
     """
     TOPI compute for qnn.conv2d_transpose.
 
+    Scaling strategy
+    ----------------
+    Quantized convolution requires multiplying the integer accumulator by
+    the combined scale  input_scale * kernel_scale  to recover the true
+    floating-point value.
+
+    kernel_scale can be either:
+
+      1. A scalar tensor  (one global scale for all output channels)
+         -> multiply every output element by the same constant.
+
+      2. A 1-D per-channel tensor of shape [OC]
+         (one scale per output channel, used in per-channel quantization)
+         -> multiply each output element by the scale of its output channel.
+         The output-channel axis position is looked up from data_layout:
+           NCHW -> axis 1  (N, C, H, W)
+           NHWC -> axis 3  (N, H, W, C)
+
+    input_scale is always a scalar in standard QNN.
     """
 
-    weight = subtract_zero_point(weight, kernel_zero_point, "weight_zp")
-    data = subtract_zero_point(data, input_zero_point, "data_zp")
+    kernel = subtract_zero_point(kernel, kernel_zero_point, "kernel_zp")
+    input = subtract_zero_point(input, input_zero_point, "input_zp")
 
     strides = get_const_tuple(strides)
     padding = get_const_tuple(padding)
@@ -123,17 +114,17 @@ def conv2d_transpose(
 
     if data_layout == "NCHW" and kernel_layout == "IOHW":
         out = conv2d_transpose_nchw(
-            data,
-            weight,
+            input,
+            kernel,
             strides,
             padding,
             out_dtype,
             output_padding,
         )
-    elif data_layout == "NHWC" and kernel_layout == "OHWI":
+    elif data_layout == "NHWC":
         out = conv2d_transpose_nhwc(
-            data,
-            weight,
+            input,
+            kernel,
             strides,
             padding,
             out_dtype,
@@ -144,16 +135,6 @@ def conv2d_transpose(
             f"qnn_conv2d_transpose: cannot handle layouts "
             f"data_layout={data_layout!r}, kernel_layout={kernel_layout!r}. "
             f"Only 4-D layouts (e.g. NCHW / IOHW ; NHWC / OIHW) are currently supported."
-        )
-
-    if input_scale is not None and kernel_scale is not None:
-        out = te.compute(
-            out.shape,
-            lambda *i: tvm.tir.multiply(
-                out(*i),
-                tvm.tir.multiply(input_scale, kernel_scale),
-            ).astype(out_dtype),
-            name="scale",
         )
 
     return out

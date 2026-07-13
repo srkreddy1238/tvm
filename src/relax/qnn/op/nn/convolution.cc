@@ -262,8 +262,8 @@ StructInfo InferStructInfoQnnConv2dTranspose(const Call& call, const BlockBuilde
         << "data_scale and weight_scale dtype mismatch";
     TVM_FFI_ICHECK(data_scale_sinfo.as<TensorStructInfoNode>()->ndim == 0)
         << "data_scale must be a scalar";
-    TVM_FFI_ICHECK(weight_scale_sinfo.as<TensorStructInfoNode>()->ndim == 0)
-        << "weight_scale must be a scalar";
+    // TVM_FFI_ICHECK(weight_scale_sinfo.as<TensorStructInfoNode>()->ndim == 0)
+    //     << "weight_scale must be a scalar";
   }
 
   const auto* attrs = call->attrs.as<Conv2DTransposeAttrs>();

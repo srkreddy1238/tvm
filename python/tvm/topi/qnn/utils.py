@@ -52,7 +52,7 @@ def subtract_zero_point(
     """
     return te.compute(
         tensor.shape,
-        lambda *i: te.subtract(tensor(*i), zero_point).astype(tensor.dtype),
+        lambda *i: te.subtract(tensor(*i), zero_point).astype("int16"),
         name=name,
         attrs={"meta_schedule.inline_rule": "disable"},
     )

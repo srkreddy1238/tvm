@@ -467,7 +467,6 @@ class OperatorConverter:
                     qnn_params = dict()
                     qnn_params["scale"] = relax.const(scale, "float32")
                     qnn_params["zero_point"] = relax.const(zero_point, "int32")
-                    raise NotImplementedError("Quantized operators not supported now")
             return_list.append(TensorWrapper(tensor_idx, tensor, buffer, qnn_params))
         return return_list
 
@@ -620,7 +619,7 @@ class OperatorConverter:
         if fused_activation_fn == ActivationFunctionType.RELU_N1_TO_1:
             return relax.op.clip(expr, min=max(qmin, quantize(-1.0)), max=min(qmax, quantize(1.0)))
         if fused_activation_fn == ActivationFunctionType.RELU:
-            return relax.op.clip(expr, min=max(qmin, quantize(0.0)), a_max=qmax)
+            return relax.op.clip(expr, min=max(qmin, quantize(0.0)), max=qmax)
 
         fused_activation_fn_str = self.activation_fn_type[fused_activation_fn]
         raise tvm.error.OpNotImplemented(
@@ -1494,7 +1493,7 @@ class OperatorConverter:
         """Convert TFLite MUL"""
         # Check if the input tensor is quantized, call QNN op
         if self.is_quantized(op):
-            return self._convert_elemwise(_qnn.op.mul, op)
+            return self._convert_elemwise(_qnn.op.multiply, op)
         return self._convert_elemwise(relax.op.multiply, op)
 
     def convert_div(self, op):
@@ -1896,7 +1895,7 @@ class OperatorConverter:
             keep_dims = False
 
         if input_tensor.qnn_params:
-            in_expr = relax.op.cast(in_expr, "int32")
+            in_expr = relax.op.astype(in_expr, "int32")
 
         out = relax_op(in_expr, axis, keep_dims)
 
@@ -2015,7 +2014,9 @@ class OperatorConverter:
         #
         # As we will transform Fully_Connected Input to MatMul
         # Weight require a transpose
+        target_shape = tuple((-1, weight_tensor_shape[1]))
         in_expr = self.get_tensor_expr(input_tensor)
+        in_expr = _op.reshape(in_expr, target_shape)
 
         # TODO: Change the output shape calculation based on keep_dim option
         assert op.BuiltinOptionsType() == BuiltinOptions.FullyConnectedOptions
@@ -2037,7 +2038,6 @@ class OperatorConverter:
             weight_expr = self.exp_tab.new_const(
                 weight_value, dtype=weight_tensor_type_str, source_name=weight_tensor.tensor.Name()
             )
-        weight_shape = weight_expr.struct_info.shape
         weight_expr = relax.op.permute_dims(weight_expr, [1, 0])
 
         if input_tensor.qnn_params:
@@ -2048,8 +2048,7 @@ class OperatorConverter:
                 kernel_zero_point=weight_tensor.qnn_params["zero_point"],
                 input_scale=input_tensor.qnn_params["scale"],
                 kernel_scale=weight_tensor.qnn_params["scale"],
-                units=weight_shape[0],
-                out_dtype="int64" if output_tensor_type_str == "int16" else "int32",
+                out_dtype="int32",
             )
         else:
             out = relax.op.matmul(in_expr, weight_expr)
@@ -2638,9 +2637,9 @@ class OperatorConverter:
                     "TFLite avg_pool2dreshape requires input and output scale"
                     "and zero points to be equal"
                 )
-                out = relax.op.cast(in_expr, dtype="int32")
+                out = relax.op.astype(in_expr, dtype="int32")
                 out = relax.op.nn.avg_pool2d(out, **params)
-                out = relax.op.cast(out, dtype=output_tensor_type_str)
+                out = relax.op.astype(out, dtype=output_tensor_type_str)
             else:
                 out = relax.op.nn.avg_pool2d(in_expr, **params)
         elif pool_type == "max":
@@ -3109,13 +3108,24 @@ class OperatorConverter:
                 input_b = relax.op.permute_dims(input_b, [0, 2, 1])
 
             if self.is_quantized(op):
+                input_tensors = self.get_input_tensors(op)
+                lhs_tensor = input_tensors[0]
+                rhs_tensor = input_tensors[1]
+                output_tensors = self.get_output_tensors(op)
+                assert len(output_tensors) == 1
+                output_tensor = output_tensors[0]
+
+                # Sanity checks: all three must be quantized
+                assert lhs_tensor.qnn_params and rhs_tensor.qnn_params and output_tensor.qnn_params
+
+                # Call qnn.batch_matmul with real qparams
                 output = _qnn.op.batch_matmul(
-                    input_a,
-                    input_b,
-                    relax.const(0, "int32"),
-                    relax.const(0, "int32"),
-                    relax.const(1.0, "float32"),
-                    relax.const(1.0, "float32"),
+                    x=input_a,
+                    y=input_b,
+                    x_zero_point=lhs_tensor.qnn_params["zero_point"],
+                    y_zero_point=rhs_tensor.qnn_params["zero_point"],
+                    x_scale=lhs_tensor.qnn_params["scale"],
+                    y_scale=rhs_tensor.qnn_params["scale"],
                 )
             else:
                 output = relax.op.nn.batch_matmul(input_a, input_b)
@@ -3136,14 +3146,29 @@ class OperatorConverter:
         reshape = relax.op.reshape(output, self._fold_constant(final_shape))
         # qnn batch matmul returns a int32 tensor so we need to requantize
         if self.is_quantized(op):
-            return _qnn.op.requantize(
+            output_tensors = self.get_output_tensors(op)
+            output_tensor = output_tensors[0]
+            output_tensor_type_str = self.get_tensor_type_str(output_tensor.tensor.Type())
+
+            input_tensors = self.get_input_tensors(op)
+            lhs_tensor = input_tensors[0]
+            rhs_tensor = input_tensors[1]
+
+            lhs_scale_val = get_scalar_from_constant(lhs_tensor.qnn_params["scale"])
+            rhs_scale_val = get_scalar_from_constant(rhs_tensor.qnn_params["scale"])
+            new_input_scale_val = lhs_scale_val * rhs_scale_val
+            new_input_scale = relax.const(new_input_scale_val, "float32")
+            new_input_zero_point = relax.const(0, "int32")
+
+            reshape = _qnn.op.requantize(
                 reshape,
-                relax.const(1.0, "float32"),
-                relax.const(0, "int32"),
-                relax.const(1.0, "float32"),
-                relax.const(0, "int32"),
-                out_dtype="int8",
+                input_scale=new_input_scale,
+                input_zero_point=new_input_zero_point,
+                output_scale=output_tensor.qnn_params["scale"],
+                output_zero_point=output_tensor.qnn_params["zero_point"],
+                out_dtype=output_tensor_type_str,
             )
+            return reshape
         else:
             return reshape
 
@@ -3182,7 +3207,14 @@ class OperatorConverter:
         depth_to_space_options = DepthToSpaceOptions()
         depth_to_space_options.Init(op_options.Bytes, op_options.Pos)
         block_size = depth_to_space_options.BlockSize()
-        out = relax.op.nn.depth_to_space(in_expr, block_size, layout="NHWC")
+
+        input_shape = to_int_list(self.get_tensor_shape(input_tensor))
+        batch, in_h, in_w, in_c = input_shape
+        c_out = in_c // (block_size * block_size)
+
+        out = relax.op.reshape(in_expr, [batch, in_h, in_w, block_size, block_size, c_out])
+        out = relax.op.permute_dims(out, axes=[0, 1, 3, 2, 4, 5])
+        out = relax.op.reshape(out, [batch, in_h * block_size, in_w * block_size, c_out])
 
         return out
 
@@ -3322,15 +3354,13 @@ class OperatorConverter:
         weight_tensor_type_str = self.get_tensor_type_str(weights_tensor_type)
 
         if self.has_expr(weights_tensor.tensor_idx):
-            weight_expr_iohw = self.get_expr(weights_tensor.tensor_idx)
-            weight_expr_iohw = relax.op.permute_dims(weight_expr_iohw, axes=(3, 0, 1, 2))
+            # weight_expr_iohw = self.get_expr(weights_tensor.tensor_idx)
+            # weight_expr_iohw = relax.op.permute_dims(weight_expr_iohw, axes=(3, 0, 1, 2))
+            weight_expr_ohwi = self.get_expr(weights_tensor.tensor_idx)
         else:
             weight_value_ohwi = self.get_tensor_value(weights_tensor)
-            # Relay kernel_layout should be OIHW
-            # Relay weights layout should be different from kernel_layout - it should be IOHW
-            weight_value_iohw = np.transpose(weight_value_ohwi, (3, 0, 1, 2))
-            weight_expr_iohw = self.exp_tab.new_const(
-                weight_value_iohw,
+            weight_expr_ohwi = self.exp_tab.new_const(
+                +weight_value_ohwi,
                 dtype=weight_tensor_type_str,
                 source_name=weights_tensor.tensor.Name(),
             )
@@ -3358,29 +3388,25 @@ class OperatorConverter:
             out_dtype = "int64" if output_tensor_type_str == "int16" else "int32"
             out = _qnn.op.conv2d_transpose(
                 in_expr,
-                weight_expr_iohw,
+                weight_expr_ohwi,
                 input_zero_point,
                 kernel_zero_point,
                 input_scale,
                 kernel_scale,
                 strides=(stride_h, stride_w),
                 padding=padding,
-                channels=int(out_channels),
-                kernel_size=(int(kernel_h), int(kernel_w)),
                 data_layout="NHWC",
-                kernel_layout="IOHW",
+                kernel_layout="OHWI",
                 out_dtype=out_dtype,
             )
         else:
             out = relax.op.nn.conv2d_transpose(
                 in_expr,
-                weight_expr_iohw,
+                weight_expr_ohwi,
                 strides=(stride_h, stride_w),
                 padding=padding,
-                channels=int(out_channels),
-                kernel_size=(int(kernel_h), int(kernel_w)),
                 data_layout="NHWC",
-                kernel_layout="IOHW",
+                kernel_layout="OHWI",
                 out_dtype=output_tensor_type_str,
             )
 
@@ -3399,8 +3425,8 @@ class OperatorConverter:
                     dtype=bias_tensor_type_str,
                     source_name=bias_tensor.tensor.Name(),
                 )
-            channel_axis = 3
-            out = relax.op.nn.bias_add(out, bias_expr, axis=channel_axis)
+            # channel_axis = 3
+            out = relax.op.add(out, bias_expr)
 
         if output_tensor.qnn_params:
             # Calculate the intermediate scale and zero point of the int32 output.
@@ -4085,7 +4111,9 @@ def prepare_dense_matrix_from_sparse(sparse_tensor, sparse_tensor_value, sparse_
 
 def get_scalar_from_constant(expr):
     """Returns scalar value from Relay constant scalar."""
-    assert isinstance(expr, relax.const) and not expr.data.shape, "Expr is not a constant scalar."
+    assert isinstance(expr, relax.Constant) and not expr.data.shape, (
+        "Expr is not a constant scalar."
+    )
     value = expr.data.numpy()
     assert value.dtype == np.dtype(np.int32) or value.dtype == np.dtype(np.float32), (
         "value must be float32/int32"
@@ -4095,7 +4123,7 @@ def get_scalar_from_constant(expr):
 
 def get_tensor_from_constant(expr):
     """Returns tensor of values from Relay constant node."""
-    assert isinstance(expr, relax.const)
+    assert isinstance(expr, relax.Constant)
     value = expr.data.numpy()
     assert value.dtype == np.dtype(np.int32) or value.dtype == np.dtype(np.float32), (
         "value must be float32/int32"

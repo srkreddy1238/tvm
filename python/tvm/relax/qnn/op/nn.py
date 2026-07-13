@@ -25,10 +25,10 @@ from . import _ffi_api
 def conv2d(
     data: Expr,
     weight: Expr,
-    data_zero_point: Expr,
-    weight_zero_point: Expr,
-    data_scale: Expr | None,
-    weight_scale: Expr | None,
+    input_zero_point: Expr,
+    kernel_zero_point: Expr,
+    input_scale: Expr | None,
+    kernel_scale: Expr | None,
     strides: int | tuple[int, int] = (1, 1),
     padding: int | tuple[int, ...] = (0, 0),
     dilation: int | tuple[int, int] = (1, 1),
@@ -71,7 +71,7 @@ def conv2d(
     weight : relax.Expr
         The weight expressions.
 
-    data_zero_point: relax.Expr
+    input_zero_point: relax.Expr
         The zero point of the quantized data distribution.
 
     kernel_zero_point: relax.Expr
@@ -80,7 +80,7 @@ def conv2d(
     input_scale: relax.Expr
         Optional scale of input tensor.
 
-    weight_scale: relax.Expr
+    kernel_scale: relax.Expr
         Optional scale of weight tensor.
 
     strides : Union[int, Tuple[int, int]]
@@ -125,10 +125,10 @@ def conv2d(
     return _ffi_api.conv2d(  # type: ignore
         data,
         weight,
-        data_zero_point,
-        weight_zero_point,
-        data_scale,
-        weight_scale,
+        input_zero_point,
+        kernel_zero_point,
+        input_scale,
+        kernel_scale,
         strides,
         padding,
         dilation,
@@ -143,10 +143,10 @@ def conv2d(
 def conv2d_transpose(
     data: Expr,
     weight: Expr,
-    data_zero_point: Expr,
-    weight_zero_point: Expr,
-    data_scale: Expr | None,
-    weight_scale: Expr | None,
+    input_zero_point: Expr,
+    kernel_zero_point: Expr,
+    input_scale: Expr | None,
+    kernel_scale: Expr | None,
     strides: int | tuple[int, int] = (1, 1),
     padding: int | tuple[int, ...] = (0, 0),
     output_padding: int | tuple[int, int] = (0, 0),
@@ -162,7 +162,7 @@ def conv2d_transpose(
 
     This is the quantized counterpart of `relax.op.nn.conv2d_transpose`.
     Zero-points are subtracted from data and weight before the transposed
-    convolution is performed. When ``data_scale`` and ``weight_scale`` are
+    convolution is performed. When ``input_scale`` and ``kernel_scale`` are
     provided, the output is additionally multiplied by their product.
 
     In the default layout (``data_layout="NCHW"``, ``kernel_layout="IOHW"``):
@@ -188,10 +188,10 @@ def conv2d_transpose(
     return _ffi_api.conv2d_transpose(  # type: ignore
         data,
         weight,
-        data_zero_point,
-        weight_zero_point,
-        data_scale,
-        weight_scale,
+        input_zero_point,
+        kernel_zero_point,
+        input_scale,
+        kernel_scale,
         strides,
         padding,
         output_padding,

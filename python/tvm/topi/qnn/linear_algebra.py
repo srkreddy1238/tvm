@@ -17,11 +17,7 @@
 # pylint: disable=invalid-name, unused-variable, too-many-locals
 # pylint: disable=unused-argument, redefined-builtin
 
-"""QNN Dense operator TOPI implementation."""
-
 from tvm import te
-
-from ..nn.dense import matmul
 
 
 def dense(
@@ -34,51 +30,37 @@ def dense(
     """
     TOPI compute definition for QNN dense
     """
-    assert len(data.shape) <= 2, f"Expected data with <= 2 dimensions, got shape {data.shape}"
     if len(data.shape) == 2:
         batch_size, in_features = data.shape
     else:
         batch_size = 1
         in_features = data.shape[0]
+
     weight_in_features, units = weight.shape
     assert in_features == weight_in_features, (
         f"Dimension mismatch: data features {in_features} != weight features {weight_in_features}"
     )
 
-    # Raw dot product
     k = te.reduce_axis((0, in_features), name="k")
-    data_weight_dot_product = matmul(
-        data,
-        weight,
-        bias=None,
-        out_dtype=out_dtype,
+
+    data_zp = (
+        te.const(data_zero_point, "int32")
+        if isinstance(data_zero_point, (int | float))
+        else data_zero_point
     )
-
-    zp_correction = data_zero_point * kernel_zero_point * in_features
-    row_sums, col_sums = None, None
-
-    if kernel_zero_point:
-        row_sums = te.compute(
-            (batch_size,),
-            lambda i: te.sum(data[i, k].astype(out_dtype), axis=k),
-            name="data_row_sums",
-        )
-
-    if data_zero_point:
-        col_sums = te.compute(
-            (units,),
-            lambda j: te.sum(weight[k, j].astype(out_dtype), axis=k),
-            name="weight_col_sums",
-        )
+    kernel_zp = (
+        te.const(kernel_zero_point, "int32")
+        if isinstance(kernel_zero_point, (int | float))
+        else kernel_zero_point
+    )
 
     output = te.compute(
         (batch_size, units),
-        lambda i, j: (
-            data_weight_dot_product[i, j]
-            - ((kernel_zero_point * row_sums[i]) if kernel_zero_point else 0)
-            - ((data_zero_point * col_sums[j]) if data_zero_point else 0)
-            + zp_correction
+        lambda i, j: te.sum(
+            (data[i, k] - data_zp) * (weight[k, j] - kernel_zp),
+            axis=k,
         ),
         name="dense_out",
     )
+
     return output

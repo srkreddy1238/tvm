@@ -134,9 +134,24 @@ def _get_qnn_impl(
     scale_dtype,
     out_dtype,
     out_layout,
+    # --- requantize parameters (mirrors OperatorConverter pattern) -------
+    output_scale=None,
+    output_zero_point=0,
+    requant_out_dtype="int8",
 ):
     """
-    QNN implementation: single relax.op.qnn.conv2d_transpose call.
+    QNN implementation that mirrors the TFLite OperatorConverter pattern:
+
+      1. conv2d_transpose  with NO scales  →  raw int32 accumulator
+      2. requantize with:
+           input_scale  = data_scale * weight_scale  (new_input_scale_val)
+           input_zp     = 0                          (new_input_zero_point)
+           output_scale = output tensor scale
+           output_zp    = output tensor zero point
+           out_dtype    = output tensor dtype (e.g. int8)
+
+    When data_scale is None (no quantization params), requantize is
+    skipped and the raw int32 conv output is returned.
     """
     data = relax.Var("data", TensorStructInfo(shape=data_shape, dtype=dtype))
     weight = relax.Var("weight", TensorStructInfo(shape=weight_shape, dtype=dtype))
@@ -149,32 +164,62 @@ def _get_qnn_impl(
         "data_scale and weight_scale must both be None or both be set"
     )
 
-    if has_scale:
-        data_s = relax.const(data_scale, dtype=scale_dtype)
-        weight_s = relax.const(weight_scale, dtype=scale_dtype)
-    else:
-        data_s = weight_s = None
-
     bb = relax.BlockBuilder()
     with bb.function("main", [data, weight]):
         with bb.dataflow():
-            out = relax.qnn.op.conv2d_transpose(
-                data,
-                weight,
-                data_zp,
-                weight_zp,
-                data_s,
-                weight_s,
-                strides,
-                padding,
-                output_padding,
-                dilation,
-                groups,
-                data_layout,
-                weight_layout,
-                out_layout,
-                out_dtype,
+            # ------------------------------------------------------------------
+            # Step 1 — conv2d_transpose with NO scales (same as converter)
+            # Scales are intentionally omitted here so the TOPI does NOT
+            # apply them internally. The raw int32 accumulator is returned.
+            # ------------------------------------------------------------------
+            conv_out = bb.emit(
+                relax.qnn.op.conv2d_transpose(
+                    data,
+                    weight,
+                    data_zp,
+                    weight_zp,
+                    None,  # input_scale  ← None, mirrors converter
+                    None,  # kernel_scale ← None, mirrors converter
+                    strides,
+                    padding,
+                    output_padding,
+                    dilation,
+                    groups,
+                    data_layout,
+                    weight_layout,
+                    out_layout,
+                    zp_dtype,  # out_dtype = int32 (raw accumulator)
+                )
             )
+
+            # ------------------------------------------------------------------
+            # Step 2 — requantize (same as converter)
+            # new_input_scale_val = data_scale * weight_scale
+            # new_input_zero_point = 0
+            # output_scale / output_zero_point from the output tensor qnn_params
+            # ------------------------------------------------------------------
+            if has_scale:
+                assert output_scale is not None, (
+                    "output_scale must be provided when data_scale is set"
+                )
+                # mirrors: new_input_scale_val = data_scale_val * weight_scale_val
+                new_input_scale = relax.const(data_scale * weight_scale, dtype=scale_dtype)
+                new_input_zero_point = relax.const(0, dtype=zp_dtype)
+
+                out = bb.emit_output(
+                    relax.qnn.op.requantize(
+                        conv_out,
+                        input_scale=new_input_scale,
+                        input_zero_point=new_input_zero_point,
+                        output_scale=relax.const(output_scale, dtype=scale_dtype),
+                        output_zero_point=relax.const(output_zero_point, dtype=zp_dtype),
+                        out_dtype=requant_out_dtype,
+                    )
+                )
+            else:
+                # No quantization params — return raw int32 conv output
+                out = bb.emit_output(conv_out)
+
         bb.emit_func_output(out)
 
     return bb.finalize()
@@ -312,10 +357,15 @@ def test_qnn_conv2d_transpose(
     if has_scale:
         data_s = float(rng.uniform(0.01, 1.0))
         weight_s = float(rng.uniform(0.01, 1.0))
-        out_dtype = scale_dtype
+        # output tensor qnn_params (mirrors output_tensor.qnn_params in converter)
+        output_s = float(rng.uniform(0.001, 0.1))
+        output_zp = int(rng.integers(-10, 10))
+        out_dtype = scale_dtype  # ref produces float32
     else:
         data_s = weight_s = None
-        out_dtype = zp_dtype
+        output_s = None
+        output_zp = 0
+        out_dtype = zp_dtype  # both ref and qnn produce int32
 
     common_kwargs = dict(
         data_shape=data_shape,
@@ -339,7 +389,12 @@ def test_qnn_conv2d_transpose(
     )
 
     ref_mod = _get_ref_impl(**common_kwargs)
-    qnn_mod = _get_qnn_impl(**common_kwargs)
+    qnn_mod = _get_qnn_impl(
+        **common_kwargs,
+        output_scale=output_s,
+        output_zero_point=output_zp,
+        requant_out_dtype="int8",
+    )
     data_np = rng.integers(0, 64, size=data_shape, dtype="int8")
     weight_np = rng.integers(0, 64, size=weight_shape, dtype="int8")
     inputs = [data_np, weight_np]
@@ -351,13 +406,32 @@ def test_qnn_conv2d_transpose(
 
     assert len(ref_outputs) == len(qnn_outputs)
     for ref, res in zip(ref_outputs, qnn_outputs):
-        np.testing.assert_allclose(
-            ref,
-            res,
-            rtol=1e-5,
-            atol=1e-5,
-            err_msg=f"Mismatch for has_scale={has_scale}, data={data_shape}, weight={weight_shape}",
-        )
+        if has_scale:
+            # ref is float32: (data - data_zp) * (weight - weight_zp) * data_s * weight_s
+            # qnn is int8:    requantize(int32_accum, new_input_scale, 0, output_s, output_zp)
+            # Convert ref float32 → int8 using the same requantize formula:
+            #   out = clip(round(ref / output_s) + output_zp, -128, 127)
+            ref_int8 = np.clip(
+                np.round(ref / output_s).astype(np.int32) + output_zp,
+                -128,
+                127,
+            ).astype(np.int8)
+            np.testing.assert_array_equal(
+                ref_int8,
+                res,
+                err_msg=(
+                    f"Mismatch for has_scale={has_scale}, data={data_shape}, weight={weight_shape}"
+                ),
+            )
+        else:
+            # Both int32 — exact match
+            np.testing.assert_array_equal(
+                ref,
+                res,
+                err_msg=(
+                    f"Mismatch for has_scale={has_scale}, data={data_shape}, weight={weight_shape}"
+                ),
+            )
 
 
 if __name__ == "__main__":
