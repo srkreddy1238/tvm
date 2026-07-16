@@ -115,6 +115,7 @@ def test_prefill_ragged_attention(h_q, h_kv, d_qk, d_v, seq_len):
         np.float32(0.0),
         np.float32(0.0),
         np.float32(0.125),
+        np.zeros((h_q,), dtype="float16"),
     )
 
     rs_ref = build_and_run_func(mod_ref, inputs, ref_target, 7)
@@ -169,6 +170,7 @@ def test_prefill_pagged_attention(h_q, h_kv, d, seq_len, kv_len):
         np.float32(0.0),
         np.float32(0.0),
         np.float32(0.125),
+        np.zeros((h_q,), dtype="float16"),
     )
 
     rs_ref = build_and_run_func(mod_ref, inputs, ref_target, 8)

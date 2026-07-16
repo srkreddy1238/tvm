@@ -26,11 +26,19 @@ def _var(dtype):
     return T.alloc_buffer((1,), dtype, scope="local")
 
 
-def _causal_mask(causal, row, col, kv_len, qo_len):
+def _causal_mask(causal, row, col, kv_len, qo_len, sliding_window=False, sliding_window_size=-1):
+    if not (sliding_window and sliding_window_size > 0):
+        return T.if_then_else(
+            causal > 0,
+            col < kv_len - qo_len + row + 1,
+            col < kv_len,
+        )
     return T.if_then_else(
         causal > 0,
-        col < kv_len - qo_len + row + 1,
-        col < kv_len,
+        T.bitwise_and(
+            col < kv_len - qo_len + row + 1, col > kv_len - qo_len + row - sliding_window_size
+        ),
+        T.bitwise_and(col > row, col < kv_len),
     )
 
 
@@ -55,11 +63,24 @@ def _get_kv_chunk_len(num_pages, page_size, seq_id, length_info, sliding_window)
 
 
 def attention_prefill_ragged_adreno(
-    h_kv, h_q, d_qk, d_v, dtype, rope_scaling: dict[str, Any], _rope
+    h_kv,
+    h_q,
+    d_qk,
+    d_v,
+    dtype,
+    rope_scaling: dict[str, Any],
+    _rope,
+    is_sinks: bool = False,
+    sliding_window: bool = False,
+    sliding_window_size: int = -1,
 ):
     tile_x = 256
     NUM_BLKS = 16
     group_size = h_q // h_kv
+
+    global_symbol = "batch_prefill_ragged_kv_adreno"
+    if sliding_window:
+        global_symbol += "_sliding_window"
 
     @T.prim_func(private=True)
     def batch_prefill_ragged_kv(
@@ -77,6 +98,7 @@ def attention_prefill_ragged_adreno(
         rope_scale: T.float32,
         rope_theta: T.float32,
         sm_scale: T.float32,
+        var_sinks: T.handle,
     ):
         T.func_attr({"tir.noalias": True, "tir.is_scheduled": 1})
 
@@ -108,6 +130,7 @@ def attention_prefill_ragged_adreno(
         )
         output = T.match_buffer(var_output, (qo_len, h_q, d_v), "float16")
         lse = T.match_buffer(var_lse, (qo_len, h_q), "float32")  # pylint: disable=unused-variable
+        sinks = T.match_buffer(var_sinks, (h_q,), dtype)
         with T.sblock("root"):
             Q_mem_pad = T.alloc_buffer(
                 (
@@ -351,12 +374,14 @@ def attention_prefill_ragged_adreno(
                                         V_frag = T.alloc_buffer(
                                             (16, d_v), "float16", scope="wmma.matrix_b"
                                         )
-                                        m_smem = T.alloc_buffer((tile_x,), scope="local")
-                                        m_prev_smem = T.alloc_buffer((tile_x,), scope="local")
-                                        d_smem = T.alloc_buffer((tile_x,), scope="local")
+                                        m_smem = T.alloc_buffer((1,), scope="local")
+                                        m_prev_smem = T.alloc_buffer((1,), scope="local")
+                                        d_smem = T.alloc_buffer((1,), scope="local")
+                                        alpha = T.alloc_buffer((1,), scope="local")
                                         m_new = T.alloc_buffer((1,), scope="local")
                                         m_prev = T.alloc_buffer((1,), scope="local")
                                         d_new = T.alloc_buffer((1,), scope="local")
+                                        sink_val = T.alloc_buffer((1,), scope="local")
                                         tile_id = T.alloc_buffer((1,), "int32", scope="local")
                                         batch_idx = T.alloc_buffer((1,), "int32", scope="local")
                                         batch_tiles = T.alloc_buffer((1,), "int32", scope="local")
@@ -389,9 +414,12 @@ def attention_prefill_ragged_adreno(
                                                 )
                                                 for i in range(1):
                                                     row: T.int32 = i * tile_x + tz * 64 + tx
-                                                    if row < tile_x:
-                                                        m_smem[row] = T.float32(-50000.0)
-                                                        d_smem[row] = T.float32(1.0)
+                                                    m_smem[0] = T.float32(-50000.0)
+                                                    d_smem[0] = T.float32(1.0)
+                                                    alpha[0] = 1.0
+
+                                                sink_val[0] = sinks[by] * math.log2(math.exp(1))
+
                                                 with T.sblock("O_frag_init"):
                                                     T.reads()
                                                     T.writes(O_frag[0:64, bz * 64 : bz * 64 + 64])
@@ -416,8 +444,11 @@ def attention_prefill_ragged_adreno(
                                                         + C.elem_offset % C.strides[0] // 64,
                                                         T.float32(0.0),
                                                     )
+                                                kv_start: T.int32 = 0
+                                                if LH_start > sliding_window_size:
+                                                    kv_start = LH_start - 128
                                                 for iterator_1 in range(
-                                                    (kv_chunk_len[0] + 63) // 64
+                                                    kv_start, (kv_chunk_len[0] + 63) // 64
                                                 ):
                                                     L_kv_start: T.int32 = iterator_1 * 64
                                                     L_kv_base: T.int32 = kv_indptr[b_idx]
@@ -729,20 +760,20 @@ def attention_prefill_ragged_adreno(
                                                         if row < tile_x:
                                                             with T.sblock("update1"):
                                                                 T.reads(
-                                                                    m_smem[row],
+                                                                    m_smem[0],
                                                                     kv_chunk_len[0],
-                                                                    m_new[i],
+                                                                    m_new[0],
                                                                     S_local[row, 0:64],
-                                                                    d_smem[row],
-                                                                    m_prev[i],
+                                                                    d_smem[0],
+                                                                    m_prev[0],
                                                                 )
                                                                 T.writes(
-                                                                    m_prev[i],
-                                                                    m_new[i],
-                                                                    d_new[i],
+                                                                    m_prev[0],
+                                                                    m_new[0],
+                                                                    d_new[0],
                                                                 )
-                                                                m_prev[i] = m_smem[row]
-                                                                m_new[i] = m_smem[row]
+                                                                m_prev[0] = m_smem[0]
+                                                                m_new[0] = m_smem[0]
                                                                 row_: T.int32 = LH_start + row
                                                                 for j in range(64):
                                                                     if _causal_mask(
@@ -752,16 +783,18 @@ def attention_prefill_ragged_adreno(
                                                                         kv_len=kv_chunk_len[0],
                                                                         qo_len=q_indptr[b_idx + 1]
                                                                         - q_indptr[b_idx],
+                                                                        sliding_window=sliding_window,
+                                                                        sliding_window_size=sliding_window_size,
                                                                     ):
-                                                                        m_new[i] = T.max(
-                                                                            m_new[i],
+                                                                        m_new[0] = T.max(
+                                                                            m_new[0],
                                                                             S_local[
                                                                                 row,
                                                                                 j,
                                                                             ],
                                                                         )
-                                                                d_new[i] = d_smem[row] * T.exp2(
-                                                                    m_prev[i] - m_new[i]
+                                                                d_new[i] = d_smem[0] * T.exp2(
+                                                                    m_prev[0] - m_new[0]
                                                                 )
                                                     for i in range(1):
                                                         row: T.int32 = i * tile_x + tz * 64 + tx
@@ -769,7 +802,7 @@ def attention_prefill_ragged_adreno(
                                                             T.reads(
                                                                 kv_chunk_len[0],
                                                                 S_local[row, 0:64],
-                                                                m_new[i],
+                                                                m_new[0],
                                                             )
                                                             T.writes(S_local[row, 0:64])
                                                             for j in range(64):
@@ -782,15 +815,17 @@ def attention_prefill_ragged_adreno(
                                                                         kv_len=kv_chunk_len[0],
                                                                         qo_len=q_indptr[b_idx + 1]
                                                                         - q_indptr[b_idx],
+                                                                        sliding_window=sliding_window,
+                                                                        sliding_window_size=sliding_window_size,
                                                                     ):
                                                                         S_local[row, j] = T.exp2(
                                                                             S_local[row, j]
-                                                                            - m_new[i]
+                                                                            - m_new[0]
                                                                         )
                                                                     else:
                                                                         S_local[row, j] = T.exp2(
                                                                             T.float32(-50000.0)
-                                                                            - m_new[i]
+                                                                            - m_new[0]
                                                                         )
                                                     for i in range(1):
                                                         row: T.int32 = i * tile_x + tz * 64 + tx
@@ -804,21 +839,21 @@ def attention_prefill_ragged_adreno(
                                                                 )
                                                                 T.writes(
                                                                     d_new[i],
-                                                                    m_smem[row],
-                                                                    d_smem[row],
-                                                                    m_prev_smem[row],
+                                                                    m_smem[0],
+                                                                    d_smem[0],
+                                                                    m_prev_smem[0],
                                                                 )
                                                                 for j in range(64):
                                                                     d_new[i] = (
                                                                         d_new[i] + S_local[row, j]
                                                                     )
-                                                                m_smem[row] = m_new[i]
-                                                                d_smem[row] = d_new[i]
-                                                                m_prev_smem[row] = m_prev[i]
+                                                                m_smem[0] = m_new[i]
+                                                                d_smem[0] = d_new[i]
+                                                                m_prev_smem[0] = m_prev[i]
                                                     with T.sblock(""):
                                                         T.reads(
-                                                            m_prev_smem[0:tile_x],
-                                                            m_smem[0:tile_x],
+                                                            m_prev_smem[0],
+                                                            m_smem[0],
                                                             S_local[0:tile_x, 0:64],
                                                         )
                                                         T.writes(O_local[0:tile_x, 0:64])
@@ -882,8 +917,8 @@ def attention_prefill_ragged_adreno(
                                                                         O_local[i, j] = O_local[
                                                                             i, j
                                                                         ] * T.exp2(
-                                                                            m_prev_smem[i]
-                                                                            - m_smem[i]
+                                                                            m_prev_smem[0]
+                                                                            - m_smem[0]
                                                                         )
                                                         for li_0_lj_0_fused_1 in T.thread_binding(
                                                             64, thread="threadIdx.x"
@@ -1152,6 +1187,20 @@ def attention_prefill_ragged_adreno(
                                                         T.tvm_deconstruct_coopmat_qcom(
                                                             C.data, 64, 64, 16, L.data
                                                         )
+                                                if is_sinks:
+                                                    for li_0_lj_0_fused_1 in T.thread_binding(
+                                                        64, thread="threadIdx.x"
+                                                    ):
+                                                        with T.sblock("sink_compute"):
+                                                            i = T.axis.spatial(
+                                                                tile_x,
+                                                                (tz * 64 + li_0_lj_0_fused_1),
+                                                            )
+                                                            m_new[0] = T.max(m_smem[0], sink_val[0])
+                                                            alpha[0] = T.exp2(m_smem[0] - m_new[0])
+                                                            d_smem[0] = d_smem[0] * alpha[
+                                                                0
+                                                            ] + T.exp2(sink_val[0] - m_new[0])
                                                 for li_0_lj_0_fused_1 in T.thread_binding(
                                                     64, thread="threadIdx.x"
                                                 ):
@@ -1171,7 +1220,7 @@ def attention_prefill_ragged_adreno(
                                                                 )
                                                                 T.reads(
                                                                     O_local[i, j],
-                                                                    d_smem[i],
+                                                                    d_smem[0],
                                                                 )
                                                                 T.writes(
                                                                     output[
@@ -1195,7 +1244,8 @@ def attention_prefill_ragged_adreno(
                                                                         j,
                                                                     ] = T.Cast(
                                                                         "float16",
-                                                                        O_local[i, j] / d_smem[i],
+                                                                        (O_local[i, j] * alpha[0])
+                                                                        / d_smem[0],
                                                                     )
                                                 # Store LSE to gmem
                                                 for li_0_lj_0_fused_1 in T.thread_binding(
@@ -1211,7 +1261,7 @@ def attention_prefill_ragged_adreno(
                                                         if cur_L < q_indptr[b_idx + 1]:
                                                             lse[cur_L, cur_H_qo] = m_smem[
                                                                 i
-                                                            ] + T.log2(d_smem[i])
+                                                            ] + T.log2(d_smem[0])
                                             tile_id[0] += NUM_BLKS
 
     sch = s_tir.Schedule(batch_prefill_ragged_kv)
@@ -1224,10 +1274,17 @@ def attention_prefill_paged_adreno(
     d,
     dtype,
     rope_scaling: dict[str, Any],
+    is_sinks: bool = False,
+    sliding_window: bool = False,
+    sliding_window_size: int = -1,
 ):
     tile_x = 256
     NUM_BLKS = 16
     group_size = h_q // h_kv
+
+    global_symbol = "batch_prefill_paged_kv_adreno"
+    if sliding_window:
+        global_symbol += "_sliding_window"
 
     # pylint: disable=line-too-long,too-many-branches
     @T.prim_func(private=True)
@@ -1247,9 +1304,11 @@ def attention_prefill_paged_adreno(
         rope_scale: T.float32,
         rope_theta: T.float32,
         sm_scale: T.float32,
+        var_sinks: T.handle,
     ):
         T.func_attr({"tir.noalias": True, "tir.is_scheduled": 1})
         total_len = T.int32(is_size_var=True)
+        length_info_elem_offset = T.int32(is_size_var=True)
         q = T.match_buffer(var_q, (total_len, h_q, d), "float16")
         batch_size = T.int32(is_size_var=True)
         q_indptr = T.match_buffer(var_q_indptr, (batch_size + 1,), "int32", offset_factor=0)
@@ -1264,9 +1323,12 @@ def attention_prefill_paged_adreno(
         page_indptr = T.match_buffer(var_page_indptr, (batch_size + 1,), "int32", offset_factor=0)
         nnz_pages = T.int32(is_size_var=True)
         page_values = T.match_buffer(var_page_values, (nnz_pages,), "int32", offset_factor=0)
-        length_info = T.match_buffer(var_length_info, (batch_size,), "int32", offset_factor=0)
+        length_info = _declare_length_info(
+            var_length_info, batch_size, sliding_window, length_info_elem_offset
+        )
         output = T.match_buffer(var_output, (total_len, h_q, d), "float16")
         lse = T.match_buffer(var_lse, (total_len, h_q))
+        sinks = T.match_buffer(var_sinks, (h_q,), dtype)
         with T.sblock("root"):
             Q_mem_pad = T.alloc_buffer(
                 (
@@ -1377,6 +1439,7 @@ def attention_prefill_paged_adreno(
                                         m_smem = T.alloc_buffer((tile_x,), scope="local")
                                         m_prev_smem = T.alloc_buffer((tile_x,), scope="local")
                                         d_smem = T.alloc_buffer((tile_x,), scope="local")
+                                        alpha = T.alloc_buffer((1,), scope="local")
                                         m_new = T.alloc_buffer((1,), scope="local")
                                         m_prev = T.alloc_buffer((1,), scope="local")
                                         d_new = T.alloc_buffer((1,), scope="local")
@@ -1409,13 +1472,13 @@ def attention_prefill_paged_adreno(
                                                 ]
                                                 kv_chunk_len[0] = T.if_then_else(
                                                     cur_page_indptr_begin != cur_page_indptr_end,
-                                                    (
-                                                        cur_page_indptr_end
-                                                        - cur_page_indptr_begin
-                                                        - 1
-                                                    )
-                                                    * 64
-                                                    + length_info[b_idx],
+                                                    _get_kv_chunk_len(
+                                                        cur_page_indptr_end - cur_page_indptr_begin,
+                                                        page_size,
+                                                        b_idx,
+                                                        length_info,
+                                                        sliding_window,
+                                                    ),
                                                     0,
                                                 )
                                                 for i in range(1):
@@ -1423,6 +1486,7 @@ def attention_prefill_paged_adreno(
                                                     if row < tile_x:
                                                         m_smem[row] = T.float32(-50000.0)
                                                         d_smem[row] = T.float32(1.0)
+                                                        alpha[0] = T.float32(1.0)
                                                 with T.sblock("O_frag_init"):
                                                     T.reads()
                                                     T.writes(O_frag[0:64, bz * 64 : bz * 64 + 64])
@@ -1785,18 +1849,15 @@ def attention_prefill_paged_adreno(
                                                                 m_new[i] = m_smem[row]
                                                                 row_: T.int32 = LH_start + row
                                                                 for j in range(64):
-                                                                    if T.if_then_else(
-                                                                        causal > 0,
-                                                                        L_kv_start + j
-                                                                        < kv_chunk_len[0]
-                                                                        - (
-                                                                            q_indptr[b_idx + 1]
-                                                                            - q_indptr[b_idx]
-                                                                        )
-                                                                        + row_
-                                                                        + 1,
-                                                                        L_kv_start + j
-                                                                        < kv_chunk_len[0],
+                                                                    if _causal_mask(
+                                                                        causal,
+                                                                        row=row_,
+                                                                        col=L_kv_start + j,
+                                                                        kv_len=kv_chunk_len[0],
+                                                                        qo_len=q_indptr[b_idx + 1]
+                                                                        - q_indptr[b_idx],
+                                                                        sliding_window=sliding_window,
+                                                                        sliding_window_size=sliding_window_size,
                                                                     ):
                                                                         m_new[i] = T.max(
                                                                             m_new[i],
@@ -1821,18 +1882,15 @@ def attention_prefill_paged_adreno(
                                                             for j in range(64):
                                                                 if row < tile_x:
                                                                     row_: T.int32 = LH_start + row
-                                                                    if T.if_then_else(
-                                                                        causal > 0,
-                                                                        L_kv_start + j
-                                                                        < kv_chunk_len[0]
-                                                                        - (
-                                                                            q_indptr[b_idx + 1]
-                                                                            - q_indptr[b_idx]
-                                                                        )
-                                                                        + row_
-                                                                        + 1,
-                                                                        L_kv_start + j
-                                                                        < kv_chunk_len[0],
+                                                                    if _causal_mask(
+                                                                        causal,
+                                                                        row=row_,
+                                                                        col=L_kv_start + j,
+                                                                        kv_len=kv_chunk_len[0],
+                                                                        qo_len=q_indptr[b_idx + 1]
+                                                                        - q_indptr[b_idx],
+                                                                        sliding_window=sliding_window,
+                                                                        sliding_window_size=sliding_window_size,
                                                                     ):
                                                                         S_local[row, j] = T.exp2(
                                                                             S_local[row, j]
@@ -2196,6 +2254,27 @@ def attention_prefill_paged_adreno(
                                                         T.tvm_deconstruct_coopmat_qcom(
                                                             C.data, 64, 64, 16, L.data
                                                         )
+                                                if is_sinks:
+                                                    for i in range(1):
+                                                        row: T.int32 = i * tile_x + tz * 64 + tx
+                                                        if row < tile_x:
+                                                            with T.sblock("update_sink_denom"):
+                                                                sink_H_qo: T.int32 = by
+                                                                m_new[i] = T.max(
+                                                                    m_smem[row],
+                                                                    sinks[sink_H_qo]
+                                                                    * math.log2(math.exp(1)),
+                                                                )
+                                                                alpha[0] = T.exp2(
+                                                                    m_smem[row] - m_new[i]
+                                                                )
+                                                                d_smem[row] = d_smem[row] * alpha[
+                                                                    0
+                                                                ] + T.exp2(
+                                                                    sinks[sink_H_qo]
+                                                                    * math.log2(math.exp(1))
+                                                                    - m_new[i]
+                                                                )
                                                 for li_0_lj_0_fused_1 in T.thread_binding(
                                                     64, thread="threadIdx.x"
                                                 ):
@@ -2238,7 +2317,10 @@ def attention_prefill_paged_adreno(
                                                                             j,
                                                                         ] = T.Cast(
                                                                             "float16",
-                                                                            O_local[i, j]
+                                                                            (
+                                                                                O_local[i, j]
+                                                                                * alpha[0]
+                                                                            )
                                                                             / d_smem[i],
                                                                         )
                                                 for li_0 in range(1):

@@ -272,11 +272,11 @@ class DequantMatmulTensorization(AdrenoScheduleRule):
         n = block_info.block_stmt.writes[0].buffer.shape[-1]
         if n % tile_n != 0:
             return None
-        tile_n_factor = n // tile_n
+        # tile_n_factor = n // tile_n
         thread_size_x, thread_size_y, thread_size_z = (
             tile_m,
             tile_m_factor,
-            get_max_factor(tile_n_factor, [1, 2]),
+            2,  # get_max_factor(tile_n_factor, [1, 2]),
         )
         # Special Case where shared mem is not reused
         if intermediate_storage_scope == "shared" and dtypes[1][0] == "int32":
@@ -413,6 +413,11 @@ class DequantMatmulTensorization(AdrenoScheduleRule):
             padc_block = sch.get_consumers(main_block)[0]
         else:
             padc_block = sch.reindex(main_block, ("write", 0))
+
+        if not (isinstance(n, tir.IntImm) and n % (config.intrin_tile_n * config.splits_n[1]) == 0):
+            padb_block = sch.get_producers(main_block)[1]
+            sch.compute_inline(dequant_blk)
+            dequant_blk = padb_block
 
         loada_block = sch.cache_read(main_block, 0, config.load_scope_a)
         loadb_block = dequant_blk

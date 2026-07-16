@@ -234,6 +234,13 @@ def rope_freq_yarn(
     freq_extra = tir.const(1, "float32") / freq_power
     freq_inter = tir.const(1, "float32") / (scaling_factor * freq_power)
 
+    def get_mscale(scale, mscale=1):
+        if scale <= 1:
+            return 1.0
+        return 0.1 * mscale * math.log(scale) + 1.0
+
+    attention_factor = get_mscale(scaling_factor)
+
     low, high = yarn_find_correction_range(
         beta_fast,
         beta_slow,
@@ -243,13 +250,13 @@ def rope_freq_yarn(
     )
     high = tir.if_then_else(low == high, high + 0.001, high)
     inv_freq_mask = tir.const(1, "float32") - tir.max(
-        tir.min((d - low) / (high - low), 1.0), 0.0
+        tir.min(((d % (d_range // 2)) - low) / (high - low), 1.0), 0.0
     ).astype("float32")
     inv_freq = freq_inter * (1 - inv_freq_mask) + freq_extra * inv_freq_mask
     freq = s * inv_freq
     freq_var = tir.Var("freq", "float32")
-    cos_freq = tir.cos(freq_var).astype(dtype)
-    sin_freq = tir.sin(freq_var).astype(dtype)
+    cos_freq = (tir.cos(freq_var) * attention_factor).astype(dtype)
+    sin_freq = (tir.sin(freq_var) * attention_factor).astype(dtype)
     return cos_freq, sin_freq, {freq_var: freq}
 
 
